@@ -48,12 +48,6 @@ Install and open immediately:
 npx github:luyh7/codex-usage-dashboard -- --open
 ```
 
-NPM package installer:
-
-```bash
-npx codex-usage-dashboard-skill
-```
-
 ## Features
 
 - Per-conversation Codex usage from local session logs.
