@@ -39,6 +39,8 @@
   "files": [
     "bin/",
     "skills/",
+    "!skills/**/__pycache__/**",
+    "!skills/**/*.pyc",
     "README.md",
     "LICENSE"
   ]

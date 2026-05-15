@@ -22,11 +22,9 @@ Recommended global Codex install:
 npx skills add luyh7/codex-usage-dashboard -g -a codex -y
 ```
 
-Then restart Codex or open a new Codex conversation, and ask:
+Then restart Codex or open a new Codex conversation. Type `/usage`, then select the **Codex Usage Dashboard** skill.
 
-```text
-Use $codex-usage-dashboard to open my Codex usage dashboard
-```
+The skill opens the local dashboard in your browser.
 
 ## Install With npx
 

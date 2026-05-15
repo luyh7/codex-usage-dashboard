@@ -677,6 +677,29 @@ HTML = r"""<!doctype html>
       flex-wrap: wrap;
       justify-content: flex-end;
     }
+    .lang-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      min-height: 36px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .lang-option {
+      min-height: 28px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 0 9px;
+    }
+    .lang-option.active {
+      background: #17201d;
+      color: #fff;
+    }
     button, select, input {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1086,11 +1109,15 @@ HTML = r"""<!doctype html>
     <div class="header-inner">
       <div>
         <h1>Codex Usage Dashboard</h1>
-        <div class="subtitle" id="codexHome">读取本地 Codex 会话日志</div>
+        <div class="subtitle" id="codexHome" data-i18n="subtitle">读取本地 Codex 会话日志</div>
       </div>
       <div class="toolbar">
-        <button id="refreshBtn" class="primary" title="重新扫描本地日志">刷新</button>
-        <button id="exportBtn" title="导出当前所有会话统计">导出 CSV</button>
+        <div class="lang-toggle" aria-label="语言" data-i18n-aria="language">
+          <button class="lang-option active" data-lang-button="zh" type="button">中文</button>
+          <button class="lang-option" data-lang-button="en" type="button">EN</button>
+        </div>
+        <button id="refreshBtn" class="primary" title="重新扫描本地日志" data-i18n="refresh" data-i18n-title="refreshTitle">刷新</button>
+        <button id="exportBtn" title="导出当前所有会话统计" data-i18n="exportCsv" data-i18n-title="exportTitle">导出 CSV</button>
       </div>
     </div>
   </header>
@@ -1099,20 +1126,20 @@ HTML = r"""<!doctype html>
     <div class="metrics" id="metrics"></div>
 
     <div class="controls">
-      <input id="searchInput" type="search" placeholder="搜索标题、项目、路径、模型">
-      <select id="sourceFilter" title="来源">
+      <input id="searchInput" type="search" placeholder="搜索标题、项目、路径、模型" data-i18n-placeholder="searchPlaceholder">
+      <select id="sourceFilter" title="来源" data-i18n-title="source">
         <option value="all">全部来源</option>
         <option value="active">当前会话</option>
         <option value="archived">归档会话</option>
       </select>
-      <select id="modelFilter" title="模型">
+      <select id="modelFilter" title="模型" data-i18n-title="model">
         <option value="all">全部模型</option>
       </select>
-      <div class="sort-toggle" aria-label="排序">
-        <button class="sort-option active" data-sort-button="end_at" type="button">最近</button>
-        <button class="sort-option" data-sort-button="total_tokens" type="button">总量</button>
+      <div class="sort-toggle" aria-label="排序" data-i18n-aria="sort">
+        <button class="sort-option active" data-sort-button="end_at" data-i18n="recent" type="button">最近</button>
+        <button class="sort-option" data-sort-button="total_tokens" data-i18n="total" type="button">总量</button>
       </div>
-      <select id="limitSelect" title="显示数量">
+      <select id="limitSelect" title="显示数量" data-i18n-title="limitTitle">
         <option value="50">前 50</option>
         <option value="100">前 100</option>
         <option value="all">全部</option>
@@ -1122,8 +1149,8 @@ HTML = r"""<!doctype html>
     <div class="layout">
       <section class="panel">
         <div class="panel-title">
-          <h2>对话</h2>
-          <div class="count" id="resultCount">加载中</div>
+          <h2 data-i18n="conversations">对话</h2>
+          <div class="count" id="resultCount" data-i18n="loading">加载中</div>
         </div>
         <div class="table-wrap">
           <table>
@@ -1139,18 +1166,18 @@ HTML = r"""<!doctype html>
             </colgroup>
             <thead>
               <tr>
-                <th data-sort="title">对话</th>
-                <th data-sort="total_tokens">总量</th>
-                <th data-sort="output_tokens">输出</th>
-                <th data-sort="estimated_cost_usd">花费</th>
-                <th data-sort="cached_input_percent">缓存命中</th>
-                <th data-sort="turn_count">轮次</th>
-                <th data-sort="model">模型</th>
-                <th data-sort="effort">推理强度</th>
+                <th data-sort="title" data-i18n="conversation">对话</th>
+                <th data-sort="total_tokens" data-i18n="total">总量</th>
+                <th data-sort="output_tokens" data-i18n="output">输出</th>
+                <th data-sort="estimated_cost_usd" data-i18n="cost">花费</th>
+                <th data-sort="cached_input_percent" data-i18n="cacheHit">缓存命中</th>
+                <th data-sort="turn_count" data-i18n="turns">轮次</th>
+                <th data-sort="model" data-i18n="model">模型</th>
+                <th data-sort="effort" data-i18n="reasoningEffort">推理强度</th>
               </tr>
             </thead>
             <tbody id="sessionRows">
-              <tr><td colspan="8" class="empty">加载中</td></tr>
+              <tr><td colspan="8" class="empty" data-i18n="loading">加载中</td></tr>
             </tbody>
           </table>
         </div>
@@ -1158,11 +1185,11 @@ HTML = r"""<!doctype html>
 
       <aside class="panel details">
         <div class="panel-title">
-          <h2>对话明细</h2>
-          <div class="count" id="detailStatus">未选择</div>
+          <h2 data-i18n="conversationDetails">对话明细</h2>
+          <div class="count" id="detailStatus" data-i18n="notSelected">未选择</div>
         </div>
         <div class="details-body" id="detailsBody">
-          <div class="empty">点击左侧任意一行查看 token 明细和时间线。</div>
+          <div class="empty" data-i18n="selectRow">点击左侧任意一行查看 token 明细和时间线。</div>
         </div>
       </aside>
     </div>
@@ -1172,6 +1199,8 @@ HTML = r"""<!doctype html>
     const state = {
       sessions: [],
       summary: null,
+      codexHome: '',
+      generatedAt: '',
       selectedUid: null,
       sortKey: 'end_at',
       sortDir: 'desc',
@@ -1179,9 +1208,256 @@ HTML = r"""<!doctype html>
       source: 'all',
       model: 'all',
       limit: '50',
+      lang: 'zh',
     };
 
     const tokenKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
+
+    const I18N = {
+      zh: {
+        subtitle: '读取本地 Codex 会话日志',
+        refresh: '刷新',
+        refreshTitle: '重新扫描本地日志',
+        exportCsv: '导出 CSV',
+        exportTitle: '导出当前所有会话统计',
+        language: '语言',
+        searchPlaceholder: '搜索标题、项目、路径、模型',
+        source: '来源',
+        sourceAll: '全部来源',
+        sourceActive: '当前会话',
+        sourceArchived: '归档会话',
+        model: '模型',
+        allModels: '全部模型',
+        sort: '排序',
+        recent: '最近',
+        total: '总量',
+        limitTitle: '显示数量',
+        limit50: '前 50',
+        limit100: '前 100',
+        limitAll: '全部',
+        conversations: '对话',
+        conversation: '对话',
+        output: '输出',
+        cost: '花费',
+        cacheHit: '缓存命中',
+        turns: '轮次',
+        reasoningEffort: '推理强度',
+        conversationDetails: '对话明细',
+        loading: '加载中',
+        notSelected: '未选择',
+        selectRow: '点击左侧任意一行查看 token 明细和时间线。',
+        scanning: '扫描中',
+        scanned: '扫描',
+        loadFailed: '加载失败：{message}',
+        noMatches: '没有匹配的会话',
+        priceKnown: '按公开 API 标准价格估算花费',
+        priceUnknown: '没有匹配到公开模型价格',
+        archived: '归档',
+        justNow: '刚刚',
+        minutes: '{value} 分钟',
+        hours: '{value} 小时',
+        days: '{value} 天',
+        months: '{value} 个月',
+        years: '{value} 年',
+        seconds: '{value} 秒',
+        minutesSeconds: '{minutes} 分 {seconds} 秒',
+        hoursMinutes: '{hours} 小时 {minutes} 分',
+        metricSessions: '会话数',
+        metricSessionsHint: '当前 {active} · 归档 {archived}',
+        metricTotalTokens: '总 tokens',
+        metricCost: '估算价格',
+        metricCostHint: '{count} 个会话可估算',
+        metricInput: '输入 tokens',
+        metricCached: '缓存输入',
+        metricOutput: '输出 tokens',
+        rowCount: '{count} 条',
+        detailsLoading: '加载中',
+        detailFailed: '明细加载失败：{message}',
+        failed: '失败',
+        countEvents: '{count} 次计数',
+        turnSuffix: '{count} 轮',
+        input: '输入',
+        cached: '缓存',
+        reasoning: '推理',
+        reasoningCostTitle: '推理花费按输出单价估算，已包含在输出花费中',
+        cumulativeChart: '累计曲线',
+        metadata: '元数据',
+        totalTokens: '总 tokens',
+        cachePercent: '缓存占比',
+        time: '时间',
+        totalDuration: '总耗时',
+        ttftAvg: 'TTFT 均值',
+        project: '项目',
+        cwd: '工作目录',
+        logFile: '日志文件',
+        firstUserPrompt: '首条用户消息',
+        lastReplySummary: '最后回复摘要',
+        toolCalls: '工具调用',
+        tool: '工具',
+        count: '次数',
+        noToolCalls: '没有记录到工具调用。',
+        timelineDetails: '每次计数明细',
+        timelineTime: '时间',
+        timelineTotal: '本次总量',
+        noTimeline: '这个会话没有 token_count.info 记录。',
+        noCurve: '没有曲线数据',
+        countPoints: '{count} 次计数',
+      },
+      en: {
+        subtitle: 'Reading local Codex session logs',
+        refresh: 'Refresh',
+        refreshTitle: 'Rescan local logs',
+        exportCsv: 'Export CSV',
+        exportTitle: 'Export all conversation statistics',
+        language: 'Language',
+        searchPlaceholder: 'Search title, project, path, or model',
+        source: 'Source',
+        sourceAll: 'All sources',
+        sourceActive: 'Active',
+        sourceArchived: 'Archived',
+        model: 'Model',
+        allModels: 'All models',
+        sort: 'Sort',
+        recent: 'Recent',
+        total: 'Total',
+        limitTitle: 'Rows',
+        limit50: 'Top 50',
+        limit100: 'Top 100',
+        limitAll: 'All',
+        conversations: 'Conversations',
+        conversation: 'Conversation',
+        output: 'Output',
+        cost: 'Cost',
+        cacheHit: 'Cache hit',
+        turns: 'Turns',
+        reasoningEffort: 'Reasoning',
+        conversationDetails: 'Details',
+        loading: 'Loading',
+        notSelected: 'No selection',
+        selectRow: 'Select a row to inspect token details and timeline.',
+        scanning: 'Scanning',
+        scanned: 'scanned',
+        loadFailed: 'Load failed: {message}',
+        noMatches: 'No matching conversations',
+        priceKnown: 'Estimated from public API prices',
+        priceUnknown: 'No matching public model price',
+        archived: 'Archived',
+        justNow: 'just now',
+        minutes: '{value} min',
+        hours: '{value} hr',
+        days: '{value} days',
+        months: '{value} mo',
+        years: '{value} yr',
+        seconds: '{value} sec',
+        minutesSeconds: '{minutes} min {seconds} sec',
+        hoursMinutes: '{hours} hr {minutes} min',
+        metricSessions: 'Sessions',
+        metricSessionsHint: 'Active {active} · Archived {archived}',
+        metricTotalTokens: 'Total tokens',
+        metricCost: 'Estimated cost',
+        metricCostHint: '{count} sessions priced',
+        metricInput: 'Input tokens',
+        metricCached: 'Cached input',
+        metricOutput: 'Output tokens',
+        rowCount: '{count} rows',
+        detailsLoading: 'Loading',
+        detailFailed: 'Detail load failed: {message}',
+        failed: 'Failed',
+        countEvents: '{count} counts',
+        turnSuffix: '{count} turns',
+        input: 'Input',
+        cached: 'Cached',
+        reasoning: 'Reasoning',
+        reasoningCostTitle: 'Reasoning cost is estimated at the output rate and is included in output cost.',
+        cumulativeChart: 'Cumulative Chart',
+        metadata: 'Metadata',
+        totalTokens: 'Total tokens',
+        cachePercent: 'Cache rate',
+        time: 'Time',
+        totalDuration: 'Total duration',
+        ttftAvg: 'Avg TTFT',
+        project: 'Project',
+        cwd: 'Working dir',
+        logFile: 'Log file',
+        firstUserPrompt: 'First User Message',
+        lastReplySummary: 'Last Reply Summary',
+        toolCalls: 'Tool Calls',
+        tool: 'Tool',
+        count: 'Count',
+        noToolCalls: 'No tool calls recorded.',
+        timelineDetails: 'Token Count Events',
+        timelineTime: 'Time',
+        timelineTotal: 'Event total',
+        noTimeline: 'This conversation has no token_count.info records.',
+        noCurve: 'No chart data',
+        countPoints: '{count} counts',
+      },
+    };
+
+    function t(key, vars = {}) {
+      const template = (I18N[state.lang] && I18N[state.lang][key]) || I18N.zh[key] || key;
+      return template.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ''));
+    }
+
+    function locale() {
+      return state.lang === 'en' ? 'en-US' : 'zh-CN';
+    }
+
+    function applyStaticText() {
+      document.documentElement.lang = state.lang === 'en' ? 'en' : 'zh-CN';
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        el.textContent = t(el.dataset.i18n);
+      });
+      document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        el.title = t(el.dataset.i18nTitle);
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        el.placeholder = t(el.dataset.i18nPlaceholder);
+      });
+      document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+        el.setAttribute('aria-label', t(el.dataset.i18nAria));
+      });
+      document.querySelectorAll('[data-lang-button]').forEach(button => {
+        button.classList.toggle('active', button.dataset.langButton === state.lang);
+      });
+      if (state.generatedAt) {
+        document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
+      }
+    }
+
+    function populateSourceFilter() {
+      const select = document.getElementById('sourceFilter');
+      const oldValue = select.value || state.source;
+      select.innerHTML = [
+        ['all', t('sourceAll')],
+        ['active', t('sourceActive')],
+        ['archived', t('sourceArchived')],
+      ].map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('');
+      select.value = ['all', 'active', 'archived'].includes(oldValue) ? oldValue : 'all';
+      state.source = select.value;
+    }
+
+    function populateLimitSelect() {
+      const select = document.getElementById('limitSelect');
+      const oldValue = select.value || state.limit;
+      select.innerHTML = [
+        ['50', t('limit50')],
+        ['100', t('limit100')],
+        ['all', t('limitAll')],
+      ].map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('');
+      select.value = ['50', '100', 'all'].includes(oldValue) ? oldValue : '50';
+      state.limit = select.value;
+    }
+
+    function setLanguage(lang) {
+      state.lang = lang === 'en' ? 'en' : 'zh';
+      applyStaticText();
+      populateSourceFilter();
+      populateLimitSelect();
+      populateModelFilter();
+      renderAll();
+      if (state.selectedUid) showDetails(state.selectedUid, false);
+    }
 
     function usageOf(row) {
       return row && row.total_token_usage ? row.total_token_usage : {};
@@ -1207,7 +1483,7 @@ HTML = r"""<!doctype html>
     }
 
     function fmt(n) {
-      return Number(n || 0).toLocaleString('zh-CN');
+      return Number(n || 0).toLocaleString(locale());
     }
 
     function fmtCompact(n) {
@@ -1222,7 +1498,7 @@ HTML = r"""<!doctype html>
       if (!value) return '';
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return String(value);
-      return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleString(locale(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     }
 
     function fmtRelativeTime(value) {
@@ -1230,27 +1506,27 @@ HTML = r"""<!doctype html>
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return '';
       const diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-      if (diffSeconds < 60) return '刚刚';
+      if (diffSeconds < 60) return t('justNow');
       const minutes = Math.floor(diffSeconds / 60);
-      if (minutes < 60) return minutes + ' 分钟';
+      if (minutes < 60) return t('minutes', { value: minutes });
       const hours = Math.floor(minutes / 60);
-      if (hours < 48) return hours + ' 小时';
+      if (hours < 48) return t('hours', { value: hours });
       const days = Math.floor(hours / 24);
-      if (days < 30) return days + ' 天';
+      if (days < 30) return t('days', { value: days });
       const months = Math.floor(days / 30);
-      if (months < 12) return months + ' 个月';
-      return Math.floor(months / 12) + ' 年';
+      if (months < 12) return t('months', { value: months });
+      return t('years', { value: Math.floor(months / 12) });
     }
 
     function fmtDuration(ms) {
       if (!ms) return '';
       const seconds = Math.round(ms / 1000);
-      if (seconds < 60) return seconds + ' 秒';
+      if (seconds < 60) return t('seconds', { value: seconds });
       const minutes = Math.floor(seconds / 60);
       const rest = seconds % 60;
-      if (minutes < 60) return minutes + ' 分 ' + rest + ' 秒';
+      if (minutes < 60) return t('minutesSeconds', { minutes, seconds: rest });
       const hours = Math.floor(minutes / 60);
-      return hours + ' 小时 ' + (minutes % 60) + ' 分';
+      return t('hoursMinutes', { hours, minutes: minutes % 60 });
     }
 
     function escapeHtml(value) {
@@ -1270,21 +1546,23 @@ HTML = r"""<!doctype html>
 
     function sourceBadge(source) {
       if (source !== 'archived') return '';
-      const text = '归档';
+      const text = t('archived');
       return `<span class="badge ${escapeHtml(source)}">${text}</span>`;
     }
 
     async function loadData(selectTop = true) {
       const refreshBtn = document.getElementById('refreshBtn');
       refreshBtn.disabled = true;
-      refreshBtn.textContent = '扫描中';
+      refreshBtn.textContent = t('scanning');
       try {
         const res = await fetch('/api/sessions', { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         state.sessions = data.sessions || [];
         state.summary = data.summary || null;
-        document.getElementById('codexHome').textContent = `${data.codex_home || ''} · ${fmtDate(data.generated_at)} 扫描`;
+        state.codexHome = data.codex_home || '';
+        state.generatedAt = data.generated_at || '';
+        document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
         populateModelFilter();
         renderAll();
         if (selectTop && !state.selectedUid && state.sessions.length) {
@@ -1294,10 +1572,10 @@ HTML = r"""<!doctype html>
           await showDetails(state.selectedUid, false);
         }
       } catch (err) {
-        document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="error">加载失败：${escapeHtml(err.message)}</td></tr>`;
+        document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="error">${escapeHtml(t('loadFailed', { message: err.message }))}</td></tr>`;
       } finally {
         refreshBtn.disabled = false;
-        refreshBtn.textContent = '刷新';
+        refreshBtn.textContent = t('refresh');
       }
     }
 
@@ -1305,7 +1583,7 @@ HTML = r"""<!doctype html>
       const select = document.getElementById('modelFilter');
       const oldValue = select.value;
       const models = Array.from(new Set(state.sessions.map(row => row.model || 'unknown'))).sort();
-      select.innerHTML = '<option value="all">全部模型</option>' + models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+      select.innerHTML = `<option value="all">${escapeHtml(t('allModels'))}</option>` + models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
       select.value = models.includes(oldValue) ? oldValue : 'all';
       state.model = select.value;
     }
@@ -1345,7 +1623,7 @@ HTML = r"""<!doctype html>
         if (typeof av === 'number' && typeof bv === 'number') {
           return state.sortDir === 'asc' ? av - bv : bv - av;
         }
-        const result = String(av).localeCompare(String(bv), 'zh-CN');
+        const result = String(av).localeCompare(String(bv), locale());
         return state.sortDir === 'asc' ? result : -result;
       });
 
@@ -1374,12 +1652,12 @@ HTML = r"""<!doctype html>
     function renderMetrics() {
       const usage = state.summary && state.summary.usage ? state.summary.usage : {};
       const metrics = [
-        ['会话数', fmt(state.summary?.session_count || 0), `当前 ${fmt(state.summary?.active_count || 0)} · 归档 ${fmt(state.summary?.archived_count || 0)}`],
-        ['总 tokens', fmtCompact(usage.total_tokens), fmt(usage.total_tokens)],
-        ['估算价格', fmtUsd(state.summary?.estimated_cost_usd), `${fmt(state.summary?.estimated_cost_known_count || 0)} 个会话可估算`],
-        ['输入 tokens', fmtCompact(usage.input_tokens), fmt(usage.input_tokens)],
-        ['缓存输入', fmtCompact(usage.cached_input_tokens), fmt(usage.cached_input_tokens)],
-        ['输出 tokens', fmtCompact(usage.output_tokens), fmt(usage.output_tokens)],
+        [t('metricSessions'), fmt(state.summary?.session_count || 0), t('metricSessionsHint', { active: fmt(state.summary?.active_count || 0), archived: fmt(state.summary?.archived_count || 0) })],
+        [t('metricTotalTokens'), fmtCompact(usage.total_tokens), fmt(usage.total_tokens)],
+        [t('metricCost'), fmtUsd(state.summary?.estimated_cost_usd), t('metricCostHint', { count: fmt(state.summary?.estimated_cost_known_count || 0) })],
+        [t('metricInput'), fmtCompact(usage.input_tokens), fmt(usage.input_tokens)],
+        [t('metricCached'), fmtCompact(usage.cached_input_tokens), fmt(usage.cached_input_tokens)],
+        [t('metricOutput'), fmtCompact(usage.output_tokens), fmt(usage.output_tokens)],
       ];
       document.getElementById('metrics').innerHTML = metrics.map(([label, value, hint]) => `
         <div class="metric">
@@ -1392,9 +1670,9 @@ HTML = r"""<!doctype html>
 
     function renderTable() {
       const rows = filteredSessions();
-      document.getElementById('resultCount').textContent = `${fmt(rows.length)} 条`;
+      document.getElementById('resultCount').textContent = t('rowCount', { count: fmt(rows.length) });
       if (!rows.length) {
-        document.getElementById('sessionRows').innerHTML = '<tr><td colspan="8" class="empty">没有匹配的会话</td></tr>';
+        document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(t('noMatches'))}</td></tr>`;
         return;
       }
       document.getElementById('sessionRows').innerHTML = rows.map((row, idx) => {
@@ -1412,7 +1690,7 @@ HTML = r"""<!doctype html>
             </td>
             <td class="number" title="${fmt(usage.total_tokens)} tokens"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
             <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
-            <td class="number" title="${row.price_model_known ? '按公开 API 标准价格估算花费' : '没有匹配到公开模型价格'}">${fmtUsd(row.estimated_cost_usd)}</td>
+            <td class="number" title="${escapeHtml(row.price_model_known ? t('priceKnown') : t('priceUnknown'))}">${fmtUsd(row.estimated_cost_usd)}</td>
             <td class="number">${fmtPercent(row.cached_input_percent)}</td>
             <td class="number">${fmt(row.turn_count)}</td>
             <td class="model-cell" title="${escapeHtml(row.model || 'unknown')}">${escapeHtml(row.model || 'unknown')}</td>
@@ -1428,15 +1706,15 @@ HTML = r"""<!doctype html>
     async function showDetails(uid, renderRows = true) {
       state.selectedUid = uid;
       if (renderRows) renderTable();
-      document.getElementById('detailStatus').textContent = '加载中';
+      document.getElementById('detailStatus').textContent = t('detailsLoading');
       try {
         const res = await fetch('/api/session?id=' + encodeURIComponent(uid), { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const detail = await res.json();
         renderDetails(detail);
       } catch (err) {
-        document.getElementById('detailsBody').innerHTML = `<div class="error">明细加载失败：${escapeHtml(err.message)}</div>`;
-        document.getElementById('detailStatus').textContent = '失败';
+        document.getElementById('detailsBody').innerHTML = `<div class="error">${escapeHtml(t('detailFailed', { message: err.message }))}</div>`;
+        document.getElementById('detailStatus').textContent = t('failed');
       }
     }
 
@@ -1464,44 +1742,44 @@ HTML = r"""<!doctype html>
         `;
       }).join('');
 
-      document.getElementById('detailStatus').textContent = `${fmt(detail.token_event_count)} 次计数`;
+      document.getElementById('detailStatus').textContent = t('countEvents', { count: fmt(detail.token_event_count) });
       document.getElementById('detailsBody').innerHTML = `
         <div class="detail-title">${escapeHtml(detail.title || detail.session_id)}</div>
-        <div>${sourceBadge(detail.source)} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${fmt(detail.turn_count)} 轮</span></div>
+        <div>${sourceBadge(detail.source)} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
 
         <div class="breakdown">
-          ${breakdownRow('输入', 'input', uncachedInputTokens, max, costs.input_tokens)}
-          ${breakdownRow('缓存', 'cached', usage.cached_input_tokens, max, costs.cached_input_tokens)}
-          ${breakdownRow('输出', 'output', usage.output_tokens, max, costs.output_tokens)}
-          ${breakdownRow('推理', 'reasoning', usage.reasoning_output_tokens, max, costs.reasoning_output_tokens, '推理花费按输出单价估算，已包含在输出花费中')}
+          ${breakdownRow(t('input'), 'input', uncachedInputTokens, max, costs.input_tokens)}
+          ${breakdownRow(t('cached'), 'cached', usage.cached_input_tokens, max, costs.cached_input_tokens)}
+          ${breakdownRow(t('output'), 'output', usage.output_tokens, max, costs.output_tokens)}
+          ${breakdownRow(t('reasoning'), 'reasoning', usage.reasoning_output_tokens, max, costs.reasoning_output_tokens, t('reasoningCostTitle'))}
         </div>
 
-        <div class="section-label">累计曲线</div>
+        <div class="section-label">${escapeHtml(t('cumulativeChart'))}</div>
         <canvas id="timelineCanvas" width="720" height="220"></canvas>
 
-        <div class="section-label">元数据</div>
+        <div class="section-label">${escapeHtml(t('metadata'))}</div>
         <div class="detail-meta">
-          ${kv('总 tokens', fmt(usage.total_tokens))}
-          ${kv('花费', fmtUsd(detail.estimated_cost_usd))}
-          ${kv('缓存占比', detail.cached_input_percent == null ? '' : detail.cached_input_percent + '%')}
-          ${kv('推理强度', detail.effort || 'N/A')}
-          ${kv('时间', `${fmtRelativeTime(detail.end_at)} (${fmtDate(detail.start_at)} - ${fmtDate(detail.end_at)})`)}
-          ${kv('总耗时', fmtDuration(detail.duration_ms_total))}
-          ${kv('TTFT 均值', fmtDuration(detail.time_to_first_token_ms_avg))}
-          ${kv('项目', detail.project || '')}
-          ${kv('工作目录', detail.cwd || '', 'path')}
-          ${kv('日志文件', detail.path || '', 'path')}
+          ${kv(t('totalTokens'), fmt(usage.total_tokens))}
+          ${kv(t('cost'), fmtUsd(detail.estimated_cost_usd))}
+          ${kv(t('cachePercent'), detail.cached_input_percent == null ? '' : detail.cached_input_percent + '%')}
+          ${kv(t('reasoningEffort'), detail.effort || 'N/A')}
+          ${kv(t('time'), `${fmtRelativeTime(detail.end_at)} (${fmtDate(detail.start_at)} - ${fmtDate(detail.end_at)})`)}
+          ${kv(t('totalDuration'), fmtDuration(detail.duration_ms_total))}
+          ${kv(t('ttftAvg'), fmtDuration(detail.time_to_first_token_ms_avg))}
+          ${kv(t('project'), detail.project || '')}
+          ${kv(t('cwd'), detail.cwd || '', 'path')}
+          ${kv(t('logFile'), detail.path || '', 'path')}
           ${kv('Session ID', detail.session_id || '', 'path')}
         </div>
 
-        ${detail.first_user_prompt ? `<div class="section-label">首条用户消息</div><div class="notice">${escapeHtml(detail.first_user_prompt)}</div>` : ''}
-        ${detail.last_agent_preview ? `<div class="section-label">最后回复摘要</div><div class="notice">${escapeHtml(detail.last_agent_preview)}</div>` : ''}
+        ${detail.first_user_prompt ? `<div class="section-label">${escapeHtml(t('firstUserPrompt'))}</div><div class="notice">${escapeHtml(detail.first_user_prompt)}</div>` : ''}
+        ${detail.last_agent_preview ? `<div class="section-label">${escapeHtml(t('lastReplySummary'))}</div><div class="notice">${escapeHtml(detail.last_agent_preview)}</div>` : ''}
 
-        <div class="section-label">工具调用</div>
-        ${toolRows ? `<table class="mini-table"><thead><tr><th>工具</th><th>次数</th></tr></thead><tbody>${toolRows}</tbody></table>` : '<div class="notice">没有记录到工具调用。</div>'}
+        <div class="section-label">${escapeHtml(t('toolCalls'))}</div>
+        ${toolRows ? `<table class="mini-table"><thead><tr><th>${escapeHtml(t('tool'))}</th><th>${escapeHtml(t('count'))}</th></tr></thead><tbody>${toolRows}</tbody></table>` : `<div class="notice">${escapeHtml(t('noToolCalls'))}</div>`}
 
-        <div class="section-label">每次计数明细</div>
-        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table"><thead><tr><th>时间</th><th>本次总量</th><th>输入</th><th>缓存</th><th>输出</th><th>推理</th></tr></thead><tbody>${timelineRows}</tbody></table></div>` : '<div class="notice">这个会话没有 token_count.info 记录。</div>'}
+        <div class="section-label">${escapeHtml(t('timelineDetails'))}</div>
+        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table"><thead><tr><th>${escapeHtml(t('timelineTime'))}</th><th>${escapeHtml(t('timelineTotal'))}</th><th>${escapeHtml(t('input'))}</th><th>${escapeHtml(t('cached'))}</th><th>${escapeHtml(t('output'))}</th><th>${escapeHtml(t('reasoning'))}</th></tr></thead><tbody>${timelineRows}</tbody></table></div>` : `<div class="notice">${escapeHtml(t('noTimeline'))}</div>`}
       `;
       drawTimeline(detail.timeline || []);
     }
@@ -1548,7 +1826,7 @@ HTML = r"""<!doctype html>
       const points = timeline.map(row => Number(row.total_token_usage?.total_tokens || 0));
       if (!points.length) {
         ctx.fillStyle = '#65716c';
-        ctx.fillText('没有曲线数据', 14, 24);
+        ctx.fillText(t('noCurve'), 14, 24);
         return;
       }
       const max = Math.max(1, ...points);
@@ -1572,7 +1850,7 @@ HTML = r"""<!doctype html>
       ctx.font = '12px system-ui, sans-serif';
       ctx.fillText(fmtCompact(max), 14, 18);
       ctx.fillStyle = '#65716c';
-      ctx.fillText(`${points.length} 次计数`, 14, height - 8);
+      ctx.fillText(t('countPoints', { count: points.length }), 14, height - 8);
     }
 
     document.getElementById('refreshBtn').addEventListener('click', () => loadData(false));
@@ -1580,6 +1858,9 @@ HTML = r"""<!doctype html>
     document.getElementById('searchInput').addEventListener('input', event => { state.search = event.target.value; renderAll(); });
     document.getElementById('sourceFilter').addEventListener('change', event => { state.source = event.target.value; renderAll(); });
     document.getElementById('modelFilter').addEventListener('change', event => { state.model = event.target.value; renderAll(); });
+    document.querySelectorAll('[data-lang-button]').forEach(button => {
+      button.addEventListener('click', () => setLanguage(button.dataset.langButton));
+    });
     document.querySelectorAll('[data-sort-button]').forEach(button => {
       button.addEventListener('click', () => setPrimarySort(button.dataset.sortButton));
     });
@@ -1596,6 +1877,9 @@ HTML = r"""<!doctype html>
       if (state.selectedUid) showDetails(state.selectedUid, false);
     });
 
+    applyStaticText();
+    populateSourceFilter();
+    populateLimitSelect();
     loadData(true);
   </script>
 </body>
