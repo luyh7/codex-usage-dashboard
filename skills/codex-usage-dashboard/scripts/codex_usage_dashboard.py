@@ -72,14 +72,18 @@ def add_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
     return {key: int(left.get(key, 0)) + int(right.get(key, 0)) for key in TOKEN_KEYS}
 
 
-def price_for_model(model: str) -> dict[str, float] | None:
+def rate_for_model(model: str, rates: dict[str, dict[str, float]]) -> dict[str, float] | None:
     model_key = (model or "").lower()
-    if model_key in MODEL_PRICES_USD_PER_M_TOKENS:
-        return MODEL_PRICES_USD_PER_M_TOKENS[model_key]
-    for key in sorted(MODEL_PRICES_USD_PER_M_TOKENS, key=len, reverse=True):
+    if model_key in rates:
+        return rates[model_key]
+    for key in sorted(rates, key=len, reverse=True):
         if model_key.startswith(key):
-            return MODEL_PRICES_USD_PER_M_TOKENS[key]
+            return rates[key]
     return None
+
+
+def price_for_model(model: str) -> dict[str, float] | None:
+    return rate_for_model(model, MODEL_PRICES_USD_PER_M_TOKENS)
 
 
 def estimate_cost_usd(usage: dict[str, int], model: str) -> float | None:
@@ -98,67 +102,20 @@ def estimate_cost_usd(usage: dict[str, int], model: str) -> float | None:
     return round(cost, 6)
 
 
-def rate_limit_entries(rate_limits: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not isinstance(rate_limits, dict):
-        return []
-    entries: list[dict[str, Any]] = []
-    for name in ("primary", "secondary"):
-        item = rate_limits.get(name)
-        if not isinstance(item, dict):
-            continue
-        percent = item.get("used_percent")
-        window = item.get("window_minutes")
-        if isinstance(percent, (int, float)) and isinstance(window, (int, float)):
-            entries.append({"name": name, "used_percent": round(float(percent), 1), "window_minutes": int(window)})
-    return entries
-
-
-def choose_quota(rate_limits: dict[str, Any] | None, kind: str) -> dict[str, Any] | None:
-    entries = rate_limit_entries(rate_limits)
-    if not entries:
+def estimate_cost_breakdown_usd(usage: dict[str, int], model: str) -> dict[str, float] | None:
+    price = price_for_model(model)
+    if not price:
         return None
-    if kind == "week":
-        weekly = [entry for entry in entries if entry["window_minutes"] >= 10080]
-        if weekly:
-            return max(weekly, key=lambda entry: entry["window_minutes"])
-        secondary = [entry for entry in entries if entry["name"] == "secondary"]
-        return secondary[0] if secondary else None
-
-    daily = [entry for entry in entries if entry["window_minutes"] == 1440]
-    if daily:
-        return daily[0]
-    primary = [entry for entry in entries if entry["name"] == "primary"]
-    if primary:
-        return primary[0]
-    shorter = [entry for entry in entries if entry["window_minutes"] < 10080]
-    return max(shorter, key=lambda entry: entry["window_minutes"]) if shorter else None
-
-
-def quota_consumption_from_history(history: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
-    if kind == "week":
-        entries = [entry for entry in history if int(entry.get("window_minutes", 0)) >= 10080]
-        if not entries:
-            entries = [entry for entry in history if entry.get("name") == "secondary"]
-    else:
-        entries = [entry for entry in history if int(entry.get("window_minutes", 0)) == 300]
-        if not entries:
-            entries = [entry for entry in history if entry.get("name") == "primary"]
-        if not entries:
-            entries = [entry for entry in history if 0 < int(entry.get("window_minutes", 0)) < 10080]
-
-    if len(entries) < 2:
-        return None
-
-    start = float(entries[0]["used_percent"])
-    end = float(entries[-1]["used_percent"])
-    consumed = end - start if end >= start else end
+    input_tokens = max(int(usage.get("input_tokens", 0)), 0)
+    cached_tokens = min(max(int(usage.get("cached_input_tokens", 0)), 0), input_tokens)
+    uncached_tokens = input_tokens - cached_tokens
+    output_tokens = max(int(usage.get("output_tokens", 0)), 0)
+    reasoning_tokens = min(max(int(usage.get("reasoning_output_tokens", 0)), 0), output_tokens)
     return {
-        "name": entries[-1].get("name"),
-        "used_percent": round(max(consumed, 0.0), 1),
-        "window_minutes": int(entries[-1].get("window_minutes", 0)),
-        "start_used_percent": round(start, 1),
-        "end_used_percent": round(end, 1),
-        "basis": "session_delta",
+        "input_tokens": round(uncached_tokens * price["input"] / 1_000_000, 6),
+        "cached_input_tokens": round(cached_tokens * price["cached_input"] / 1_000_000, 6),
+        "output_tokens": round(output_tokens * price["output"] / 1_000_000, 6),
+        "reasoning_output_tokens": round(reasoning_tokens * price["output"] / 1_000_000, 6),
     }
 
 
@@ -324,7 +281,6 @@ class CodexUsageAnalyzer:
         latest_rate_limits: dict[str, Any] | None = None
         latest_rate_limit_reached_type: str | None = None
         latest_plan_type: str | None = None
-        rate_limit_history: list[dict[str, Any]] = []
 
         total_usage = zero_usage()
         last_usage = zero_usage()
@@ -396,9 +352,6 @@ class CodexUsageAnalyzer:
                 event_type = payload.get("type")
                 if event_type == "token_count":
                     latest_rate_limits = payload.get("rate_limits") if isinstance(payload.get("rate_limits"), dict) else None
-                    for entry in rate_limit_entries(latest_rate_limits):
-                        entry["timestamp"] = timestamp
-                        rate_limit_history.append(entry)
                     latest_plan_type = payload.get("plan_type") if isinstance(payload.get("plan_type"), str) else latest_plan_type
                     reached = payload.get("rate_limit_reached_type")
                     latest_rate_limit_reached_type = reached if isinstance(reached, str) else latest_rate_limit_reached_type
@@ -472,8 +425,7 @@ class CodexUsageAnalyzer:
         if input_tokens:
             cached_percent = round(total_usage.get("cached_input_tokens", 0) / input_tokens * 100, 1)
         estimated_cost_usd = estimate_cost_usd(total_usage, model)
-        five_hour_quota = quota_consumption_from_history(rate_limit_history, "five_hour")
-        week_quota = quota_consumption_from_history(rate_limit_history, "week")
+        estimated_cost_breakdown_usd = estimate_cost_breakdown_usd(total_usage, model)
 
         detail: dict[str, Any] = {
             "uid": uid,
@@ -497,10 +449,9 @@ class CodexUsageAnalyzer:
             "total_token_usage": total_usage,
             "last_token_usage": last_usage,
             "estimated_cost_usd": estimated_cost_usd,
+            "estimated_cost_breakdown_usd": estimated_cost_breakdown_usd,
             "price_model_known": estimated_cost_usd is not None,
             "cached_input_percent": cached_percent,
-            "five_hour_quota": five_hour_quota,
-            "week_quota": week_quota,
             "model_context_window": model_context_window,
             "token_event_count": token_event_count,
             "turn_count": len(turn_ids) or len(tasks) or token_event_count,
@@ -539,10 +490,9 @@ class CodexUsageAnalyzer:
             "total_token_usage",
             "last_token_usage",
             "estimated_cost_usd",
+            "estimated_cost_breakdown_usd",
             "price_model_known",
             "cached_input_percent",
-            "five_hour_quota",
-            "week_quota",
             "token_event_count",
             "turn_count",
             "completed_turn_count",
@@ -622,10 +572,6 @@ class CodexUsageAnalyzer:
                 "end_at",
                 "total_tokens",
                 "estimated_cost_usd",
-                "five_hour_quota_used_percent",
-                "five_hour_quota_window_minutes",
-                "week_quota_used_percent",
-                "week_quota_window_minutes",
                 "cached_input_percent",
                 "input_tokens",
                 "cached_input_tokens",
@@ -652,10 +598,6 @@ class CodexUsageAnalyzer:
                     session.get("end_at", ""),
                     usage["total_tokens"],
                     session.get("estimated_cost_usd", ""),
-                    (session.get("five_hour_quota") or {}).get("used_percent", ""),
-                    (session.get("five_hour_quota") or {}).get("window_minutes", ""),
-                    (session.get("week_quota") or {}).get("used_percent", ""),
-                    (session.get("week_quota") or {}).get("window_minutes", ""),
                     session.get("cached_input_percent", ""),
                     usage["input_tokens"],
                     usage["cached_input_tokens"],
@@ -896,7 +838,7 @@ HTML = r"""<!doctype html>
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      min-width: 920px;
+      min-width: 830px;
     }
     th, td {
       border-bottom: 1px solid var(--line);
@@ -918,18 +860,17 @@ HTML = r"""<!doctype html>
     td {
       font-size: 13px;
     }
-    .col-title { width: 250px; }
-    .col-total { width: 92px; }
+    .col-title { width: 238px; }
+    .col-total { width: 86px; }
+    .col-output { width: 78px; }
     .col-cost { width: 72px; }
-    .col-quota { width: 78px; }
     .col-cache { width: 82px; }
     .col-turns { width: 58px; }
     .col-model { width: 112px; }
     .col-effort { width: 76px; }
     th[data-sort="total_tokens"],
+    th[data-sort="output_tokens"],
     th[data-sort="estimated_cost_usd"],
-    th[data-sort="five_hour_quota_percent"],
-    th[data-sort="week_quota_percent"],
     th[data-sort="cached_input_percent"],
     th[data-sort="turn_count"] {
       text-align: right;
@@ -1062,11 +1003,21 @@ HTML = r"""<!doctype html>
     }
     .breakdown-row {
       display: grid;
-      grid-template-columns: 92px minmax(100px, 1fr) 90px;
+      grid-template-columns: 92px minmax(100px, 1fr) 148px;
       gap: 8px;
       align-items: center;
       font-size: 12px;
       color: var(--muted);
+    }
+    .breakdown-value {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .breakdown-value strong {
+      color: var(--text);
+      font-weight: 650;
     }
     .breakdown-row .bar-fill.input { background: var(--accent-3); }
     .breakdown-row .bar-fill.cached { background: var(--accent); }
@@ -1179,9 +1130,8 @@ HTML = r"""<!doctype html>
             <colgroup>
               <col class="col-title">
               <col class="col-total">
+              <col class="col-output">
               <col class="col-cost">
-              <col class="col-quota">
-              <col class="col-quota">
               <col class="col-cache">
               <col class="col-turns">
               <col class="col-model">
@@ -1191,9 +1141,8 @@ HTML = r"""<!doctype html>
               <tr>
                 <th data-sort="title">对话</th>
                 <th data-sort="total_tokens">总量</th>
+                <th data-sort="output_tokens">输出</th>
                 <th data-sort="estimated_cost_usd">花费</th>
-                <th data-sort="five_hour_quota_percent">5 小时额度</th>
-                <th data-sort="week_quota_percent">周额度</th>
                 <th data-sort="cached_input_percent">缓存命中</th>
                 <th data-sort="turn_count">轮次</th>
                 <th data-sort="model">模型</th>
@@ -1201,7 +1150,7 @@ HTML = r"""<!doctype html>
               </tr>
             </thead>
             <tbody id="sessionRows">
-              <tr><td colspan="9" class="empty">加载中</td></tr>
+              <tr><td colspan="8" class="empty">加载中</td></tr>
             </tbody>
           </table>
         </div>
@@ -1240,25 +1189,6 @@ HTML = r"""<!doctype html>
 
     function tokenValue(row, key) {
       return Number(usageOf(row)[key] || 0);
-    }
-
-    function quota(row, kind) {
-      const value = row ? row[kind + '_quota'] : null;
-      return value && typeof value === 'object' ? value : null;
-    }
-
-    function quotaPercent(row, kind) {
-      const value = quota(row, kind);
-      return value && Number.isFinite(Number(value.used_percent)) ? Number(value.used_percent) : null;
-    }
-
-    function windowLabel(minutes) {
-      const value = Number(minutes || 0);
-      if (!value) return '';
-      if (value % 10080 === 0) return (value / 10080) + ' 周';
-      if (value % 1440 === 0) return (value / 1440) + ' 天';
-      if (value % 60 === 0) return (value / 60) + ' 小时';
-      return value + ' 分钟';
     }
 
     function fmtPercent(value) {
@@ -1364,7 +1294,7 @@ HTML = r"""<!doctype html>
           await showDetails(state.selectedUid, false);
         }
       } catch (err) {
-        document.getElementById('sessionRows').innerHTML = `<tr><td colspan="10" class="error">加载失败：${escapeHtml(err.message)}</td></tr>`;
+        document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="error">加载失败：${escapeHtml(err.message)}</td></tr>`;
       } finally {
         refreshBtn.disabled = false;
         refreshBtn.textContent = '刷新';
@@ -1401,12 +1331,6 @@ HTML = r"""<!doctype html>
         } else if (state.sortKey === 'estimated_cost_usd') {
           av = Number(a.estimated_cost_usd ?? -1);
           bv = Number(b.estimated_cost_usd ?? -1);
-        } else if (state.sortKey === 'five_hour_quota_percent') {
-          av = quotaPercent(a, 'five_hour') ?? -1;
-          bv = quotaPercent(b, 'five_hour') ?? -1;
-        } else if (state.sortKey === 'week_quota_percent') {
-          av = quotaPercent(a, 'week') ?? -1;
-          bv = quotaPercent(b, 'week') ?? -1;
         } else if (state.sortKey === 'cached_input_percent' || state.sortKey === 'turn_count') {
           av = Number(a[state.sortKey] ?? -1);
           bv = Number(b[state.sortKey] ?? -1);
@@ -1470,14 +1394,12 @@ HTML = r"""<!doctype html>
       const rows = filteredSessions();
       document.getElementById('resultCount').textContent = `${fmt(rows.length)} 条`;
       if (!rows.length) {
-        document.getElementById('sessionRows').innerHTML = '<tr><td colspan="9" class="empty">没有匹配的会话</td></tr>';
+        document.getElementById('sessionRows').innerHTML = '<tr><td colspan="8" class="empty">没有匹配的会话</td></tr>';
         return;
       }
       document.getElementById('sessionRows').innerHTML = rows.map((row, idx) => {
         const usage = usageOf(row);
         const selected = row.uid === state.selectedUid ? 'selected' : '';
-        const fiveHour = quota(row, 'five_hour');
-        const week = quota(row, 'week');
         const timeValue = row.end_at || row.updated_at || row.start_at;
         return `
           <tr class="${selected}" data-uid="${escapeHtml(row.uid)}">
@@ -1489,9 +1411,8 @@ HTML = r"""<!doctype html>
               <div class="title-sub">${sourceBadge(row.source)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>
             </td>
             <td class="number" title="${fmt(usage.total_tokens)} tokens"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
+            <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
             <td class="number" title="${row.price_model_known ? '按公开 API 标准价格估算花费' : '没有匹配到公开模型价格'}">${fmtUsd(row.estimated_cost_usd)}</td>
-            <td class="number" title="${fiveHour ? `本对话消耗：${fmtPercent(fiveHour.used_percent)}；窗口：${windowLabel(fiveHour.window_minutes)}；起始 ${fmtPercent(fiveHour.start_used_percent)}，结束 ${fmtPercent(fiveHour.end_used_percent)}` : '日志中没有足够的额度记录'}">${fmtPercent(fiveHour?.used_percent)}</td>
-            <td class="number" title="${week ? `本对话消耗：${fmtPercent(week.used_percent)}；窗口：${windowLabel(week.window_minutes)}；起始 ${fmtPercent(week.start_used_percent)}，结束 ${fmtPercent(week.end_used_percent)}` : '日志中没有足够的额度记录'}">${fmtPercent(week?.used_percent)}</td>
             <td class="number">${fmtPercent(row.cached_input_percent)}</td>
             <td class="number">${fmt(row.turn_count)}</td>
             <td class="model-cell" title="${escapeHtml(row.model || 'unknown')}">${escapeHtml(row.model || 'unknown')}</td>
@@ -1521,11 +1442,15 @@ HTML = r"""<!doctype html>
 
     function renderDetails(detail) {
       const usage = usageOf(detail);
-      const max = Math.max(1, usage.input_tokens || 0, usage.cached_input_tokens || 0, usage.output_tokens || 0, usage.reasoning_output_tokens || 0);
+      const uncachedInputTokens = Math.max(0, Number(usage.input_tokens || 0) - Number(usage.cached_input_tokens || 0));
+      const costs = detail.estimated_cost_breakdown_usd || {};
+      const max = Math.max(1, uncachedInputTokens, usage.cached_input_tokens || 0, usage.output_tokens || 0, usage.reasoning_output_tokens || 0);
       const toolRows = Object.entries(detail.tool_counts || {}).slice(0, 8).map(([name, count]) =>
         `<tr><td>${escapeHtml(name)}</td><td class="number">${fmt(count)}</td></tr>`
       ).join('');
-      const timelineRows = (detail.timeline || []).map((row) => {
+      const timelineRows = [...(detail.timeline || [])].sort((a, b) => {
+        return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
+      }).map((row) => {
         const last = row.last_token_usage || {};
         return `
           <tr>
@@ -1540,17 +1465,15 @@ HTML = r"""<!doctype html>
       }).join('');
 
       document.getElementById('detailStatus').textContent = `${fmt(detail.token_event_count)} 次计数`;
-      const detailFiveHour = quota(detail, 'five_hour');
-      const detailWeek = quota(detail, 'week');
       document.getElementById('detailsBody').innerHTML = `
         <div class="detail-title">${escapeHtml(detail.title || detail.session_id)}</div>
         <div>${sourceBadge(detail.source)} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${fmt(detail.turn_count)} 轮</span></div>
 
         <div class="breakdown">
-          ${breakdownRow('输入', 'input', usage.input_tokens, max)}
-          ${breakdownRow('缓存', 'cached', usage.cached_input_tokens, max)}
-          ${breakdownRow('输出', 'output', usage.output_tokens, max)}
-          ${breakdownRow('推理', 'reasoning', usage.reasoning_output_tokens, max)}
+          ${breakdownRow('输入', 'input', uncachedInputTokens, max, costs.input_tokens)}
+          ${breakdownRow('缓存', 'cached', usage.cached_input_tokens, max, costs.cached_input_tokens)}
+          ${breakdownRow('输出', 'output', usage.output_tokens, max, costs.output_tokens)}
+          ${breakdownRow('推理', 'reasoning', usage.reasoning_output_tokens, max, costs.reasoning_output_tokens, '推理花费按输出单价估算，已包含在输出花费中')}
         </div>
 
         <div class="section-label">累计曲线</div>
@@ -1560,8 +1483,6 @@ HTML = r"""<!doctype html>
         <div class="detail-meta">
           ${kv('总 tokens', fmt(usage.total_tokens))}
           ${kv('花费', fmtUsd(detail.estimated_cost_usd))}
-          ${kv('5 小时额度消耗', detailFiveHour ? `${fmtPercent(detailFiveHour.used_percent)} (${fmtPercent(detailFiveHour.start_used_percent)} -> ${fmtPercent(detailFiveHour.end_used_percent)}, ${windowLabel(detailFiveHour.window_minutes)})` : 'N/A')}
-          ${kv('周额度消耗', detailWeek ? `${fmtPercent(detailWeek.used_percent)} (${fmtPercent(detailWeek.start_used_percent)} -> ${fmtPercent(detailWeek.end_used_percent)}, ${windowLabel(detailWeek.window_minutes)})` : 'N/A')}
           ${kv('缓存占比', detail.cached_input_percent == null ? '' : detail.cached_input_percent + '%')}
           ${kv('推理强度', detail.effort || 'N/A')}
           ${kv('时间', `${fmtRelativeTime(detail.end_at)} (${fmtDate(detail.start_at)} - ${fmtDate(detail.end_at)})`)}
@@ -1585,13 +1506,13 @@ HTML = r"""<!doctype html>
       drawTimeline(detail.timeline || []);
     }
 
-    function breakdownRow(label, cls, value, max) {
+    function breakdownRow(label, cls, value, max, cost, title = '') {
       const pct = Math.max(2, Math.round(Number(value || 0) / max * 100));
       return `
-        <div class="breakdown-row">
+        <div class="breakdown-row" title="${escapeHtml(title)}">
           <div>${escapeHtml(label)}</div>
           <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
-          <div class="number">${fmt(value)}</div>
+          <div class="breakdown-value"><span>${fmt(value)}</span><strong>${fmtUsd(cost)}</strong></div>
         </div>
       `;
     }

@@ -8,7 +8,7 @@ const cp = require("child_process");
 
 const SKILL_NAME = "codex-usage-dashboard";
 const repoRoot = path.resolve(__dirname, "..");
-const sourceSkill = path.join(repoRoot, "skill", SKILL_NAME);
+const sourceSkill = path.join(repoRoot, "skills", SKILL_NAME);
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const targetRoot = path.join(codexHome, "skills");
 const targetSkill = path.join(targetRoot, SKILL_NAME);
@@ -71,6 +71,9 @@ console.log("");
 console.log("Codex-only: this is a Codex skill and currently only works in OpenAI Codex.");
 console.log("Restart Codex or open a new Codex conversation, then ask:");
 console.log("  Use $codex-usage-dashboard to open my Codex usage dashboard");
+console.log("");
+console.log("Standard skills CLI install:");
+console.log("  npx skills add luyh7/codex-usage-dashboard -g -a codex -y");
 console.log("");
 console.log("Direct launch:");
 console.log(`  python "${path.join(targetSkill, "scripts", "open_dashboard.py")}"`);

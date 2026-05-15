@@ -1,7 +1,15 @@
 {
   "name": "codex-usage-dashboard-skill",
   "version": "0.1.0",
-  "description": "Codex-only skill for a local per-conversation Codex usage dashboard with tokens, cost estimates, cache hit rate, and quota deltas.",
+  "description": "Codex-only skill for a local per-conversation Codex usage dashboard with tokens, output, cost estimates, cache hit rate, models, and reasoning effort.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luyh7/codex-usage-dashboard.git"
+  },
+  "homepage": "https://github.com/luyh7/codex-usage-dashboard#readme",
+  "bugs": {
+    "url": "https://github.com/luyh7/codex-usage-dashboard/issues"
+  },
   "bin": {
     "codex-usage-dashboard-skill": "./bin/install.js"
   },
@@ -19,7 +27,7 @@
     "usage-dashboard",
     "conversation-usage",
     "per-conversation-usage",
-    "quota-tracker",
+    "cost-estimate",
     "cache-hit-rate",
     "local-dashboard"
   ],
@@ -30,7 +38,7 @@
   },
   "files": [
     "bin/",
-    "skill/",
+    "skills/",
     "README.md",
     "LICENSE"
   ]
