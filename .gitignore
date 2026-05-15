@@ -1,0 +1,10 @@
+node_modules/
+*.log
+__pycache__/
+.DS_Store
+.env
+dist/
+coverage/
+.tmp-codex-home/
+.tmp-codex-home-npx/
+.npm-cache/

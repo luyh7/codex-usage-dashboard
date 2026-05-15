@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Usage Dashboard"
+  short_description: "Open a local Codex usage dashboard."
+  default_prompt: "Open my Codex usage dashboard."

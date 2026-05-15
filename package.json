@@ -1,0 +1,37 @@
+{
+  "name": "codex-usage-dashboard-skill",
+  "version": "0.1.0",
+  "description": "Codex-only skill for a local per-conversation Codex usage dashboard with tokens, cost estimates, cache hit rate, and quota deltas.",
+  "bin": {
+    "codex-usage-dashboard-skill": "./bin/install.js"
+  },
+  "scripts": {
+    "install-skill": "node ./bin/install.js",
+    "validate": "node --check ./bin/install.js"
+  },
+  "keywords": [
+    "codex",
+    "openai-codex",
+    "codex-skill",
+    "codex-usage",
+    "codex-dashboard",
+    "token-usage",
+    "usage-dashboard",
+    "conversation-usage",
+    "per-conversation-usage",
+    "quota-tracker",
+    "cache-hit-rate",
+    "local-dashboard"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "skill/",
+    "README.md",
+    "LICENSE"
+  ]
+}
