@@ -5,6 +5,7 @@ Codex-only skill for a local OpenAI Codex usage dashboard.
 It reads your local Codex session logs and opens a browser dashboard for per-conversation usage: total tokens, output tokens, estimated dollar cost, cache hit rate, turns, model, reasoning effort, tool calls, and token-count timeline.
 
 > Currently only supports OpenAI Codex. It is not a Claude Code, Cursor, Continue, or generic OpenAI API dashboard.
+<img width="2594" height="1292" alt="image" src="https://github.com/user-attachments/assets/2b6de5bd-9e81-495d-aa82-4634cf0e86a9" />
 
 ## Why This Exists
 
