@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
-"""Open the bundled Codex usage dashboard.
-
-This script is intentionally standard-library only. It starts the dashboard as
-a detached local process and returns quickly so Codex can continue responding.
-"""
+"""Open the bundled Codex usage dashboard."""
 
 from __future__ import annotations
 
 import json
-import os
 import platform
+import selectors
 import shutil
 import subprocess
 import sys
@@ -21,22 +17,43 @@ from urllib.request import urlopen
 
 HOST = "127.0.0.1"
 PORT = 8765
-URL = f"http://{HOST}:{PORT}/"
+PORT_SCAN_COUNT = 50
+
+
+def dashboard_url(port: int) -> str:
+    return f"http://{HOST}:{port}/"
 
 
 def dashboard_script() -> Path:
     return Path(__file__).resolve().with_name("codex_usage_dashboard.py")
 
 
-def dashboard_running() -> bool:
+def health_dashboard_url(port: int) -> str | None:
+    url = dashboard_url(port)
     try:
-        with urlopen(URL + "api/sessions", timeout=0.7) as response:
+        with urlopen(url + "api/health", timeout=0.4) as response:
             if response.status != 200:
-                return False
-            payload = json.loads(response.read().decode("utf-8"))
+                return None
+            payload = json.loads(response.read(256).decode("utf-8"))
     except Exception:
-        return False
-    return isinstance(payload, dict) and isinstance(payload.get("summary"), dict)
+        return None
+    features = payload.get("features") if isinstance(payload, dict) else None
+    if (
+        isinstance(payload, dict)
+        and payload.get("app") == "codex-usage-dashboard"
+        and isinstance(features, list)
+        and "calendar-range-v2" in features
+    ):
+        return url
+    return None
+
+
+def dashboard_running_url() -> str | None:
+    for port in range(PORT, PORT + PORT_SCAN_COUNT):
+        health_url = health_dashboard_url(port)
+        if health_url:
+            return health_url
+    return None
 
 
 def windows_pythonw() -> str:
@@ -48,7 +65,44 @@ def windows_pythonw() -> str:
     return found or str(exe)
 
 
-def start_dashboard() -> None:
+def parse_dashboard_url(line: str) -> str | None:
+    prefixes = (
+        "Codex Usage Dashboard: ",
+        "Codex Usage Dashboard already running: ",
+    )
+    for prefix in prefixes:
+        if line.startswith(prefix):
+            return line.removeprefix(prefix).strip()
+    return None
+
+
+def read_dashboard_url(process: subprocess.Popen[str], timeout: float = 2.5) -> str | None:
+    if process.stdout is None:
+        return None
+
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            remaining = max(0, deadline - time.monotonic())
+            events = selector.select(remaining)
+            if not events:
+                break
+            line = process.stdout.readline()
+            if not line:
+                if process.poll() is not None:
+                    break
+                continue
+            url = parse_dashboard_url(line.strip())
+            if url:
+                return url
+    finally:
+        selector.close()
+    return None
+
+
+def start_dashboard() -> str | None:
     system = platform.system()
     script = str(dashboard_script())
 
@@ -57,7 +111,7 @@ def start_dashboard() -> None:
         for name in ("CREATE_NO_WINDOW", "CREATE_NEW_PROCESS_GROUP", "DETACHED_PROCESS"):
             creationflags |= getattr(subprocess, name, 0)
         subprocess.Popen(
-            [windows_pythonw(), script, "--port", str(PORT), "--open"],
+            [windows_pythonw(), "-u", script, "--port", str(PORT), "--open"],
             cwd=str(Path(script).parent),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -65,37 +119,46 @@ def start_dashboard() -> None:
             close_fds=True,
             creationflags=creationflags,
         )
-        return
+        return None
 
     python = sys.executable or shutil.which("python3") or shutil.which("python")
     if not python:
         raise RuntimeError("Python was not found.")
 
-    subprocess.Popen(
-        [python, script, "--port", str(PORT), "--open"],
+    process = subprocess.Popen(
+        [python, "-u", script, "--port", str(PORT), "--open"],
         cwd=str(Path(script).parent),
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
         close_fds=True,
         start_new_session=True,
     )
+    return read_dashboard_url(process)
 
 
 def main() -> int:
-    if dashboard_running():
-        webbrowser.open(URL, new=2)
-        print(f"Dashboard already running: {URL}")
+    running_url = dashboard_running_url()
+    if running_url:
+        webbrowser.open(running_url, new=2)
+        print(running_url)
         return 0
 
-    start_dashboard()
-    for _ in range(20):
-        time.sleep(0.25)
-        if dashboard_running():
-            print(f"Dashboard opened: {URL}")
+    started_url = start_dashboard()
+    if started_url:
+        print(started_url)
+        return 0
+
+    for _ in range(16):
+        time.sleep(0.15)
+        running_url = dashboard_running_url()
+        if running_url:
+            print(running_url)
             return 0
 
-    print(f"Dashboard starting. If the browser did not open, visit {URL}")
+    print(f"Dashboard starting. Try {dashboard_url(PORT)} or nearby ports.")
     return 0
 
 

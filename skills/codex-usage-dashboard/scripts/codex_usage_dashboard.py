@@ -53,6 +53,38 @@ MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5-codex": {"input": 1.25, "cached_input": 0.125, "output": 10.00},
 }
 
+PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
+DASHBOARD_FEATURES = ["periods", "period-deltas", "period-token-label", "all-period", "calendar-range-v2"]
+
+SUMMARY_KEYS = (
+    "uid",
+    "session_id",
+    "title",
+    "source",
+    "path",
+    "file_size",
+    "parse_errors",
+    "created_at",
+    "start_at",
+    "end_at",
+    "updated_at",
+    "cwd",
+    "project",
+    "model",
+    "effort",
+    "total_token_usage",
+    "last_token_usage",
+    "estimated_cost_usd",
+    "estimated_cost_breakdown_usd",
+    "price_model_known",
+    "cached_input_percent",
+    "token_event_count",
+    "turn_count",
+    "completed_turn_count",
+    "duration_ms_total",
+    "time_to_first_token_ms_avg",
+)
+
 
 def zero_usage() -> dict[str, int]:
     return {key: 0 for key in TOKEN_KEYS}
@@ -70,6 +102,10 @@ def normalize_usage(value: Any) -> dict[str, int]:
 
 def add_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
     return {key: int(left.get(key, 0)) + int(right.get(key, 0)) for key in TOKEN_KEYS}
+
+
+def subtract_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
+    return {key: max(int(left.get(key, 0)) - int(right.get(key, 0)), 0) for key in TOKEN_KEYS}
 
 
 def rate_for_model(model: str, rates: dict[str, dict[str, float]]) -> dict[str, float] | None:
@@ -133,6 +169,86 @@ def utc_from_mtime(path: Path) -> str | None:
         return utc_from_epoch(path.stat().st_mtime)
     except OSError:
         return None
+
+
+def utc_iso(moment: dt.datetime) -> str:
+    return moment.astimezone(dt.UTC).isoformat().replace("+00:00", "Z")
+
+
+def parse_timestamp(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    return parsed.astimezone(dt.UTC)
+
+
+def parse_local_date(value: str | None) -> dt.date | None:
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def local_range_bounds(start_date: str | None, end_date: str | None) -> tuple[dt.datetime, dt.datetime, str, str]:
+    now_local = dt.datetime.now().astimezone()
+    tzinfo = now_local.tzinfo
+    start_day = parse_local_date(start_date) or now_local.date()
+    end_day = parse_local_date(end_date) or start_day
+    if end_day < start_day:
+        start_day, end_day = end_day, start_day
+
+    start_local = dt.datetime.combine(start_day, dt.time.min, tzinfo=tzinfo)
+    if end_day >= now_local.date():
+        end_local = now_local
+    else:
+        next_day = end_day + dt.timedelta(days=1)
+        end_local = dt.datetime.combine(next_day, dt.time.min, tzinfo=tzinfo) - dt.timedelta(microseconds=1)
+    return start_local.astimezone(dt.UTC), end_local.astimezone(dt.UTC), start_day.isoformat(), end_day.isoformat()
+
+
+def local_period_bounds(
+    period: str | None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> tuple[str, dt.datetime | None, dt.datetime, str | None, str | None]:
+    key = period if period in PERIOD_KEYS or period == "custom" else "today"
+    now_local = dt.datetime.now().astimezone()
+    midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if key == "all":
+        return key, None, now_local.astimezone(dt.UTC), None, None
+    if key == "custom":
+        start_at, end_at, start_key, end_key = local_range_bounds(start_date, end_date)
+        return key, start_at, end_at, start_key, end_key
+    if key == "7d":
+        start_local = midnight - dt.timedelta(days=6)
+    elif key == "30d":
+        start_local = midnight - dt.timedelta(days=29)
+    elif key == "week":
+        start_local = midnight - dt.timedelta(days=midnight.weekday())
+    elif key == "month":
+        start_local = midnight.replace(day=1)
+    else:
+        start_local = midnight
+
+    start_key = start_local.date().isoformat()
+    end_key = now_local.date().isoformat()
+    return key, start_local.astimezone(dt.UTC), now_local.astimezone(dt.UTC), start_key, end_key
+
+
+def timestamp_in_range(value: Any, start_at: dt.datetime, end_at: dt.datetime) -> bool:
+    timestamp = parse_timestamp(value)
+    return timestamp is not None and start_at <= timestamp <= end_at
 
 
 def clean_text(value: str, limit: int = 260) -> str:
@@ -226,7 +342,12 @@ class CodexUsageAnalyzer:
         files.sort(key=lambda item: item[0].stat().st_mtime if item[0].exists() else 0, reverse=True)
         return files
 
-    def scan(self) -> dict[str, Any]:
+    def scan(
+        self,
+        period: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
         titles = self.load_session_titles()
         sessions: list[dict[str, Any]] = []
         details_by_uid: dict[str, dict[str, Any]] = {}
@@ -246,13 +367,168 @@ class CodexUsageAnalyzer:
             details_by_uid[summary["uid"]] = detail
 
         sessions.sort(key=lambda row: row["total_token_usage"].get("total_tokens", 0), reverse=True)
-        return {
-            "generated_at": dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z"),
+        generated_at = dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+        snapshot = {
+            "generated_at": generated_at,
             "codex_home": str(self.codex_home),
             "sessions": sessions,
             "details_by_uid": details_by_uid,
             "summary": self.build_summary(sessions),
+            "daily_usage": self.build_daily_usage(details_by_uid.values()),
+            "period": {"key": "all", "start_at": None, "end_at": generated_at},
         }
+        if period:
+            return self.filter_snapshot_by_period(snapshot, period, start_date, end_date)
+        return snapshot
+
+    def filter_snapshot_by_period(
+        self,
+        snapshot: dict[str, Any],
+        period: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        key, start_at, end_at, start_key, end_key = local_period_bounds(period, start_date, end_date)
+        if key == "all" or start_at is None:
+            return {
+                **snapshot,
+                "period": {"key": "all", "start_at": None, "end_at": utc_iso(end_at), "start_date": None, "end_date": None},
+            }
+
+        sessions: list[dict[str, Any]] = []
+        details_by_uid: dict[str, dict[str, Any]] = {}
+
+        for session in snapshot["sessions"]:
+            detail = snapshot["details_by_uid"].get(session["uid"])
+            if not detail:
+                continue
+            ranged_detail = self.detail_for_period(detail, start_at, end_at)
+            usage = normalize_usage(ranged_detail.get("total_token_usage"))
+            if ranged_detail.get("token_event_count", 0) <= 0 and usage["total_tokens"] <= 0:
+                continue
+            sessions.append({field: ranged_detail[field] for field in SUMMARY_KEYS})
+            details_by_uid[ranged_detail["uid"]] = ranged_detail
+
+        sessions.sort(key=lambda row: row["total_token_usage"].get("total_tokens", 0), reverse=True)
+        return {
+            **snapshot,
+            "sessions": sessions,
+            "details_by_uid": details_by_uid,
+            "summary": self.build_summary(sessions),
+            "period": {
+                "key": key,
+                "start_at": utc_iso(start_at),
+                "end_at": utc_iso(end_at),
+                "start_date": start_key,
+                "end_date": end_key,
+            },
+        }
+
+    def build_daily_usage(self, details: Any) -> list[dict[str, Any]]:
+        tzinfo = dt.datetime.now().astimezone().tzinfo
+        by_day: dict[str, dict[str, Any]] = {}
+
+        for detail in details:
+            all_timeline = [
+                row
+                for row in detail.get("timeline", [])
+                if parse_timestamp(row.get("timestamp")) is not None
+            ]
+            all_timeline.sort(key=lambda row: parse_timestamp(row.get("timestamp")) or dt.datetime.min.replace(tzinfo=dt.UTC))
+            previous_usage = zero_usage()
+            for row in all_timeline:
+                timestamp = parse_timestamp(row.get("timestamp"))
+                if timestamp is None:
+                    continue
+                cumulative_usage = normalize_usage(row.get("total_token_usage"))
+                delta_usage = subtract_usage(cumulative_usage, previous_usage)
+                previous_usage = cumulative_usage
+                if delta_usage["total_tokens"] <= 0:
+                    continue
+                day = timestamp.astimezone(tzinfo).date().isoformat()
+                by_day.setdefault(day, {"date": day, "usage": zero_usage()})
+                by_day[day]["usage"] = add_usage(by_day[day]["usage"], delta_usage)
+
+        return sorted(by_day.values(), key=lambda row: row["date"])
+
+    def detail_for_period(self, detail: dict[str, Any], start_at: dt.datetime, end_at: dt.datetime) -> dict[str, Any]:
+        all_timeline = [
+            row
+            for row in detail.get("timeline", [])
+            if parse_timestamp(row.get("timestamp")) is not None
+        ]
+        all_timeline.sort(key=lambda row: parse_timestamp(row.get("timestamp")) or dt.datetime.min.replace(tzinfo=dt.UTC))
+
+        baseline_usage = zero_usage()
+        timeline: list[dict[str, Any]] = []
+        previous_usage = zero_usage()
+        for row in all_timeline:
+            timestamp = parse_timestamp(row.get("timestamp"))
+            if timestamp is None:
+                continue
+            cumulative_usage = normalize_usage(row.get("total_token_usage"))
+            if timestamp < start_at:
+                baseline_usage = cumulative_usage
+                previous_usage = cumulative_usage
+                continue
+            if timestamp > end_at:
+                break
+
+            relative_row = dict(row)
+            relative_row["total_token_usage"] = subtract_usage(cumulative_usage, baseline_usage)
+            relative_row["last_token_usage"] = subtract_usage(cumulative_usage, previous_usage)
+            timeline.append(relative_row)
+            previous_usage = cumulative_usage
+
+        end_usage = normalize_usage(all_timeline[-1].get("total_token_usage")) if timeline else zero_usage()
+        if timeline:
+            end_usage = add_usage(baseline_usage, normalize_usage(timeline[-1].get("total_token_usage")))
+        total_usage = subtract_usage(end_usage, baseline_usage)
+        last_usage = normalize_usage(timeline[-1].get("last_token_usage")) if timeline else zero_usage()
+        cached_percent = None
+        input_tokens = total_usage.get("input_tokens", 0)
+        if input_tokens:
+            cached_percent = round(total_usage.get("cached_input_tokens", 0) / input_tokens * 100, 1)
+
+        tasks = [
+            row
+            for row in detail.get("tasks", [])
+            if timestamp_in_range(row.get("timestamp"), start_at, end_at)
+        ]
+        durations_ms = [
+            int(row["duration_ms"])
+            for row in tasks
+            if isinstance(row.get("duration_ms"), (int, float))
+        ]
+        ttf_ms = [
+            int(row["time_to_first_token_ms"])
+            for row in tasks
+            if isinstance(row.get("time_to_first_token_ms"), (int, float))
+        ]
+
+        ranged = dict(detail)
+        ranged["period_start_at"] = utc_iso(start_at)
+        ranged["period_end_at"] = utc_iso(end_at)
+        ranged["timeline"] = timeline
+        ranged["tasks"] = tasks
+        ranged["total_token_usage"] = total_usage
+        ranged["last_token_usage"] = last_usage
+        ranged["estimated_cost_usd"] = estimate_cost_usd(total_usage, str(detail.get("model") or ""))
+        ranged["estimated_cost_breakdown_usd"] = estimate_cost_breakdown_usd(total_usage, str(detail.get("model") or ""))
+        ranged["price_model_known"] = ranged["estimated_cost_usd"] is not None
+        ranged["cached_input_percent"] = cached_percent
+        ranged["token_event_count"] = len(timeline)
+        ranged["turn_count"] = len(tasks) or len(timeline)
+        ranged["completed_turn_count"] = len(tasks)
+        ranged["duration_ms_total"] = sum(durations_ms)
+        ranged["duration_ms_avg"] = int(sum(durations_ms) / len(durations_ms)) if durations_ms else None
+        ranged["time_to_first_token_ms_avg"] = int(sum(ttf_ms) / len(ttf_ms)) if ttf_ms else None
+        if timeline:
+            ranged["start_at"] = str(timeline[0].get("timestamp") or detail.get("start_at") or "")
+            ranged["end_at"] = str(timeline[-1].get("timestamp") or detail.get("end_at") or "")
+            ranged["model_context_window"] = timeline[-1].get("model_context_window")
+            ranged["latest_rate_limits"] = timeline[-1].get("rate_limits")
+        return ranged
 
     def parse_file_cached(self, path: Path, source: str) -> tuple[dict[str, Any], dict[str, Any]]:
         stat = path.stat()
@@ -471,35 +747,7 @@ class CodexUsageAnalyzer:
             "tasks": tasks,
         }
 
-        summary_keys = {
-            "uid",
-            "session_id",
-            "title",
-            "source",
-            "path",
-            "file_size",
-            "parse_errors",
-            "created_at",
-            "start_at",
-            "end_at",
-            "updated_at",
-            "cwd",
-            "project",
-            "model",
-            "effort",
-            "total_token_usage",
-            "last_token_usage",
-            "estimated_cost_usd",
-            "estimated_cost_breakdown_usd",
-            "price_model_known",
-            "cached_input_percent",
-            "token_event_count",
-            "turn_count",
-            "completed_turn_count",
-            "duration_ms_total",
-            "time_to_first_token_ms_avg",
-        }
-        summary = {key: detail[key] for key in summary_keys}
+        summary = {key: detail[key] for key in SUMMARY_KEYS}
         return summary, detail
 
     def build_summary(self, sessions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -552,12 +800,23 @@ class CodexUsageAnalyzer:
             "top_session_uid": sessions[0]["uid"] if sessions else None,
         }
 
-    def get_detail(self, uid: str) -> dict[str, Any] | None:
-        snapshot = self.scan()
+    def get_detail(
+        self,
+        uid: str,
+        period: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any] | None:
+        snapshot = self.scan(period, start_date, end_date)
         return snapshot["details_by_uid"].get(uid)
 
-    def export_csv(self) -> str:
-        snapshot = self.scan()
+    def export_csv(
+        self,
+        period: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> str:
+        snapshot = self.scan(period, start_date, end_date)
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
@@ -654,10 +913,13 @@ HTML = r"""<!doctype html>
       max-width: 1480px;
       margin: 0 auto;
       padding: 18px 24px 14px;
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
       align-items: center;
-      justify-content: space-between;
       gap: 16px;
+    }
+    .brand {
+      min-width: 0;
     }
     h1 {
       margin: 0;
@@ -676,6 +938,122 @@ HTML = r"""<!doctype html>
       gap: 8px;
       flex-wrap: wrap;
       justify-content: flex-end;
+      justify-self: end;
+    }
+    .period-wrap {
+      position: relative;
+      justify-self: center;
+    }
+    .period-toggle {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(48px, 1fr));
+      gap: 3px;
+      min-height: 38px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      min-width: 458px;
+    }
+    .period-option {
+      min-height: 30px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 0 10px;
+      white-space: nowrap;
+    }
+    .period-option.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 1px 4px rgba(15, 123, 99, 0.22);
+    }
+    .calendar-popover {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: 360px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 40px rgba(26, 36, 32, 0.18);
+      z-index: 20;
+    }
+    .calendar-popover[hidden] {
+      display: none;
+    }
+    .calendar-head,
+    .calendar-actions {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) 36px;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .calendar-title {
+      text-align: center;
+      font-weight: 750;
+      font-size: 14px;
+    }
+    .calendar-actions {
+      grid-template-columns: 1fr 1fr;
+      margin: 10px 0 0;
+    }
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 4px;
+    }
+    .calendar-weekday {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+      padding: 4px 0;
+    }
+    .calendar-day {
+      display: grid;
+      grid-template-rows: 16px 14px;
+      gap: 2px;
+      min-height: 42px;
+      padding: 4px 2px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1;
+      text-align: center;
+    }
+    .calendar-day.outside {
+      color: #a3aca8;
+      background: #fbfcfc;
+    }
+    .calendar-day.in-range {
+      background: #eef8f4;
+      border-color: #99c9bb;
+    }
+    .calendar-day.range-edge {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .calendar-day:disabled {
+      color: #b8c0bd;
+      cursor: default;
+      background: #f8faf9;
+    }
+    .calendar-usage {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .calendar-day.range-edge .calendar-usage {
+      color: rgba(255, 255, 255, 0.84);
     }
     .lang-toggle {
       display: grid;
@@ -1088,15 +1466,22 @@ HTML = r"""<!doctype html>
       padding: 14px;
     }
     @media (max-width: 1100px) {
+      .header-inner { grid-template-columns: 1fr; align-items: flex-start; }
+      .period-wrap { justify-self: start; width: 100%; max-width: 620px; }
+      .period-toggle { width: 100%; min-width: 0; }
+      .toolbar { justify-self: start; justify-content: flex-start; }
       .metrics { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
       .layout { grid-template-columns: 1fr; }
       .details { position: static; max-height: none; }
       .table-wrap { max-height: none; }
     }
     @media (max-width: 760px) {
-      .header-inner { align-items: flex-start; flex-direction: column; padding: 16px; }
+      .header-inner { grid-template-columns: 1fr; padding: 16px; }
       main { padding: 16px; }
       .toolbar { justify-content: flex-start; }
+      .period-toggle { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+      .period-option { padding: 0 6px; }
+      .calendar-popover { left: 0; transform: none; width: min(358px, calc(100vw - 32px)); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .controls { grid-template-columns: 1fr; }
       .bar-row { grid-template-columns: 1fr; gap: 4px; }
@@ -1107,9 +1492,21 @@ HTML = r"""<!doctype html>
 <body>
   <header>
     <div class="header-inner">
-      <div>
+      <div class="brand">
         <h1>Codex Usage Dashboard</h1>
         <div class="subtitle" id="codexHome" data-i18n="subtitle">读取本地 Codex 会话日志</div>
+      </div>
+      <div class="period-wrap" id="periodWrap">
+        <div class="period-toggle" aria-label="统计区间" data-i18n-aria="period">
+          <button class="period-option active" data-period-button="today" data-i18n="periodToday" type="button">今日</button>
+          <button class="period-option" data-period-button="7d" data-i18n="period7d" type="button">7日</button>
+          <button class="period-option" data-period-button="30d" data-i18n="period30d" type="button">30日</button>
+          <button class="period-option" data-period-button="week" data-i18n="periodWeek" type="button">本周</button>
+          <button class="period-option" data-period-button="month" data-i18n="periodMonth" type="button">本月</button>
+          <button class="period-option" data-period-button="all" data-i18n="periodAll" type="button">全部</button>
+          <button class="period-option" id="calendarBtn" data-i18n="calendarButton" type="button">日期</button>
+        </div>
+        <div class="calendar-popover" id="calendarPopover" hidden></div>
       </div>
       <div class="toolbar">
         <div class="lang-toggle" aria-label="语言" data-i18n-aria="language">
@@ -1208,7 +1605,17 @@ HTML = r"""<!doctype html>
       source: 'all',
       model: 'all',
       limit: '50',
+      period: 'today',
+      customStartDate: '',
+      customEndDate: '',
+      dailyUsage: [],
+      calendarOpen: false,
+      calendarMonth: '',
+      calendarDraftStart: '',
+      calendarDraftEnd: '',
       lang: 'zh',
+      loading: false,
+      reloadAfterLoad: false,
     };
 
     const tokenKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
@@ -1219,8 +1626,23 @@ HTML = r"""<!doctype html>
         refresh: '刷新',
         refreshTitle: '重新扫描本地日志',
         exportCsv: '导出 CSV',
-        exportTitle: '导出当前所有会话统计',
+        exportTitle: '导出当前统计',
         language: '语言',
+        period: '统计区间',
+        periodToday: '今日',
+        period7d: '7日',
+        period30d: '30日',
+        periodWeek: '本周',
+        periodMonth: '本月',
+        periodAll: '全部',
+        periodCustom: '{start}-{end}',
+        calendarButton: '日期',
+        calendarTitle: '选择日期',
+        calendarApply: '应用',
+        calendarCancel: '取消',
+        calendarPrev: '上月',
+        calendarNext: '下月',
+        calendarWeekdays: ['一', '二', '三', '四', '五', '六', '日'],
         searchPlaceholder: '搜索标题、项目、路径、模型',
         source: '来源',
         sourceAll: '全部来源',
@@ -1265,6 +1687,7 @@ HTML = r"""<!doctype html>
         metricSessions: '会话数',
         metricSessionsHint: '当前 {active} · 归档 {archived}',
         metricTotalTokens: '总 tokens',
+        metricPeriodTotalTokens: '{period}总 tokens',
         metricCost: '估算价格',
         metricCostHint: '{count} 个会话可估算',
         metricInput: '输入 tokens',
@@ -1308,8 +1731,23 @@ HTML = r"""<!doctype html>
         refresh: 'Refresh',
         refreshTitle: 'Rescan local logs',
         exportCsv: 'Export CSV',
-        exportTitle: 'Export all conversation statistics',
+        exportTitle: 'Export current statistics',
         language: 'Language',
+        period: 'Range',
+        periodToday: 'Today',
+        period7d: '7d',
+        period30d: '30d',
+        periodWeek: 'Week',
+        periodMonth: 'Month',
+        periodAll: 'All',
+        periodCustom: '{start}-{end}',
+        calendarButton: 'Dates',
+        calendarTitle: 'Select Dates',
+        calendarApply: 'Apply',
+        calendarCancel: 'Cancel',
+        calendarPrev: 'Prev',
+        calendarNext: 'Next',
+        calendarWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
         searchPlaceholder: 'Search title, project, path, or model',
         source: 'Source',
         sourceAll: 'All sources',
@@ -1354,6 +1792,7 @@ HTML = r"""<!doctype html>
         metricSessions: 'Sessions',
         metricSessionsHint: 'Active {active} · Archived {archived}',
         metricTotalTokens: 'Total tokens',
+        metricPeriodTotalTokens: '{period} total tokens',
         metricCost: 'Estimated cost',
         metricCostHint: '{count} sessions priced',
         metricInput: 'Input tokens',
@@ -1420,6 +1859,7 @@ HTML = r"""<!doctype html>
       document.querySelectorAll('[data-lang-button]').forEach(button => {
         button.classList.toggle('active', button.dataset.langButton === state.lang);
       });
+      updatePeriodButtons();
       if (state.generatedAt) {
         document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
       }
@@ -1550,32 +1990,75 @@ HTML = r"""<!doctype html>
       return `<span class="badge ${escapeHtml(source)}">${text}</span>`;
     }
 
+    function periodParams(period = state.period) {
+      const params = new URLSearchParams({ period });
+      if (period === 'custom') {
+        if (state.customStartDate) params.set('start', state.customStartDate);
+        if (state.customEndDate) params.set('end', state.customEndDate);
+      }
+      return params;
+    }
+
     async function loadData(selectTop = true) {
+      if (state.loading) {
+        state.reloadAfterLoad = true;
+        return;
+      }
+      state.loading = true;
+      state.reloadAfterLoad = false;
+      const requestedPeriod = state.period;
+      const requestedStart = state.customStartDate;
+      const requestedEnd = state.customEndDate;
       const refreshBtn = document.getElementById('refreshBtn');
       refreshBtn.disabled = true;
       refreshBtn.textContent = t('scanning');
       try {
-        const res = await fetch('/api/sessions', { cache: 'no-store' });
+        const res = await fetch('/api/sessions?' + periodParams(requestedPeriod).toString(), { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
+        if (
+          state.period !== requestedPeriod
+          || state.customStartDate !== requestedStart
+          || state.customEndDate !== requestedEnd
+        ) {
+          state.reloadAfterLoad = true;
+          return;
+        }
         state.sessions = data.sessions || [];
         state.summary = data.summary || null;
+        state.dailyUsage = data.daily_usage || [];
         state.codexHome = data.codex_home || '';
         state.generatedAt = data.generated_at || '';
+        state.period = data.period?.key || requestedPeriod;
+        if (state.period === 'custom') {
+          state.customStartDate = data.period?.start_date || requestedStart;
+          state.customEndDate = data.period?.end_date || requestedEnd || state.customStartDate;
+        }
         document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
         populateModelFilter();
+        if (state.selectedUid && !state.sessions.some(row => row.uid === state.selectedUid)) {
+          state.selectedUid = null;
+        }
         renderAll();
-        if (selectTop && !state.selectedUid && state.sessions.length) {
-          const first = filteredSessions()[0];
+        const visibleRows = filteredSessions();
+        if ((selectTop || !state.selectedUid) && visibleRows.length) {
+          const first = visibleRows[0];
           if (first) await showDetails(first.uid);
         } else if (state.selectedUid) {
           await showDetails(state.selectedUid, false);
+        } else {
+          clearDetails();
         }
       } catch (err) {
         document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="error">${escapeHtml(t('loadFailed', { message: err.message }))}</td></tr>`;
       } finally {
         refreshBtn.disabled = false;
         refreshBtn.textContent = t('refresh');
+        state.loading = false;
+        if (state.reloadAfterLoad) {
+          state.reloadAfterLoad = false;
+          loadData(true);
+        }
       }
     }
 
@@ -1633,8 +2116,31 @@ HTML = r"""<!doctype html>
 
     function renderAll() {
       renderMetrics();
+      updatePeriodButtons();
       updateSortButtons();
       renderTable();
+      if (state.calendarOpen) renderCalendar();
+    }
+
+    function setPeriod(period) {
+      if (state.period === period) return;
+      state.period = period;
+      state.selectedUid = null;
+      updatePeriodButtons();
+      clearDetails();
+      loadData(true);
+    }
+
+    function setCustomPeriod(startDate, endDate) {
+      state.period = 'custom';
+      state.customStartDate = startDate;
+      state.customEndDate = endDate || startDate;
+      state.selectedUid = null;
+      state.calendarOpen = false;
+      updateCalendarVisibility();
+      updatePeriodButtons();
+      clearDetails();
+      loadData(true);
     }
 
     function setPrimarySort(key) {
@@ -1643,9 +2149,187 @@ HTML = r"""<!doctype html>
       renderAll();
     }
 
+    function updatePeriodButtons() {
+      document.querySelectorAll('[data-period-button]').forEach(button => {
+        button.classList.toggle('active', button.dataset.periodButton === state.period);
+      });
+      document.getElementById('calendarBtn').classList.toggle('active', state.period === 'custom');
+    }
+
     function updateSortButtons() {
       document.querySelectorAll('[data-sort-button]').forEach(button => {
         button.classList.toggle('active', button.dataset.sortButton === state.sortKey);
+      });
+    }
+
+    function periodLabel() {
+      const keys = {
+        today: 'periodToday',
+        '7d': 'period7d',
+        '30d': 'period30d',
+        week: 'periodWeek',
+        month: 'periodMonth',
+        all: 'periodAll',
+      };
+      if (state.period === 'custom') {
+        return t('periodCustom', {
+          start: shortDateLabel(state.customStartDate),
+          end: shortDateLabel(state.customEndDate || state.customStartDate),
+        });
+      }
+      return t(keys[state.period] || 'periodToday');
+    }
+
+    function dateFromKey(key) {
+      const parts = String(key || '').split('-').map(Number);
+      if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) return null;
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+
+    function dateKey(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function shortDateLabel(key) {
+      const date = dateFromKey(key);
+      if (!date) return '';
+      return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+    }
+
+    function monthKey(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    function usageByDate() {
+      const map = new Map();
+      state.dailyUsage.forEach(row => {
+        map.set(row.date, Number(row.usage?.total_tokens || 0));
+      });
+      return map;
+    }
+
+    function latestUsageDate() {
+      const dates = state.dailyUsage.map(row => row.date).filter(Boolean).sort();
+      return dates.length ? dates[dates.length - 1] : dateKey(new Date());
+    }
+
+    function openCalendar() {
+      state.calendarOpen = true;
+      state.calendarDraftStart = state.customStartDate || '';
+      state.calendarDraftEnd = state.customEndDate || '';
+      const seed = state.calendarDraftStart || latestUsageDate();
+      state.calendarMonth = monthKey(dateFromKey(seed) || new Date());
+      updateCalendarVisibility();
+      renderCalendar();
+    }
+
+    function closeCalendar() {
+      state.calendarOpen = false;
+      updateCalendarVisibility();
+    }
+
+    function updateCalendarVisibility() {
+      const popover = document.getElementById('calendarPopover');
+      popover.hidden = !state.calendarOpen;
+    }
+
+    function changeCalendarMonth(delta) {
+      const current = dateFromKey(`${state.calendarMonth || monthKey(new Date())}-01`) || new Date();
+      current.setMonth(current.getMonth() + delta);
+      state.calendarMonth = monthKey(current);
+      renderCalendar();
+    }
+
+    function inDraftRange(key) {
+      if (!state.calendarDraftStart) return false;
+      const start = state.calendarDraftStart;
+      const end = state.calendarDraftEnd || state.calendarDraftStart;
+      return key >= start && key <= end;
+    }
+
+    function isDraftEdge(key) {
+      return key === state.calendarDraftStart || key === state.calendarDraftEnd;
+    }
+
+    function selectCalendarDate(key) {
+      if (!state.calendarDraftStart || state.calendarDraftEnd) {
+        state.calendarDraftStart = key;
+        state.calendarDraftEnd = '';
+        renderCalendar();
+        return;
+      }
+      const start = state.calendarDraftStart;
+      if (key < start) setCustomPeriod(key, start);
+      else setCustomPeriod(start, key);
+    }
+
+    function applyCalendarRange() {
+      if (!state.calendarDraftStart) return;
+      setCustomPeriod(state.calendarDraftStart, state.calendarDraftEnd || state.calendarDraftStart);
+    }
+
+    function renderCalendar() {
+      const popover = document.getElementById('calendarPopover');
+      if (!popover || !state.calendarOpen) return;
+
+      const usageMap = usageByDate();
+      const todayKey = dateKey(new Date());
+      const monthStart = dateFromKey(`${state.calendarMonth || monthKey(new Date())}-01`) || new Date();
+      monthStart.setDate(1);
+      const title = monthStart.toLocaleDateString(locale(), { year: 'numeric', month: 'long' });
+      const firstGridDate = new Date(monthStart);
+      firstGridDate.setDate(monthStart.getDate() - ((monthStart.getDay() + 6) % 7));
+      const weekdays = (I18N[state.lang] && I18N[state.lang].calendarWeekdays) || I18N.zh.calendarWeekdays;
+      const nextMonth = new Date(monthStart);
+      nextMonth.setMonth(nextMonth.getMonth() + 1);
+      const nextDisabled = monthKey(nextMonth) > monthKey(new Date()) ? 'disabled' : '';
+
+      const days = [];
+      for (let index = 0; index < 42; index += 1) {
+        const date = new Date(firstGridDate);
+        date.setDate(firstGridDate.getDate() + index);
+        const key = dateKey(date);
+        const tokens = usageMap.get(key) || 0;
+        const classes = [
+          'calendar-day',
+          date.getMonth() === monthStart.getMonth() ? '' : 'outside',
+          inDraftRange(key) ? 'in-range' : '',
+          isDraftEdge(key) ? 'range-edge' : '',
+        ].filter(Boolean).join(' ');
+        const disabled = key > todayKey ? 'disabled' : '';
+        days.push(`
+          <button class="${classes}" type="button" data-calendar-date="${key}" ${disabled}>
+            <span>${date.getDate()}</span>
+            ${tokens ? `<span class="calendar-usage">${escapeHtml(fmtCompact(tokens))}</span>` : ''}
+          </button>
+        `);
+      }
+
+      popover.innerHTML = `
+        <div class="calendar-head">
+          <button type="button" title="${escapeHtml(t('calendarPrev'))}" data-calendar-prev>&lt;</button>
+          <div class="calendar-title">${escapeHtml(title)}</div>
+          <button type="button" title="${escapeHtml(t('calendarNext'))}" data-calendar-next ${nextDisabled}>&gt;</button>
+        </div>
+        <div class="calendar-grid">
+          ${weekdays.map(day => `<div class="calendar-weekday">${escapeHtml(day)}</div>`).join('')}
+          ${days.join('')}
+        </div>
+        <div class="calendar-actions">
+          <button type="button" data-calendar-cancel>${escapeHtml(t('calendarCancel'))}</button>
+          <button class="primary" type="button" data-calendar-apply ${state.calendarDraftStart ? '' : 'disabled'}>${escapeHtml(t('calendarApply'))}</button>
+        </div>
+      `;
+
+      popover.querySelector('[data-calendar-prev]').addEventListener('click', () => changeCalendarMonth(-1));
+      popover.querySelector('[data-calendar-next]').addEventListener('click', () => changeCalendarMonth(1));
+      popover.querySelector('[data-calendar-cancel]').addEventListener('click', closeCalendar);
+      popover.querySelector('[data-calendar-apply]').addEventListener('click', applyCalendarRange);
+      popover.querySelectorAll('[data-calendar-date]').forEach(button => {
+        button.addEventListener('click', () => selectCalendarDate(button.dataset.calendarDate));
       });
     }
 
@@ -1653,7 +2337,7 @@ HTML = r"""<!doctype html>
       const usage = state.summary && state.summary.usage ? state.summary.usage : {};
       const metrics = [
         [t('metricSessions'), fmt(state.summary?.session_count || 0), t('metricSessionsHint', { active: fmt(state.summary?.active_count || 0), archived: fmt(state.summary?.archived_count || 0) })],
-        [t('metricTotalTokens'), fmtCompact(usage.total_tokens), fmt(usage.total_tokens)],
+        [t('metricPeriodTotalTokens', { period: periodLabel() }), fmtCompact(usage.total_tokens), fmt(usage.total_tokens)],
         [t('metricCost'), fmtUsd(state.summary?.estimated_cost_usd), t('metricCostHint', { count: fmt(state.summary?.estimated_cost_known_count || 0) })],
         [t('metricInput'), fmtCompact(usage.input_tokens), fmt(usage.input_tokens)],
         [t('metricCached'), fmtCompact(usage.cached_input_tokens), fmt(usage.cached_input_tokens)],
@@ -1703,12 +2387,19 @@ HTML = r"""<!doctype html>
       });
     }
 
+    function clearDetails() {
+      document.getElementById('detailStatus').textContent = t('notSelected');
+      document.getElementById('detailsBody').innerHTML = `<div class="empty">${escapeHtml(t('selectRow'))}</div>`;
+    }
+
     async function showDetails(uid, renderRows = true) {
       state.selectedUid = uid;
       if (renderRows) renderTable();
       document.getElementById('detailStatus').textContent = t('detailsLoading');
       try {
-        const res = await fetch('/api/session?id=' + encodeURIComponent(uid), { cache: 'no-store' });
+        const params = periodParams();
+        params.set('id', uid);
+        const res = await fetch('/api/session?' + params.toString(), { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const detail = await res.json();
         renderDetails(detail);
@@ -1854,12 +2545,23 @@ HTML = r"""<!doctype html>
     }
 
     document.getElementById('refreshBtn').addEventListener('click', () => loadData(false));
-    document.getElementById('exportBtn').addEventListener('click', () => { window.location.href = '/api/export.csv'; });
+    document.getElementById('exportBtn').addEventListener('click', () => { window.location.href = '/api/export.csv?' + periodParams().toString(); });
     document.getElementById('searchInput').addEventListener('input', event => { state.search = event.target.value; renderAll(); });
     document.getElementById('sourceFilter').addEventListener('change', event => { state.source = event.target.value; renderAll(); });
     document.getElementById('modelFilter').addEventListener('change', event => { state.model = event.target.value; renderAll(); });
     document.querySelectorAll('[data-lang-button]').forEach(button => {
       button.addEventListener('click', () => setLanguage(button.dataset.langButton));
+    });
+    document.querySelectorAll('[data-period-button]').forEach(button => {
+      button.addEventListener('click', () => setPeriod(button.dataset.periodButton));
+    });
+    document.getElementById('periodWrap').addEventListener('click', event => {
+      event.stopPropagation();
+    });
+    document.getElementById('calendarBtn').addEventListener('click', event => {
+      event.stopPropagation();
+      if (state.calendarOpen) closeCalendar();
+      else openCalendar();
     });
     document.querySelectorAll('[data-sort-button]').forEach(button => {
       button.addEventListener('click', () => setPrimarySort(button.dataset.sortButton));
@@ -1876,11 +2578,18 @@ HTML = r"""<!doctype html>
     window.addEventListener('resize', () => {
       if (state.selectedUid) showDetails(state.selectedUid, false);
     });
+    document.addEventListener('click', event => {
+      if (state.calendarOpen && !event.target.closest('#periodWrap')) closeCalendar();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && state.calendarOpen) closeCalendar();
+    });
 
     applyStaticText();
     populateSourceFilter();
     populateLimitSelect();
     loadData(true);
+    setInterval(() => loadData(false), 60000);
   </script>
 </body>
 </html>
@@ -1901,24 +2610,43 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
+            query = parse_qs(parsed.query)
             if path == "/":
                 self.send_bytes(HTML.encode("utf-8"), "text/html; charset=utf-8")
                 return
 
+            if path == "/api/health":
+                self.send_json(
+                    {
+                        "ok": True,
+                        "app": "codex-usage-dashboard",
+                        "features": DASHBOARD_FEATURES,
+                    }
+                )
+                return
+
             if path == "/api/sessions":
-                snapshot = analyzer.scan()
+                period = query.get("period", ["today"])[0]
+                start_date = query.get("start", [""])[0] or None
+                end_date = query.get("end", [""])[0] or None
+                snapshot = analyzer.scan(period, start_date, end_date)
                 payload = {
                     "generated_at": snapshot["generated_at"],
                     "codex_home": snapshot["codex_home"],
+                    "period": snapshot["period"],
                     "summary": snapshot["summary"],
                     "sessions": snapshot["sessions"],
+                    "daily_usage": snapshot.get("daily_usage", []),
                 }
                 self.send_json(payload)
                 return
 
             if path == "/api/session":
-                uid = parse_qs(parsed.query).get("id", [""])[0]
-                detail = analyzer.get_detail(uid)
+                uid = query.get("id", [""])[0]
+                period = query.get("period", ["today"])[0]
+                start_date = query.get("start", [""])[0] or None
+                end_date = query.get("end", [""])[0] or None
+                detail = analyzer.get_detail(uid, period, start_date, end_date)
                 if detail is None:
                     self.send_json({"error": "session not found"}, status=404)
                     return
@@ -1926,11 +2654,18 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 return
 
             if path == "/api/export.csv":
-                body = analyzer.export_csv().encode("utf-8-sig")
+                period = query.get("period", ["today"])[0]
+                start_date = query.get("start", [""])[0] or None
+                end_date = query.get("end", [""])[0] or None
+                body = analyzer.export_csv(period, start_date, end_date).encode("utf-8-sig")
+                if period == "custom" and start_date:
+                    filename = f"codex-usage-{start_date}-{end_date or start_date}.csv"
+                else:
+                    filename = f"codex-usage-{period if period in PERIOD_KEYS else 'today'}.csv"
                 self.send_bytes(
                     body,
                     "text/csv; charset=utf-8",
-                    extra_headers={"Content-Disposition": 'attachment; filename="codex-usage.csv"'},
+                    extra_headers={"Content-Disposition": f'attachment; filename="{filename}"'},
                 )
                 return
 
@@ -1964,8 +2699,11 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
 def find_free_port(host: str, preferred: int) -> int:
     for port in range(preferred, preferred + 50):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.2)
-            if sock.connect_ex((host, port)) != 0:
+            try:
+                sock.bind((host, port))
+            except OSError:
+                continue
+            else:
                 return port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((host, 0))
@@ -1975,14 +2713,28 @@ def find_free_port(host: str, preferred: int) -> int:
 def existing_dashboard_url(host: str, port: int) -> str | None:
     url = f"http://{host}:{port}/"
     try:
-        with urlopen(url + "api/sessions", timeout=0.6) as response:
+        with urlopen(url + "api/health", timeout=0.4) as response:
             if response.status != 200:
                 return None
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read(256).decode("utf-8"))
     except Exception:
         return None
-    if isinstance(payload, dict) and isinstance(payload.get("summary"), dict):
+    features = payload.get("features") if isinstance(payload, dict) else None
+    if (
+        isinstance(payload, dict)
+        and payload.get("app") == "codex-usage-dashboard"
+        and isinstance(features, list)
+        and "calendar-range-v2" in features
+    ):
         return url
+    return None
+
+
+def find_existing_dashboard_url(host: str, preferred: int) -> str | None:
+    for port in range(preferred, preferred + 50):
+        existing = existing_dashboard_url(host, port)
+        if existing:
+            return existing
     return None
 
 
@@ -2021,12 +2773,11 @@ def main() -> int:
                 safe_print(f"Top session: {top.get('title', top.get('session_id'))} ({top['total_token_usage']['total_tokens']:,})")
         return 0
 
-    existing = existing_dashboard_url(args.host, args.port)
+    existing = find_existing_dashboard_url(args.host, args.port)
     if existing:
         if args.open:
             webbrowser.open(existing, new=2)
-        else:
-            safe_print(f"Codex Usage Dashboard already running: {existing}")
+        safe_print(f"Codex Usage Dashboard already running: {existing}")
         return 0
 
     port = find_free_port(args.host, args.port)
