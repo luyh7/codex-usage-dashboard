@@ -17,7 +17,6 @@ from urllib.request import urlopen
 
 HOST = "127.0.0.1"
 PORT = 8765
-PORT_SCAN_COUNT = 50
 
 
 def dashboard_url(port: int) -> str:
@@ -49,11 +48,7 @@ def health_dashboard_url(port: int) -> str | None:
 
 
 def dashboard_running_url() -> str | None:
-    for port in range(PORT, PORT + PORT_SCAN_COUNT):
-        health_url = health_dashboard_url(port)
-        if health_url:
-            return health_url
-    return None
+    return health_dashboard_url(PORT)
 
 
 def windows_pythonw() -> str:
@@ -140,12 +135,6 @@ def start_dashboard() -> str | None:
 
 
 def main() -> int:
-    running_url = dashboard_running_url()
-    if running_url:
-        webbrowser.open(running_url, new=2)
-        print(running_url)
-        return 0
-
     started_url = start_dashboard()
     if started_url:
         print(started_url)
@@ -158,7 +147,7 @@ def main() -> int:
             print(running_url)
             return 0
 
-    print(f"Dashboard starting. Try {dashboard_url(PORT)} or nearby ports.")
+    print(f"Dashboard starting. Try {dashboard_url(PORT)}.")
     return 0
 
 

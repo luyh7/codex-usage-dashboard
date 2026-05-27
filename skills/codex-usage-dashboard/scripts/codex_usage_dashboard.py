@@ -17,8 +17,12 @@ import hashlib
 import io
 import json
 import os
+import platform
 import re
 import socket
+import signal
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -26,7 +30,6 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.request import urlopen
 from urllib.parse import parse_qs, urlparse
 
 
@@ -2589,7 +2592,7 @@ HTML = r"""<!doctype html>
     populateSourceFilter();
     populateLimitSelect();
     loadData(true);
-    setInterval(() => loadData(false), 60000);
+    setInterval(() => loadData(false), 10000);
   </script>
 </body>
 </html>
@@ -2696,46 +2699,104 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def find_free_port(host: str, preferred: int) -> int:
-    for port in range(preferred, preferred + 50):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            try:
-                sock.bind((host, port))
-            except OSError:
-                continue
-            else:
-                return port
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((host, 0))
-        return int(sock.getsockname()[1])
+class FixedPortHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
 
 
-def existing_dashboard_url(host: str, port: int) -> str | None:
-    url = f"http://{host}:{port}/"
+DASHBOARD_PROCESS_MARKERS = ("codex_usage_dashboard.py", "codex-usage-dashboard")
+
+
+def is_dashboard_command(command: str) -> bool:
+    lowered = command.lower()
+    return any(marker in lowered for marker in DASHBOARD_PROCESS_MARKERS)
+
+
+def run_text(command: list[str]) -> str:
     try:
-        with urlopen(url + "api/health", timeout=0.4) as response:
-            if response.status != 200:
-                return None
-            payload = json.loads(response.read(256).decode("utf-8"))
-    except Exception:
-        return None
-    features = payload.get("features") if isinstance(payload, dict) else None
-    if (
-        isinstance(payload, dict)
-        and payload.get("app") == "codex-usage-dashboard"
-        and isinstance(features, list)
-        and "calendar-range-v2" in features
-    ):
-        return url
-    return None
+        result = subprocess.run(command, capture_output=True, text=True, timeout=1.5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
 
 
-def find_existing_dashboard_url(host: str, preferred: int) -> str | None:
-    for port in range(preferred, preferred + 50):
-        existing = existing_dashboard_url(host, port)
-        if existing:
-            return existing
-    return None
+def listening_pids_for_port(port: int) -> list[int]:
+    if platform.system() == "Windows":
+        output = run_text(["netstat", "-ano", "-p", "TCP"])
+        pids: set[int] = set()
+        suffix = f":{port}"
+        for line in output.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(suffix) and parts[3].upper() == "LISTENING":
+                try:
+                    pids.add(int(parts[4]))
+                except ValueError:
+                    pass
+        return sorted(pids)
+
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return []
+    output = run_text([lsof, "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"])
+    pids: list[int] = []
+    for line in output.splitlines():
+        try:
+            pid = int(line.strip())
+        except ValueError:
+            continue
+        if pid not in pids:
+            pids.append(pid)
+    return pids
+
+
+def command_for_pid(pid: int) -> str:
+    if pid == os.getpid():
+        return ""
+    if platform.system() == "Windows":
+        output = run_text(["wmic", "process", "where", f"processid={pid}", "get", "CommandLine", "/value"])
+        for line in output.splitlines():
+            if line.startswith("CommandLine="):
+                return line.removeprefix("CommandLine=").strip()
+        return ""
+    return run_text(["ps", "-p", str(pid), "-o", "command="])
+
+
+def terminate_process(pid: int) -> None:
+    if pid == os.getpid():
+        return
+    try:
+        if platform.system() == "Windows":
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=3, check=False)
+            return
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return
+            time.sleep(0.05)
+        os.kill(pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        return
+
+
+def release_dashboard_port(port: int) -> None:
+    pids = listening_pids_for_port(port)
+    if not pids:
+        return
+
+    blockers: list[str] = []
+    for pid in pids:
+        command = command_for_pid(pid)
+        if command and is_dashboard_command(command):
+            safe_print(f"Stopping existing Codex Usage Dashboard on port {port} (pid {pid}).")
+            terminate_process(pid)
+        else:
+            blockers.append(f"{pid}: {command or 'unknown process'}")
+
+    if blockers:
+        joined = "; ".join(blockers)
+        raise RuntimeError(f"Port {port} is already in use by a non-dashboard process: {joined}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -2743,7 +2804,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local read-only Codex usage dashboard.")
     parser.add_argument("--codex-home", type=Path, default=default_home, help="Path to the Codex home directory.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host. Defaults to 127.0.0.1.")
-    parser.add_argument("--port", type=int, default=8765, help="Preferred port. The app will try nearby ports if busy.")
+    parser.add_argument("--port", type=int, default=8765, help="Port to bind. Defaults to the fixed dashboard port 8765.")
     parser.add_argument("--open", action="store_true", help="Open the dashboard in the default browser.")
     parser.add_argument("--once", action="store_true", help="Scan once and print a short summary instead of serving the UI.")
     parser.add_argument("--json", action="store_true", help="With --once, print JSON.")
@@ -2773,15 +2834,12 @@ def main() -> int:
                 safe_print(f"Top session: {top.get('title', top.get('session_id'))} ({top['total_token_usage']['total_tokens']:,})")
         return 0
 
-    existing = find_existing_dashboard_url(args.host, args.port)
-    if existing:
-        if args.open:
-            webbrowser.open(existing, new=2)
-        safe_print(f"Codex Usage Dashboard already running: {existing}")
-        return 0
-
-    port = find_free_port(args.host, args.port)
-    server = ThreadingHTTPServer((args.host, port), make_handler(analyzer))
+    port = args.port
+    release_dashboard_port(port)
+    try:
+        server = FixedPortHTTPServer((args.host, port), make_handler(analyzer))
+    except OSError as exc:
+        raise RuntimeError(f"Port {port} is already in use and could not be released.") from exc
     url = f"http://{args.host}:{port}/"
     safe_print(f"Codex Usage Dashboard: {url}")
     safe_print(f"Codex home: {analyzer.codex_home}")
