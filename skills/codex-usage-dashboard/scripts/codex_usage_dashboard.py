@@ -292,6 +292,11 @@ def text_from_content(content: Any) -> str:
     return ""
 
 
+def is_synthetic_user_context(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("# AGENTS.md instructions for ") or stripped.startswith("<environment_context>")
+
+
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8-sig", errors="replace") as handle:
@@ -617,7 +622,7 @@ class CodexUsageAnalyzer:
                     text = clean_text(text_from_content(payload.get("content")), 260)
                     if role == "user":
                         user_message_count += 1
-                        if text and not first_user_prompt:
+                        if text and not first_user_prompt and not is_synthetic_user_context(text):
                             first_user_prompt = text
                     elif role == "assistant":
                         assistant_message_count += 1
@@ -684,7 +689,7 @@ class CodexUsageAnalyzer:
                 elif event_type in {"user_message", "user_input", "human_message"}:
                     user_message_count += 1
                     message = payload.get("message") or payload.get("text") or payload.get("content")
-                    if isinstance(message, str) and not first_user_prompt:
+                    if isinstance(message, str) and not first_user_prompt and not is_synthetic_user_context(message):
                         first_user_prompt = clean_text(message, 260)
 
         if not session_id:
