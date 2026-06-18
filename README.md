@@ -5,7 +5,7 @@ Codex-only skill for a local OpenAI Codex usage dashboard.
 It reads your local Codex session logs and opens a browser dashboard for per-conversation usage: total tokens, output tokens, estimated dollar cost, cache hit rate, turns, model, reasoning effort, tool calls, and token-count timeline. When launched from WSL, it can also read the mounted Windows Codex log directory and merge both environments into one dashboard.
 
 > Currently only supports OpenAI Codex. It is not a Claude Code, Cursor, Continue, or generic OpenAI API dashboard.
-<img width="2594" height="1292" alt="image" src="https://github.com/user-attachments/assets/2b6de5bd-9e81-495d-aa82-4634cf0e86a9" />
+<img width="1830" height="1041" alt="Codex Usage Dashboard project view" src="assets/codex-usage-dashboard.png" />
 
 ## Why This Exists
 
@@ -50,7 +50,7 @@ npx github:luyh7/codex-usage-dashboard -- --open
 ## Features
 
 - Per-conversation Codex usage from local session logs.
-- Default recent sorting, with a prominent switch to sort by total tokens.
+- Default project view, grouped by environment and workspace, with switches for recent and total-token list views.
 - Compact list columns for total tokens, output tokens, cost, cache hit rate, turns, model, and reasoning effort.
 - Detail view with token breakdown and estimated dollar cost for input, cached input, output, and reasoning.
 - Token-count timeline with latest entries shown first.

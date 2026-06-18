@@ -67,6 +67,9 @@ DASHBOARD_FEATURES = [
     "multi-codex-home",
     "wsl-windows-autodiscovery",
     "windows-cwd-folder-name",
+    "project-grouped-default-view",
+    "project-compact-layout-v2",
+    "project-env-tag-in-conversation-column",
 ]
 
 SUMMARY_KEYS = (
@@ -1362,7 +1365,7 @@ HTML = r"""<!doctype html>
     }
     .sort-toggle {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 4px;
       min-height: 36px;
       padding: 3px;
@@ -1499,6 +1502,90 @@ HTML = r"""<!doctype html>
     }
     tr:hover td { background: #f7faf9; }
     tr.selected td { background: var(--soft); }
+    tr.project-group-row td {
+      background: #fbfcfc;
+      padding: 10px 12px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    tr.project-group-row:hover td {
+      background: #f4f8f6;
+    }
+    .project-title-cell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      min-width: 0;
+    }
+    .project-toggle {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      width: 100%;
+      min-height: 30px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+    }
+    .project-folder-icon {
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      color: var(--accent);
+    }
+    .project-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 750;
+    }
+    .project-meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .project-summary-cell {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .project-session-row .title-cell {
+      padding-left: 42px;
+    }
+    .project-session-row .title-line {
+      gap: 8px;
+      margin-bottom: 0;
+    }
+    .project-session-row .title-main {
+      margin-bottom: 0;
+    }
+    .project-session-row .title-sub {
+      display: none;
+    }
+    .project-more-row td {
+      background: #fff;
+      padding: 8px 8px 10px 42px;
+    }
+    .project-more-row:hover td {
+      background: #fff;
+    }
+    .project-more-btn {
+      min-height: 30px;
+      padding: 0 10px;
+      color: var(--accent);
+      border-color: #99c9bb;
+      background: #eef8f4;
+      font-weight: 700;
+    }
     .rank {
       color: var(--muted);
       white-space: nowrap;
@@ -1704,6 +1791,9 @@ HTML = r"""<!doctype html>
       .calendar-popover { left: 0; transform: none; width: min(358px, calc(100vw - 32px)); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .controls { grid-template-columns: 1fr; }
+      .project-title-cell { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+      .project-meta { justify-content: flex-start; flex-wrap: wrap; }
+      .project-session-row .title-cell { padding-left: 42px; }
       .bar-row { grid-template-columns: 1fr; gap: 4px; }
       .kv { grid-template-columns: 1fr; gap: 2px; }
     }
@@ -1755,9 +1845,10 @@ HTML = r"""<!doctype html>
       <select id="modelFilter" title="模型" data-i18n-title="model">
         <option value="all">全部模型</option>
       </select>
-      <div class="sort-toggle" aria-label="排序" data-i18n-aria="sort">
-        <button class="sort-option active" data-sort-button="end_at" data-i18n="recent" type="button">最近</button>
-        <button class="sort-option" data-sort-button="total_tokens" data-i18n="total" type="button">总量</button>
+      <div class="sort-toggle" aria-label="视图" data-i18n-aria="view">
+        <button class="sort-option active" data-view-button="project" data-i18n="projectTab" type="button">项目</button>
+        <button class="sort-option" data-view-button="recent" data-i18n="recent" type="button">最近</button>
+        <button class="sort-option" data-view-button="total" data-i18n="total" type="button">总量</button>
       </div>
       <select id="limitSelect" title="显示数量" data-i18n-title="limitTitle">
         <option value="50">前 50</option>
@@ -1823,8 +1914,11 @@ HTML = r"""<!doctype html>
       codexSources: [],
       generatedAt: '',
       selectedUid: null,
+      viewMode: 'project',
       sortKey: 'end_at',
       sortDir: 'desc',
+      projectExpanded: {},
+      projectShowAll: {},
       search: '',
       environment: 'all',
       source: 'all',
@@ -1844,6 +1938,7 @@ HTML = r"""<!doctype html>
     };
 
     const tokenKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
+    const projectPreviewLimit = 5;
 
     const I18N = {
       zh: {
@@ -1878,6 +1973,8 @@ HTML = r"""<!doctype html>
         model: '模型',
         allModels: '全部模型',
         sort: '排序',
+        view: '视图',
+        projectTab: '项目',
         recent: '最近',
         total: '总量',
         limitTitle: '显示数量',
@@ -1899,6 +1996,13 @@ HTML = r"""<!doctype html>
         scanned: '扫描',
         loadFailed: '加载失败：{message}',
         noMatches: '没有匹配的会话',
+        projectRowCount: '{projects} 个工作区 · {sessions} 条对话',
+        projectConversationCount: '{count} 条对话',
+        projectLatest: '最近 {time}',
+        showMoreConversations: '展开剩余 {count} 条',
+        showFewerConversations: '收起到 5 条',
+        collapseProject: '收起工作区',
+        expandProject: '展开工作区',
         priceKnown: '按公开 API 标准价格估算花费',
         priceUnknown: '没有匹配到公开模型价格',
         archived: '归档',
@@ -1987,6 +2091,8 @@ HTML = r"""<!doctype html>
         model: 'Model',
         allModels: 'All models',
         sort: 'Sort',
+        view: 'View',
+        projectTab: 'Project',
         recent: 'Recent',
         total: 'Total',
         limitTitle: 'Rows',
@@ -2008,6 +2114,13 @@ HTML = r"""<!doctype html>
         scanned: 'scanned',
         loadFailed: 'Load failed: {message}',
         noMatches: 'No matching conversations',
+        projectRowCount: '{projects} workspaces · {sessions} conversations',
+        projectConversationCount: '{count} conversations',
+        projectLatest: 'Latest {time}',
+        showMoreConversations: 'Show {count} more',
+        showFewerConversations: 'Show first 5',
+        collapseProject: 'Collapse workspace',
+        expandProject: 'Expand workspace',
         priceKnown: 'Estimated from public API prices',
         priceUnknown: 'No matching public model price',
         archived: 'Archived',
@@ -2162,6 +2275,18 @@ HTML = r"""<!doctype html>
       return Number(usageOf(row)[key] || 0);
     }
 
+    function zeroClientUsage() {
+      return Object.fromEntries(tokenKeys.map(key => [key, 0]));
+    }
+
+    function addClientUsage(left, right) {
+      const usage = {};
+      tokenKeys.forEach(key => {
+        usage[key] = Number(left?.[key] || 0) + Number(right?.[key] || 0);
+      });
+      return usage;
+    }
+
     function fmtPercent(value) {
       if (value === null || value === undefined || value === '') return 'N/A';
       const number = Number(value);
@@ -2239,6 +2364,25 @@ HTML = r"""<!doctype html>
       return parts.slice(-3).join(' / ');
     }
 
+    function rowTime(row) {
+      const date = new Date(row.end_at || row.updated_at || row.start_at || 0);
+      const value = date.getTime();
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    function projectName(row) {
+      return row.project || shortPath(row.cwd) || row.session_id || t('projectTab');
+    }
+
+    function workspaceKey(row) {
+      return row.cwd || row.project || row.path || row.session_id || 'unknown';
+    }
+
+    function projectKey(row) {
+      const environment = row.environment_id || row.environment || 'local';
+      return `${encodeURIComponent(environment)}::${encodeURIComponent(workspaceKey(row))}`;
+    }
+
     function badgeClass(value) {
       return String(value || 'local').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
     }
@@ -2247,6 +2391,14 @@ HTML = r"""<!doctype html>
       const label = row.environment || '';
       if (!label) return '';
       return `<span class="badge env ${escapeHtml(badgeClass(row.environment_id || label))}">${escapeHtml(label)}</span>`;
+    }
+
+    function folderIcon() {
+      return `
+        <svg class="project-folder-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.2a2 2 0 0 1-1.6-.8l-.4-.6A2 2 0 0 0 9.2 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"></path>
+        </svg>
+      `;
     }
 
     function sourceBadge(source) {
@@ -2307,7 +2459,7 @@ HTML = r"""<!doctype html>
           state.selectedUid = null;
         }
         renderAll();
-        const visibleRows = filteredSessions();
+        const visibleRows = currentSelectableRows();
         if ((selectTop || !state.selectedUid) && visibleRows.length) {
           const first = visibleRows[0];
           if (first) await showDetails(first.uid);
@@ -2338,9 +2490,9 @@ HTML = r"""<!doctype html>
       state.model = select.value;
     }
 
-    function filteredSessions() {
+    function baseFilteredSessions() {
       const needle = state.search.trim().toLowerCase();
-      let rows = state.sessions.filter(row => {
+      return state.sessions.filter(row => {
         if (state.environment !== 'all' && (row.environment_id || row.environment || 'local') !== state.environment) return false;
         if (state.source !== 'all' && row.source !== state.source) return false;
         if (state.model !== 'all' && (row.model || 'unknown') !== state.model) return false;
@@ -2350,7 +2502,9 @@ HTML = r"""<!doctype html>
         ].join(' ').toLowerCase();
         return haystack.includes(needle);
       });
+    }
 
+    function sortSessions(rows) {
       rows.sort((a, b) => {
         let av;
         let bv;
@@ -2377,15 +2531,76 @@ HTML = r"""<!doctype html>
         const result = String(av).localeCompare(String(bv), locale());
         return state.sortDir === 'asc' ? result : -result;
       });
+      return rows;
+    }
+
+    function filteredSessions() {
+      let rows = sortSessions([...baseFilteredSessions()]);
 
       if (state.limit !== 'all') rows = rows.slice(0, Number(state.limit));
       return rows;
     }
 
+    function projectGroups() {
+      const groups = new Map();
+      baseFilteredSessions().forEach(row => {
+        const key = projectKey(row);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            label: projectName(row),
+            workspace: workspaceKey(row),
+            environment: row.environment || '',
+            environment_id: row.environment_id || '',
+            rows: [],
+            usage: zeroClientUsage(),
+            latestTime: 0,
+          });
+        }
+        const group = groups.get(key);
+        group.rows.push(row);
+        group.usage = addClientUsage(group.usage, usageOf(row));
+        group.latestTime = Math.max(group.latestTime, rowTime(row));
+        if (!group.environment && row.environment) group.environment = row.environment;
+        if (!group.environment_id && row.environment_id) group.environment_id = row.environment_id;
+      });
+
+      return Array.from(groups.values())
+        .map(group => {
+          group.rows.sort((a, b) => {
+            const archivedDelta = (a.source === 'archived' ? 1 : 0) - (b.source === 'archived' ? 1 : 0);
+            if (archivedDelta) return archivedDelta;
+            return rowTime(b) - rowTime(a) || String(a.title || '').localeCompare(String(b.title || ''), locale());
+          });
+          return group;
+        })
+        .sort((a, b) => b.latestTime - a.latestTime || a.label.localeCompare(b.label, locale()));
+    }
+
+    function isProjectExpanded(group) {
+      return state.projectExpanded[group.key] !== false;
+    }
+
+    function isProjectShowingAll(group) {
+      return state.projectShowAll[group.key] === true;
+    }
+
+    function visibleProjectRows() {
+      return projectGroups().flatMap(group => {
+        if (!isProjectExpanded(group)) return [];
+        return isProjectShowingAll(group) ? group.rows : group.rows.slice(0, projectPreviewLimit);
+      });
+    }
+
+    function currentSelectableRows() {
+      return state.viewMode === 'project' ? visibleProjectRows() : filteredSessions();
+    }
+
     function renderAll() {
       renderMetrics();
       updatePeriodButtons();
-      updateSortButtons();
+      updateViewButtons();
+      document.getElementById('limitSelect').disabled = state.viewMode === 'project';
       renderTable();
       if (state.calendarOpen) renderCalendar();
     }
@@ -2394,6 +2609,8 @@ HTML = r"""<!doctype html>
       if (state.period === period) return;
       state.period = period;
       state.selectedUid = null;
+      state.projectExpanded = {};
+      state.projectShowAll = {};
       updatePeriodButtons();
       clearDetails();
       loadData(true);
@@ -2404,6 +2621,8 @@ HTML = r"""<!doctype html>
       state.customStartDate = startDate;
       state.customEndDate = endDate || startDate;
       state.selectedUid = null;
+      state.projectExpanded = {};
+      state.projectShowAll = {};
       state.calendarOpen = false;
       updateCalendarVisibility();
       updatePeriodButtons();
@@ -2411,8 +2630,10 @@ HTML = r"""<!doctype html>
       loadData(true);
     }
 
-    function setPrimarySort(key) {
-      state.sortKey = key;
+    function setPrimaryView(mode) {
+      state.viewMode = mode === 'recent' || mode === 'total' ? mode : 'project';
+      if (state.viewMode === 'recent') state.sortKey = 'end_at';
+      if (state.viewMode === 'total') state.sortKey = 'total_tokens';
       state.sortDir = 'desc';
       renderAll();
     }
@@ -2424,9 +2645,9 @@ HTML = r"""<!doctype html>
       document.getElementById('calendarBtn').classList.toggle('active', state.period === 'custom');
     }
 
-    function updateSortButtons() {
-      document.querySelectorAll('[data-sort-button]').forEach(button => {
-        button.classList.toggle('active', button.dataset.sortButton === state.sortKey);
+    function updateViewButtons() {
+      document.querySelectorAll('[data-view-button]').forEach(button => {
+        button.classList.toggle('active', button.dataset.viewButton === state.viewMode);
       });
     }
 
@@ -2628,37 +2849,129 @@ HTML = r"""<!doctype html>
     }
 
     function renderTable() {
+      if (state.viewMode === 'project') {
+        renderProjectTable();
+        return;
+      }
+
       const rows = filteredSessions();
       document.getElementById('resultCount').textContent = t('rowCount', { count: fmt(rows.length) });
       if (!rows.length) {
         document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(t('noMatches'))}</td></tr>`;
         return;
       }
-      document.getElementById('sessionRows').innerHTML = rows.map((row, idx) => {
-        const usage = usageOf(row);
-        const selected = row.uid === state.selectedUid ? 'selected' : '';
-        const timeValue = row.end_at || row.updated_at || row.start_at;
-        return `
-          <tr class="${selected}" data-uid="${escapeHtml(row.uid)}">
-            <td class="title-cell" title="${escapeHtml((row.title || row.session_id) + (timeValue ? ' · ' + fmtDate(timeValue) : ''))}">
-              <div class="title-line">
-                <div class="title-main">${escapeHtml(row.title || row.session_id)}</div>
-                <div class="title-time">${escapeHtml(fmtRelativeTime(timeValue))}</div>
-              </div>
-              <div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>
-            </td>
-            <td class="number" title="${fmt(usage.total_tokens)} tokens"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
-            <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
-            <td class="number" title="${escapeHtml(row.price_model_known ? t('priceKnown') : t('priceUnknown'))}">${fmtUsd(row.estimated_cost_usd)}</td>
-            <td class="number">${fmtPercent(row.cached_input_percent)}</td>
-            <td class="number">${fmt(row.turn_count)}</td>
-            <td class="model-cell" title="${escapeHtml(row.model || 'unknown')}">${escapeHtml(row.model || 'unknown')}</td>
-            <td class="effort-cell" title="${escapeHtml(row.effort || 'N/A')}">${escapeHtml(row.effort || 'N/A')}</td>
-          </tr>
-        `;
+      document.getElementById('sessionRows').innerHTML = rows.map(row => sessionRowHtml(row)).join('');
+      bindTableInteractions();
+    }
+
+    function sessionRowHtml(row, extraClass = '', options = {}) {
+      const usage = usageOf(row);
+      const selected = row.uid === state.selectedUid ? 'selected' : '';
+      const classes = [selected, extraClass].filter(Boolean).join(' ');
+      const timeValue = row.end_at || row.updated_at || row.start_at;
+      const compactProject = options.compactProject === true;
+      return `
+        <tr class="${escapeHtml(classes)}" data-uid="${escapeHtml(row.uid)}">
+          <td class="title-cell" title="${escapeHtml((row.title || row.session_id) + (timeValue ? ' · ' + fmtDate(timeValue) : ''))}">
+            <div class="title-line">
+              ${compactProject ? sourceBadge(row.source) : ''}
+              <div class="title-main">${escapeHtml(row.title || row.session_id)}</div>
+              <div class="title-time">${escapeHtml(fmtRelativeTime(timeValue))}</div>
+            </div>
+            ${compactProject ? '' : `<div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>`}
+          </td>
+          <td class="number" title="${fmt(usage.total_tokens)} tokens"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
+          <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
+          <td class="number" title="${escapeHtml(row.price_model_known ? t('priceKnown') : t('priceUnknown'))}">${fmtUsd(row.estimated_cost_usd)}</td>
+          <td class="number">${fmtPercent(row.cached_input_percent)}</td>
+          <td class="number">${fmt(row.turn_count)}</td>
+          <td class="model-cell" title="${escapeHtml(row.model || 'unknown')}">${escapeHtml(row.model || 'unknown')}</td>
+          <td class="effort-cell" title="${escapeHtml(row.effort || 'N/A')}">${escapeHtml(row.effort || 'N/A')}</td>
+        </tr>
+      `;
+    }
+
+    function projectHeaderHtml(group) {
+      const expanded = isProjectExpanded(group);
+      const latest = group.rows[0]?.end_at || group.rows[0]?.updated_at || group.rows[0]?.start_at || '';
+      return `
+        <tr class="project-group-row">
+          <td class="title-cell">
+            <div class="project-title-cell">
+              <button class="project-toggle" type="button" data-project-toggle="${escapeHtml(group.key)}" title="${escapeHtml(t(expanded ? 'collapseProject' : 'expandProject'))}">
+                ${folderIcon()}
+                <span class="project-name" title="${escapeHtml(group.label)}">${escapeHtml(group.label)}</span>
+              </button>
+              ${environmentBadge(group)}
+            </div>
+          </td>
+          <td class="number" title="${fmt(group.usage.total_tokens)} tokens"><strong>${escapeHtml(fmtCompact(group.usage.total_tokens))}</strong></td>
+          <td class="project-summary-cell" colspan="6">
+            <div class="project-meta">
+              <span>${escapeHtml(t('projectConversationCount', { count: fmt(group.rows.length) }))}</span>
+              <span>${escapeHtml(t('projectLatest', { time: fmtRelativeTime(latest) }))}</span>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    function projectMoreRowHtml(group, hiddenCount) {
+      const showingAll = isProjectShowingAll(group);
+      const label = showingAll ? t('showFewerConversations') : t('showMoreConversations', { count: fmt(hiddenCount) });
+      return `
+        <tr class="project-more-row">
+          <td colspan="8">
+            <button class="project-more-btn" type="button" data-project-more="${escapeHtml(group.key)}" data-project-more-state="${showingAll ? 'less' : 'more'}">${escapeHtml(label)}</button>
+          </td>
+        </tr>
+      `;
+    }
+
+    function renderProjectTable() {
+      const groups = projectGroups();
+      const sessionCount = groups.reduce((sum, group) => sum + group.rows.length, 0);
+      document.getElementById('resultCount').textContent = t('projectRowCount', { projects: fmt(groups.length), sessions: fmt(sessionCount) });
+      if (!groups.length) {
+        document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(t('noMatches'))}</td></tr>`;
+        return;
+      }
+
+      document.getElementById('sessionRows').innerHTML = groups.map(group => {
+        const expanded = isProjectExpanded(group);
+        const showingAll = isProjectShowingAll(group);
+        const visibleRows = expanded
+          ? (showingAll ? group.rows : group.rows.slice(0, projectPreviewLimit))
+          : [];
+        const hiddenCount = Math.max(0, group.rows.length - projectPreviewLimit);
+        return [
+          projectHeaderHtml(group),
+          ...visibleRows.map(row => sessionRowHtml(row, 'project-session-row', { compactProject: true })),
+          expanded && hiddenCount > 0 ? projectMoreRowHtml(group, hiddenCount) : '',
+        ].join('');
       }).join('');
+      bindTableInteractions();
+    }
+
+    function bindTableInteractions() {
       document.querySelectorAll('#sessionRows tr[data-uid]').forEach(row => {
         row.addEventListener('click', () => showDetails(row.dataset.uid));
+      });
+      document.querySelectorAll('[data-project-toggle]').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          const key = button.dataset.projectToggle;
+          state.projectExpanded[key] = state.projectExpanded[key] === false;
+          renderAll();
+        });
+      });
+      document.querySelectorAll('[data-project-more]').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          const key = button.dataset.projectMore;
+          state.projectShowAll[key] = button.dataset.projectMoreState === 'more';
+          renderAll();
+        });
       });
     }
 
@@ -2841,13 +3154,14 @@ HTML = r"""<!doctype html>
       if (state.calendarOpen) closeCalendar();
       else openCalendar();
     });
-    document.querySelectorAll('[data-sort-button]').forEach(button => {
-      button.addEventListener('click', () => setPrimarySort(button.dataset.sortButton));
+    document.querySelectorAll('[data-view-button]').forEach(button => {
+      button.addEventListener('click', () => setPrimaryView(button.dataset.viewButton));
     });
     document.getElementById('limitSelect').addEventListener('change', event => { state.limit = event.target.value; renderAll(); });
     document.querySelectorAll('th[data-sort]').forEach(th => {
       th.addEventListener('click', () => {
         const key = th.dataset.sort;
+        state.viewMode = key === 'total_tokens' ? 'total' : 'recent';
         if (state.sortKey === key) state.sortDir = state.sortDir === 'desc' ? 'asc' : 'desc';
         else { state.sortKey = key; state.sortDir = 'desc'; }
         renderAll();

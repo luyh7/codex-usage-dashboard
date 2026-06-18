@@ -44,6 +44,9 @@ def health_dashboard_url(port: int) -> str | None:
         and "calendar-range-v2" in features
         and "multi-codex-home" in features
         and "windows-cwd-folder-name" in features
+        and "project-grouped-default-view" in features
+        and "project-compact-layout-v2" in features
+        and "project-env-tag-in-conversation-column" in features
     ):
         return url
     return None

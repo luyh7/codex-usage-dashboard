@@ -169,6 +169,25 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(session["project"], "codex-usage-dashboard")
         self.assertEqual(session["title"], "codex-usage-dashboard")
 
+    def test_html_defaults_to_project_grouped_view(self) -> None:
+        html = dashboard.HTML
+        project_index = html.index('data-view-button="project"')
+        recent_index = html.index('data-view-button="recent"')
+        total_index = html.index('data-view-button="total"')
+
+        self.assertLess(project_index, recent_index)
+        self.assertLess(recent_index, total_index)
+        self.assertIn("viewMode: 'project'", html)
+        self.assertIn("const projectPreviewLimit = 5", html)
+        self.assertIn("function renderProjectTable()", html)
+        self.assertIn("function projectGroups()", html)
+        self.assertIn("function folderIcon()", html)
+        self.assertIn("compactProject", html)
+        self.assertIn("archivedDelta", html)
+        self.assertLess(html.index("${folderIcon()}"), html.index('<span class="project-name"'))
+        self.assertLess(html.index('<div class="project-title-cell">'), html.index("${environmentBadge(group)}"))
+        self.assertLess(html.index("${environmentBadge(group)}"), html.index('<div class="project-meta">'))
+
 
 if __name__ == "__main__":
     unittest.main()
