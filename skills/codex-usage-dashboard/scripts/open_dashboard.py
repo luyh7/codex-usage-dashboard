@@ -42,6 +42,8 @@ def health_dashboard_url(port: int) -> str | None:
         and payload.get("app") == "codex-usage-dashboard"
         and isinstance(features, list)
         and "calendar-range-v2" in features
+        and "multi-codex-home" in features
+        and "windows-cwd-folder-name" in features
     ):
         return url
     return None

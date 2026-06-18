@@ -4,6 +4,7 @@
 The server reads Codex JSONL logs from:
   - ~/.codex/sessions
   - ~/.codex/archived_sessions
+  - Windows ~/.codex when running under WSL and the directory is mounted
 
 It does not modify Codex files. Bind address defaults to 127.0.0.1.
 """
@@ -29,7 +30,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import parse_qs, urlparse
 
 
@@ -57,13 +58,25 @@ MODEL_PRICES_USD_PER_M_TOKENS = {
 }
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
-DASHBOARD_FEATURES = ["periods", "period-deltas", "period-token-label", "all-period", "calendar-range-v2"]
+DASHBOARD_FEATURES = [
+    "periods",
+    "period-deltas",
+    "period-token-label",
+    "all-period",
+    "calendar-range-v2",
+    "multi-codex-home",
+    "wsl-windows-autodiscovery",
+    "windows-cwd-folder-name",
+]
 
 SUMMARY_KEYS = (
     "uid",
     "session_id",
     "title",
     "source",
+    "environment",
+    "environment_id",
+    "codex_home",
     "path",
     "file_size",
     "parse_errors",
@@ -261,6 +274,14 @@ def clean_text(value: str, limit: int = 260) -> str:
     return text
 
 
+def folder_name_from_path(value: str) -> str:
+    text = str(value or "").strip().strip('"').rstrip("\\/")
+    if not text:
+        return ""
+    parts = [part for part in re.split(r"[\\/]+", text) if part]
+    return parts[-1] if parts else text
+
+
 def safe_print(*values: Any) -> None:
     try:
         if sys.stdout is not None and not sys.stdout.closed:
@@ -314,14 +335,165 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+class CodexLogSource(NamedTuple):
+    id: str
+    label: str
+    codex_home: Path
+
+
+def slugify_source_id(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "codex"
+
+
+def path_has_codex_logs(path: Path) -> bool:
+    home = path.expanduser()
+    return (
+        (home / "sessions").exists()
+        or (home / "archived_sessions").exists()
+        or (home / "session_index.jsonl").exists()
+    )
+
+
+def running_in_wsl() -> bool:
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    try:
+        release = Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        release = platform.uname().release.lower()
+    return "microsoft" in release or "wsl" in release
+
+
+def windows_path_to_wsl_path(value: str) -> Path | None:
+    text = value.strip().strip('"').replace("\r", "")
+    match = re.match(r"^([A-Za-z]):[\\/](.*)$", text)
+    if not match:
+        return None
+    drive = match.group(1).lower()
+    rest = match.group(2).replace("\\", "/").strip("/")
+    return Path("/mnt") / drive / rest
+
+
+def windows_codex_home_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    userprofile = run_text(["cmd.exe", "/c", "echo", "%USERPROFILE%"])
+    if userprofile:
+        profile = windows_path_to_wsl_path(userprofile.splitlines()[-1])
+        if profile is not None:
+            candidates.append(profile / ".codex")
+
+    for username in (os.environ.get("USER"), os.environ.get("USERNAME")):
+        if username:
+            candidates.append(Path("/mnt/c/Users") / username / ".codex")
+
+    if not any(path_has_codex_logs(path) for path in candidates):
+        users_dir = Path("/mnt/c/Users")
+        try:
+            matches = [path for path in users_dir.glob("*/.codex") if path_has_codex_logs(path)]
+        except OSError:
+            matches = []
+        if len(matches) == 1:
+            candidates.extend(matches)
+
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+    return deduped
+
+
+def label_for_codex_home(path: Path) -> str:
+    text = str(path)
+    if running_in_wsl():
+        if text.startswith("/mnt/c/Users/"):
+            return "Windows"
+        return "WSL"
+    system = platform.system()
+    if system == "Darwin":
+        return "macOS"
+    if system:
+        return system
+    return "Local"
+
+
+def make_log_source(path: Path, label: str | None = None, source_id: str | None = None) -> CodexLogSource:
+    resolved = path.expanduser().resolve()
+    source_label = label or label_for_codex_home(resolved)
+    return CodexLogSource(source_id or slugify_source_id(source_label), source_label, resolved)
+
+
+def dedupe_codex_sources(sources: list[CodexLogSource]) -> list[CodexLogSource]:
+    seen_paths: set[str] = set()
+    seen_ids: set[str] = set()
+    deduped: list[CodexLogSource] = []
+    for source in sources:
+        path_key = str(source.codex_home)
+        if path_key in seen_paths:
+            continue
+        seen_paths.add(path_key)
+
+        source_id = source.id
+        if source_id in seen_ids:
+            suffix = 2
+            while f"{source_id}-{suffix}" in seen_ids:
+                suffix += 1
+            source_id = f"{source_id}-{suffix}"
+        seen_ids.add(source_id)
+        deduped.append(CodexLogSource(source_id, source.label, source.codex_home))
+    return deduped
+
+
+def codex_sources_from_homes(homes: list[Path]) -> list[CodexLogSource]:
+    return dedupe_codex_sources([make_log_source(path) for path in homes])
+
+
+def default_codex_sources(include_windows: bool = True) -> list[CodexLogSource]:
+    local_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    sources = [make_log_source(local_home)]
+    if include_windows and running_in_wsl():
+        for path in windows_codex_home_candidates():
+            if path_has_codex_logs(path):
+                sources.append(make_log_source(path, "Windows", "windows"))
+    return dedupe_codex_sources(sources)
+
+
+def codex_source_payloads(sources: list[CodexLogSource]) -> list[dict[str, str]]:
+    return [
+        {"id": source.id, "label": source.label, "codex_home": str(source.codex_home)}
+        for source in sources
+    ]
+
+
+def codex_home_display(sources: list[CodexLogSource]) -> str:
+    if len(sources) == 1:
+        return str(sources[0].codex_home)
+    return " · ".join(f"{source.label}: {source.codex_home}" for source in sources)
+
+
 class CodexUsageAnalyzer:
-    def __init__(self, codex_home: Path):
-        self.codex_home = codex_home.expanduser().resolve()
+    def __init__(self, codex_home: Path | list[Path] | list[CodexLogSource]):
+        if isinstance(codex_home, list):
+            if codex_home and isinstance(codex_home[0], CodexLogSource):
+                sources = dedupe_codex_sources(codex_home)
+            else:
+                sources = codex_sources_from_homes([Path(item) for item in codex_home])
+        else:
+            sources = codex_sources_from_homes([codex_home])
+        if not sources:
+            sources = codex_sources_from_homes([Path.home() / ".codex"])
+        self.codex_sources = sources
+        self.codex_home = sources[0].codex_home
+        self.codex_home_display = codex_home_display(sources)
         self._cache: dict[str, tuple[int, int, dict[str, Any], dict[str, Any]]] = {}
 
-    def load_session_titles(self) -> dict[str, str]:
+    def load_session_titles(self, codex_home: Path | None = None) -> dict[str, str]:
         titles: dict[str, str] = {}
-        index_path = self.codex_home / "session_index.jsonl"
+        index_path = (codex_home or self.codex_home) / "session_index.jsonl"
         if not index_path.exists():
             return titles
 
@@ -335,19 +507,20 @@ class CodexUsageAnalyzer:
             return titles
         return titles
 
-    def iter_session_files(self) -> list[tuple[Path, str]]:
-        files: list[tuple[Path, str]] = []
-        sessions_dir = self.codex_home / "sessions"
-        archived_dir = self.codex_home / "archived_sessions"
+    def iter_session_files(self) -> list[tuple[CodexLogSource, Path, str]]:
+        files: list[tuple[CodexLogSource, Path, str]] = []
+        for log_source in self.codex_sources:
+            sessions_dir = log_source.codex_home / "sessions"
+            archived_dir = log_source.codex_home / "archived_sessions"
 
-        if sessions_dir.exists():
-            for path in sessions_dir.rglob("*.jsonl"):
-                files.append((path, "active"))
-        if archived_dir.exists():
-            for path in archived_dir.glob("*.jsonl"):
-                files.append((path, "archived"))
+            if sessions_dir.exists():
+                for path in sessions_dir.rglob("*.jsonl"):
+                    files.append((log_source, path, "active"))
+            if archived_dir.exists():
+                for path in archived_dir.glob("*.jsonl"):
+                    files.append((log_source, path, "archived"))
 
-        files.sort(key=lambda item: item[0].stat().st_mtime if item[0].exists() else 0, reverse=True)
+        files.sort(key=lambda item: item[1].stat().st_mtime if item[1].exists() else 0, reverse=True)
         return files
 
     def scan(
@@ -356,17 +529,21 @@ class CodexUsageAnalyzer:
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> dict[str, Any]:
-        titles = self.load_session_titles()
+        titles_by_source = {
+            log_source.id: self.load_session_titles(log_source.codex_home)
+            for log_source in self.codex_sources
+        }
         sessions: list[dict[str, Any]] = []
         details_by_uid: dict[str, dict[str, Any]] = {}
 
-        for path, source in self.iter_session_files():
+        for log_source, path, source in self.iter_session_files():
             try:
-                summary, detail = self.parse_file_cached(path, source)
+                summary, detail = self.parse_file_cached(path, source, log_source)
             except OSError:
                 continue
 
             session_id = summary.get("session_id")
+            titles = titles_by_source.get(log_source.id, {})
             if isinstance(session_id, str) and session_id in titles:
                 summary["title"] = titles[session_id]
                 detail["title"] = titles[session_id]
@@ -378,7 +555,8 @@ class CodexUsageAnalyzer:
         generated_at = dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
         snapshot = {
             "generated_at": generated_at,
-            "codex_home": str(self.codex_home),
+            "codex_home": self.codex_home_display,
+            "codex_sources": codex_source_payloads(self.codex_sources),
             "sessions": sessions,
             "details_by_uid": details_by_uid,
             "summary": self.build_summary(sessions),
@@ -538,19 +716,31 @@ class CodexUsageAnalyzer:
             ranged["latest_rate_limits"] = timeline[-1].get("rate_limits")
         return ranged
 
-    def parse_file_cached(self, path: Path, source: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def parse_file_cached(
+        self,
+        path: Path,
+        source: str,
+        log_source: CodexLogSource | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        log_source = log_source or self.codex_sources[0]
         stat = path.stat()
-        cache_key = str(path.resolve())
+        cache_key = f"{log_source.id}:{path.resolve()}"
         cached = self._cache.get(cache_key)
         if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
             return cached[2], cached[3]
 
-        summary, detail = self.parse_file(path, source)
+        summary, detail = self.parse_file(path, source, log_source)
         self._cache[cache_key] = (stat.st_mtime_ns, stat.st_size, summary, detail)
         return summary, detail
 
-    def parse_file(self, path: Path, source: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        uid = hashlib.sha1(str(path.resolve()).encode("utf-8", errors="replace")).hexdigest()[:16]
+    def parse_file(
+        self,
+        path: Path,
+        source: str,
+        log_source: CodexLogSource | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        log_source = log_source or self.codex_sources[0]
+        uid = hashlib.sha1(f"{log_source.id}:{path.resolve()}".encode("utf-8", errors="replace")).hexdigest()[:16]
         session_id = ""
         title = ""
         cwd = ""
@@ -697,7 +887,7 @@ class CodexUsageAnalyzer:
             session_id = match.group(1) if match else uid
 
         if not title:
-            title = first_user_prompt or Path(cwd).name or path.stem
+            title = first_user_prompt or folder_name_from_path(cwd) or path.stem
 
         if not start_at:
             start_at = created_at or utc_from_mtime(path) or ""
@@ -716,6 +906,9 @@ class CodexUsageAnalyzer:
             "session_id": session_id,
             "title": title,
             "source": source,
+            "environment": log_source.label,
+            "environment_id": log_source.id,
+            "codex_home": str(log_source.codex_home),
             "path": str(path.resolve()),
             "file_size": path.stat().st_size,
             "line_count": line_count,
@@ -725,7 +918,7 @@ class CodexUsageAnalyzer:
             "end_at": end_at,
             "updated_at": utc_from_mtime(path),
             "cwd": cwd,
-            "project": Path(cwd).name if cwd else "",
+            "project": folder_name_from_path(cwd),
             "model": model,
             "effort": effort,
             "originator": originator,
@@ -763,6 +956,7 @@ class CodexUsageAnalyzer:
         by_model: dict[str, dict[str, Any]] = {}
         by_project: dict[str, dict[str, Any]] = {}
         by_day: dict[str, dict[str, Any]] = {}
+        by_environment: dict[str, dict[str, Any]] = {}
         active_count = 0
         archived_count = 0
         estimated_cost_total = 0.0
@@ -790,6 +984,15 @@ class CodexUsageAnalyzer:
             by_project[project]["sessions"] += 1
             by_project[project]["usage"] = add_usage(by_project[project]["usage"], usage)
 
+            environment_id = str(session.get("environment_id") or "local")
+            environment = str(session.get("environment") or environment_id)
+            by_environment.setdefault(
+                environment_id,
+                {"id": environment_id, "label": environment, "sessions": 0, "usage": zero_usage()},
+            )
+            by_environment[environment_id]["sessions"] += 1
+            by_environment[environment_id]["usage"] = add_usage(by_environment[environment_id]["usage"], usage)
+
             stamp = str(session.get("end_at") or session.get("start_at") or "")[:10] or "unknown"
             by_day.setdefault(stamp, {"date": stamp, "sessions": 0, "usage": zero_usage()})
             by_day[stamp]["sessions"] += 1
@@ -804,6 +1007,7 @@ class CodexUsageAnalyzer:
             "estimated_cost_known_count": estimated_cost_known_count,
             "by_model": sorted(by_model.values(), key=lambda row: row["usage"]["total_tokens"], reverse=True),
             "by_project": sorted(by_project.values(), key=lambda row: row["usage"]["total_tokens"], reverse=True)[:20],
+            "by_environment": sorted(by_environment.values(), key=lambda row: row["usage"]["total_tokens"], reverse=True),
             "by_day": sorted(by_day.values(), key=lambda row: row["date"]),
             "top_session_uid": sessions[0]["uid"] if sessions else None,
         }
@@ -833,6 +1037,8 @@ class CodexUsageAnalyzer:
                 "title",
                 "session_id",
                 "source",
+                "environment",
+                "codex_home",
                 "model",
                 "project",
                 "start_at",
@@ -859,6 +1065,8 @@ class CodexUsageAnalyzer:
                     session.get("title", ""),
                     session.get("session_id", ""),
                     session.get("source", ""),
+                    session.get("environment", ""),
+                    session.get("codex_home", ""),
                     session.get("model", ""),
                     session.get("project", ""),
                     session.get("start_at", ""),
@@ -1144,7 +1352,7 @@ HTML = r"""<!doctype html>
     }
     .controls {
       display: grid;
-      grid-template-columns: minmax(220px, 1fr) 150px 170px 210px 130px;
+      grid-template-columns: minmax(220px, 1fr) 140px 150px 170px 210px 130px;
       gap: 10px;
       margin-bottom: 16px;
     }
@@ -1367,6 +1575,9 @@ HTML = r"""<!doctype html>
     }
     .badge.active { color: var(--accent); border-color: #99c9bb; background: #eef8f4; }
     .badge.archived { color: var(--accent-2); border-color: #e3b887; background: #fff6ec; }
+    .badge.env { color: var(--accent-3); border-color: #a9c0df; background: #eef4fb; }
+    .badge.env.wsl { color: var(--accent); border-color: #99c9bb; background: #eef8f4; }
+    .badge.env.windows { color: var(--accent-3); border-color: #a9c0df; background: #eef4fb; }
     .details {
       position: sticky;
       top: 94px;
@@ -1479,6 +1690,7 @@ HTML = r"""<!doctype html>
       .period-toggle { width: 100%; min-width: 0; }
       .toolbar { justify-self: start; justify-content: flex-start; }
       .metrics { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+      .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .layout { grid-template-columns: 1fr; }
       .details { position: static; max-height: none; }
       .table-wrap { max-height: none; }
@@ -1531,9 +1743,12 @@ HTML = r"""<!doctype html>
     <div class="metrics" id="metrics"></div>
 
     <div class="controls">
-      <input id="searchInput" type="search" placeholder="搜索标题、项目、路径、模型" data-i18n-placeholder="searchPlaceholder">
-      <select id="sourceFilter" title="来源" data-i18n-title="source">
-        <option value="all">全部来源</option>
+      <input id="searchInput" type="search" placeholder="搜索标题、项目、路径、模型、环境" data-i18n-placeholder="searchPlaceholder">
+      <select id="environmentFilter" title="环境" data-i18n-title="environment">
+        <option value="all">全部环境</option>
+      </select>
+      <select id="sourceFilter" title="状态" data-i18n-title="source">
+        <option value="all">全部状态</option>
         <option value="active">当前会话</option>
         <option value="archived">归档会话</option>
       </select>
@@ -1605,11 +1820,13 @@ HTML = r"""<!doctype html>
       sessions: [],
       summary: null,
       codexHome: '',
+      codexSources: [],
       generatedAt: '',
       selectedUid: null,
       sortKey: 'end_at',
       sortDir: 'desc',
       search: '',
+      environment: 'all',
       source: 'all',
       model: 'all',
       limit: '50',
@@ -1651,9 +1868,11 @@ HTML = r"""<!doctype html>
         calendarPrev: '上月',
         calendarNext: '下月',
         calendarWeekdays: ['一', '二', '三', '四', '五', '六', '日'],
-        searchPlaceholder: '搜索标题、项目、路径、模型',
-        source: '来源',
-        sourceAll: '全部来源',
+        searchPlaceholder: '搜索标题、项目、路径、模型、环境',
+        environment: '环境',
+        environmentAll: '全部环境',
+        source: '状态',
+        sourceAll: '全部状态',
         sourceActive: '当前会话',
         sourceArchived: '归档会话',
         model: '模型',
@@ -1694,6 +1913,7 @@ HTML = r"""<!doctype html>
         hoursMinutes: '{hours} 小时 {minutes} 分',
         metricSessions: '会话数',
         metricSessionsHint: '当前 {active} · 归档 {archived}',
+        metricSessionsHintWithEnvs: '当前 {active} · 归档 {archived} · {envs}',
         metricTotalTokens: '总 tokens',
         metricPeriodTotalTokens: '{period}总 tokens',
         metricCost: '估算价格',
@@ -1721,6 +1941,7 @@ HTML = r"""<!doctype html>
         project: '项目',
         cwd: '工作目录',
         logFile: '日志文件',
+        codexHome: 'Codex home',
         firstUserPrompt: '首条用户消息',
         lastReplySummary: '最后回复摘要',
         toolCalls: '工具调用',
@@ -1756,9 +1977,11 @@ HTML = r"""<!doctype html>
         calendarPrev: 'Prev',
         calendarNext: 'Next',
         calendarWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-        searchPlaceholder: 'Search title, project, path, or model',
-        source: 'Source',
-        sourceAll: 'All sources',
+        searchPlaceholder: 'Search title, project, path, model, or environment',
+        environment: 'Environment',
+        environmentAll: 'All environments',
+        source: 'Status',
+        sourceAll: 'All statuses',
         sourceActive: 'Active',
         sourceArchived: 'Archived',
         model: 'Model',
@@ -1799,6 +2022,7 @@ HTML = r"""<!doctype html>
         hoursMinutes: '{hours} hr {minutes} min',
         metricSessions: 'Sessions',
         metricSessionsHint: 'Active {active} · Archived {archived}',
+        metricSessionsHintWithEnvs: 'Active {active} · Archived {archived} · {envs}',
         metricTotalTokens: 'Total tokens',
         metricPeriodTotalTokens: '{period} total tokens',
         metricCost: 'Estimated cost',
@@ -1826,6 +2050,7 @@ HTML = r"""<!doctype html>
         project: 'Project',
         cwd: 'Working dir',
         logFile: 'Log file',
+        codexHome: 'Codex home',
         firstUserPrompt: 'First User Message',
         lastReplySummary: 'Last Reply Summary',
         toolCalls: 'Tool Calls',
@@ -1873,6 +2098,27 @@ HTML = r"""<!doctype html>
       }
     }
 
+    function environmentsFromSessions() {
+      const seen = new Map();
+      state.sessions.forEach(row => {
+        const id = row.environment_id || row.environment || 'local';
+        if (!seen.has(id)) seen.set(id, { id, label: row.environment || id });
+      });
+      return Array.from(seen.values());
+    }
+
+    function populateEnvironmentFilter() {
+      const select = document.getElementById('environmentFilter');
+      const oldValue = select.value || state.environment;
+      const sources = state.codexSources.length ? state.codexSources : environmentsFromSessions();
+      select.innerHTML = `<option value="all">${escapeHtml(t('environmentAll'))}</option>` + sources
+        .map(source => `<option value="${escapeHtml(source.id)}">${escapeHtml(source.label)}</option>`)
+        .join('');
+      const values = sources.map(source => source.id);
+      select.value = values.includes(oldValue) ? oldValue : 'all';
+      state.environment = select.value;
+    }
+
     function populateSourceFilter() {
       const select = document.getElementById('sourceFilter');
       const oldValue = select.value || state.source;
@@ -1900,6 +2146,7 @@ HTML = r"""<!doctype html>
     function setLanguage(lang) {
       state.lang = lang === 'en' ? 'en' : 'zh';
       applyStaticText();
+      populateEnvironmentFilter();
       populateSourceFilter();
       populateLimitSelect();
       populateModelFilter();
@@ -1992,6 +2239,16 @@ HTML = r"""<!doctype html>
       return parts.slice(-3).join(' / ');
     }
 
+    function badgeClass(value) {
+      return String(value || 'local').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+    }
+
+    function environmentBadge(row) {
+      const label = row.environment || '';
+      if (!label) return '';
+      return `<span class="badge env ${escapeHtml(badgeClass(row.environment_id || label))}">${escapeHtml(label)}</span>`;
+    }
+
     function sourceBadge(source) {
       if (source !== 'archived') return '';
       const text = t('archived');
@@ -2036,6 +2293,7 @@ HTML = r"""<!doctype html>
         state.summary = data.summary || null;
         state.dailyUsage = data.daily_usage || [];
         state.codexHome = data.codex_home || '';
+        state.codexSources = data.codex_sources || [];
         state.generatedAt = data.generated_at || '';
         state.period = data.period?.key || requestedPeriod;
         if (state.period === 'custom') {
@@ -2043,6 +2301,7 @@ HTML = r"""<!doctype html>
           state.customEndDate = data.period?.end_date || requestedEnd || state.customStartDate;
         }
         document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
+        populateEnvironmentFilter();
         populateModelFilter();
         if (state.selectedUid && !state.sessions.some(row => row.uid === state.selectedUid)) {
           state.selectedUid = null;
@@ -2082,11 +2341,12 @@ HTML = r"""<!doctype html>
     function filteredSessions() {
       const needle = state.search.trim().toLowerCase();
       let rows = state.sessions.filter(row => {
+        if (state.environment !== 'all' && (row.environment_id || row.environment || 'local') !== state.environment) return false;
         if (state.source !== 'all' && row.source !== state.source) return false;
         if (state.model !== 'all' && (row.model || 'unknown') !== state.model) return false;
         if (!needle) return true;
         const haystack = [
-          row.title, row.session_id, row.model, row.project, row.cwd, row.path, row.source
+          row.title, row.session_id, row.model, row.project, row.cwd, row.path, row.source, row.environment
         ].join(' ').toLowerCase();
         return haystack.includes(needle);
       });
@@ -2343,8 +2603,15 @@ HTML = r"""<!doctype html>
 
     function renderMetrics() {
       const usage = state.summary && state.summary.usage ? state.summary.usage : {};
+      const environmentRows = state.summary?.by_environment || [];
+      const environmentHint = environmentRows.length > 1
+        ? environmentRows.map(row => `${row.label} ${fmt(row.sessions)}`).join(' · ')
+        : '';
+      const sessionHint = environmentHint
+        ? t('metricSessionsHintWithEnvs', { active: fmt(state.summary?.active_count || 0), archived: fmt(state.summary?.archived_count || 0), envs: environmentHint })
+        : t('metricSessionsHint', { active: fmt(state.summary?.active_count || 0), archived: fmt(state.summary?.archived_count || 0) });
       const metrics = [
-        [t('metricSessions'), fmt(state.summary?.session_count || 0), t('metricSessionsHint', { active: fmt(state.summary?.active_count || 0), archived: fmt(state.summary?.archived_count || 0) })],
+        [t('metricSessions'), fmt(state.summary?.session_count || 0), sessionHint],
         [t('metricPeriodTotalTokens', { period: periodLabel() }), fmtCompact(usage.total_tokens), fmt(usage.total_tokens)],
         [t('metricCost'), fmtUsd(state.summary?.estimated_cost_usd), t('metricCostHint', { count: fmt(state.summary?.estimated_cost_known_count || 0) })],
         [t('metricInput'), fmtCompact(usage.input_tokens), fmt(usage.input_tokens)],
@@ -2378,7 +2645,7 @@ HTML = r"""<!doctype html>
                 <div class="title-main">${escapeHtml(row.title || row.session_id)}</div>
                 <div class="title-time">${escapeHtml(fmtRelativeTime(timeValue))}</div>
               </div>
-              <div class="title-sub">${sourceBadge(row.source)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>
+              <div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>
             </td>
             <td class="number" title="${fmt(usage.total_tokens)} tokens"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
             <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
@@ -2444,7 +2711,7 @@ HTML = r"""<!doctype html>
       document.getElementById('detailStatus').textContent = t('countEvents', { count: fmt(detail.token_event_count) });
       document.getElementById('detailsBody').innerHTML = `
         <div class="detail-title">${escapeHtml(detail.title || detail.session_id)}</div>
-        <div>${sourceBadge(detail.source)} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
+        <div>${environmentBadge(detail)} ${sourceBadge(detail.source)} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
 
         <div class="breakdown">
           ${breakdownRow(t('input'), 'input', uncachedInputTokens, max, costs.input_tokens)}
@@ -2465,8 +2732,10 @@ HTML = r"""<!doctype html>
           ${kv(t('time'), `${fmtRelativeTime(detail.end_at)} (${fmtDate(detail.start_at)} - ${fmtDate(detail.end_at)})`)}
           ${kv(t('totalDuration'), fmtDuration(detail.duration_ms_total))}
           ${kv(t('ttftAvg'), fmtDuration(detail.time_to_first_token_ms_avg))}
+          ${kv(t('environment'), detail.environment || '')}
           ${kv(t('project'), detail.project || '')}
           ${kv(t('cwd'), detail.cwd || '', 'path')}
+          ${kv(t('codexHome'), detail.codex_home || '', 'path')}
           ${kv(t('logFile'), detail.path || '', 'path')}
           ${kv('Session ID', detail.session_id || '', 'path')}
         </div>
@@ -2555,6 +2824,7 @@ HTML = r"""<!doctype html>
     document.getElementById('refreshBtn').addEventListener('click', () => loadData(false));
     document.getElementById('exportBtn').addEventListener('click', () => { window.location.href = '/api/export.csv?' + periodParams().toString(); });
     document.getElementById('searchInput').addEventListener('input', event => { state.search = event.target.value; renderAll(); });
+    document.getElementById('environmentFilter').addEventListener('change', event => { state.environment = event.target.value; renderAll(); });
     document.getElementById('sourceFilter').addEventListener('change', event => { state.source = event.target.value; renderAll(); });
     document.getElementById('modelFilter').addEventListener('change', event => { state.model = event.target.value; renderAll(); });
     document.querySelectorAll('[data-lang-button]').forEach(button => {
@@ -2594,6 +2864,7 @@ HTML = r"""<!doctype html>
     });
 
     applyStaticText();
+    populateEnvironmentFilter();
     populateSourceFilter();
     populateLimitSelect();
     loadData(true);
@@ -2641,6 +2912,7 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 payload = {
                     "generated_at": snapshot["generated_at"],
                     "codex_home": snapshot["codex_home"],
+                    "codex_sources": snapshot.get("codex_sources", []),
                     "period": snapshot["period"],
                     "summary": snapshot["summary"],
                     "sessions": snapshot["sessions"],
@@ -2805,9 +3077,19 @@ def release_dashboard_port(port: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    default_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
     parser = argparse.ArgumentParser(description="Local read-only Codex usage dashboard.")
-    parser.add_argument("--codex-home", type=Path, default=default_home, help="Path to the Codex home directory.")
+    parser.add_argument(
+        "--codex-home",
+        type=Path,
+        action="append",
+        default=None,
+        help="Path to a Codex home directory. Can be provided multiple times.",
+    )
+    parser.add_argument(
+        "--no-auto-windows",
+        action="store_true",
+        help="Do not auto-add the Windows ~/.codex directory when running under WSL.",
+    )
     parser.add_argument("--host", default="127.0.0.1", help="Bind host. Defaults to 127.0.0.1.")
     parser.add_argument("--port", type=int, default=8765, help="Port to bind. Defaults to the fixed dashboard port 8765.")
     parser.add_argument("--open", action="store_true", help="Open the dashboard in the default browser.")
@@ -2818,20 +3100,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    analyzer = CodexUsageAnalyzer(args.codex_home)
+    sources = (
+        codex_sources_from_homes(args.codex_home)
+        if args.codex_home
+        else default_codex_sources(include_windows=not args.no_auto_windows)
+    )
+    analyzer = CodexUsageAnalyzer(sources)
     if args.once:
         snapshot = analyzer.scan()
         if args.json:
             payload = {
                 "generated_at": snapshot["generated_at"],
                 "codex_home": snapshot["codex_home"],
+                "codex_sources": snapshot.get("codex_sources", []),
                 "summary": snapshot["summary"],
                 "sessions": snapshot["sessions"],
             }
             safe_print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             usage = snapshot["summary"]["usage"]
-            safe_print(f"Codex home: {snapshot['codex_home']}")
+            safe_print(f"Codex homes: {snapshot['codex_home']}")
             safe_print(f"Sessions: {snapshot['summary']['session_count']}")
             safe_print(f"Total tokens: {usage['total_tokens']:,}")
             if snapshot["sessions"]:
@@ -2847,7 +3135,7 @@ def main() -> int:
         raise RuntimeError(f"Port {port} is already in use and could not be released.") from exc
     url = f"http://{args.host}:{port}/"
     safe_print(f"Codex Usage Dashboard: {url}")
-    safe_print(f"Codex home: {analyzer.codex_home}")
+    safe_print(f"Codex homes: {analyzer.codex_home_display}")
     safe_print("Press Ctrl+C to stop.")
     if args.open:
         threading.Timer(0.4, lambda: webbrowser.open(url, new=2)).start()
