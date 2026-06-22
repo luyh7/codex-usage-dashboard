@@ -641,6 +641,14 @@ def clone_json(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False))
 
 
+def path_state_signature(path: Path) -> tuple[str, int | None, int | None]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None, None)
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
 class RemoteSnapshotStore:
     def __init__(self, current_device_code: str | None = None, root: Path | None = None):
         self.current_device_code = safe_device_code(current_device_code or current_device_short_code())
@@ -695,6 +703,13 @@ class RemoteSnapshotStore:
                 continue
             payloads.append(payload)
         return payloads
+
+    def state_signature(self) -> tuple[tuple[str, int | None, int | None], ...]:
+        try:
+            paths = sorted(self.root.glob("*.json"))
+        except OSError:
+            return ()
+        return tuple(path_state_signature(path) for path in paths)
 
     def list_remotes(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -917,6 +932,9 @@ class CodexUsageAnalyzer:
         self.codex_home_display = codex_home_display(sources)
         self.remote_store = remote_store
         self._cache: dict[str, tuple[int, int, dict[str, Any], dict[str, Any]]] = {}
+        self._snapshot_cache_signature: tuple[Any, ...] | None = None
+        self._snapshot_cache: dict[str, Any] | None = None
+        self._period_cache: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
 
     def load_session_titles(self, codex_home: Path | None = None) -> dict[str, str]:
         titles: dict[str, str] = {}
@@ -950,12 +968,46 @@ class CodexUsageAnalyzer:
         files.sort(key=lambda item: item[1].stat().st_mtime if item[1].exists() else 0, reverse=True)
         return files
 
+    def scan_signature(self, files: list[tuple[CodexLogSource, Path, str]], include_remotes: bool) -> tuple[Any, ...]:
+        file_signature = tuple(
+            (log_source.id, source, *path_state_signature(path))
+            for log_source, path, source in files
+        )
+        title_signature = tuple(
+            (log_source.id, *path_state_signature(log_source.codex_home / "session_index.jsonl"))
+            for log_source in self.codex_sources
+        )
+        remote_signature = self.remote_store.state_signature() if include_remotes and self.remote_store is not None else ()
+        return (file_signature, title_signature, remote_signature)
+
     def scan(
         self,
         period: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         include_remotes: bool = True,
+    ) -> dict[str, Any]:
+        files = self.iter_session_files()
+        signature = self.scan_signature(files, include_remotes)
+        if self._snapshot_cache_signature != signature or self._snapshot_cache is None:
+            self._snapshot_cache = self.build_snapshot(files, include_remotes)
+            self._snapshot_cache_signature = signature
+            self._period_cache = {}
+
+        snapshot = self._snapshot_cache
+        if period:
+            cache_key = (period, start_date, end_date)
+            cached = self._period_cache.get(cache_key)
+            if cached is None:
+                cached = self.filter_snapshot_by_period(snapshot, period, start_date, end_date)
+                self._period_cache[cache_key] = cached
+            return cached
+        return snapshot
+
+    def build_snapshot(
+        self,
+        files: list[tuple[CodexLogSource, Path, str]],
+        include_remotes: bool,
     ) -> dict[str, Any]:
         titles_by_source = {
             log_source.id: self.load_session_titles(log_source.codex_home)
@@ -964,7 +1016,7 @@ class CodexUsageAnalyzer:
         sessions: list[dict[str, Any]] = []
         details_by_uid: dict[str, dict[str, Any]] = {}
 
-        for log_source, path, source in self.iter_session_files():
+        for log_source, path, source in files:
             try:
                 summary, detail = self.parse_file_cached(path, source, log_source)
             except OSError:
@@ -998,8 +1050,6 @@ class CodexUsageAnalyzer:
             "daily_usage": self.build_daily_usage(details_by_uid.values()),
             "period": {"key": "all", "start_at": None, "end_at": generated_at},
         }
-        if period:
-            return self.filter_snapshot_by_period(snapshot, period, start_date, end_date)
         return snapshot
 
     def filter_snapshot_by_period(
@@ -2472,6 +2522,7 @@ HTML = r"""<!doctype html>
       period: 'today',
       customStartDate: '',
       customEndDate: '',
+      periodCache: new Map(),
       dailyUsage: [],
       remotes: [],
       currentDeviceShortCode: '',
@@ -3018,9 +3069,46 @@ HTML = r"""<!doctype html>
       return params;
     }
 
-    async function loadData(selectTop = true) {
+    function periodCacheKey(period = state.period, startDate = state.customStartDate, endDate = state.customEndDate) {
+      return `${period}|${startDate || ''}|${endDate || ''}`;
+    }
+
+    async function applySessionData(data, requestedPeriod, requestedStart, requestedEnd, selectTop = true) {
+      state.sessions = data.sessions || [];
+      state.summary = data.summary || null;
+      state.dailyUsage = data.daily_usage || [];
+      state.remotes = data.remotes || [];
+      state.currentDeviceShortCode = data.current_device_short_code || '';
+      state.codexHome = data.codex_home || '';
+      state.codexSources = data.codex_sources || [];
+      state.generatedAt = data.generated_at || '';
+      state.period = data.period?.key || requestedPeriod;
+      if (state.period === 'custom') {
+        state.customStartDate = data.period?.start_date || requestedStart;
+        state.customEndDate = data.period?.end_date || requestedEnd || state.customStartDate;
+      }
+      document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
+      updateRemoteButton();
+      populateEnvironmentFilter();
+      populateModelFilter();
+      if (state.selectedUid && !state.sessions.some(row => row.uid === state.selectedUid)) {
+        state.selectedUid = null;
+      }
+      renderAll();
+      const visibleRows = currentSelectableRows();
+      if ((selectTop || !state.selectedUid) && visibleRows.length) {
+        const first = visibleRows[0];
+        if (first) await showDetails(first.uid);
+      } else if (state.selectedUid) {
+        await showDetails(state.selectedUid, false);
+      } else {
+        clearDetails();
+      }
+    }
+
+    async function loadData(selectTop = true, options = {}) {
       if (state.loading) {
-        state.reloadAfterLoad = true;
+        if (!options.silent) state.reloadAfterLoad = true;
         return;
       }
       state.loading = true;
@@ -3028,6 +3116,7 @@ HTML = r"""<!doctype html>
       const requestedPeriod = state.period;
       const requestedStart = state.customStartDate;
       const requestedEnd = state.customEndDate;
+      const cacheKey = periodCacheKey(requestedPeriod, requestedStart, requestedEnd);
       const refreshBtn = document.getElementById('refreshBtn');
       refreshBtn.disabled = true;
       refreshBtn.textContent = t('scanning');
@@ -3043,36 +3132,8 @@ HTML = r"""<!doctype html>
           state.reloadAfterLoad = true;
           return;
         }
-        state.sessions = data.sessions || [];
-        state.summary = data.summary || null;
-        state.dailyUsage = data.daily_usage || [];
-        state.remotes = data.remotes || [];
-        state.currentDeviceShortCode = data.current_device_short_code || '';
-        state.codexHome = data.codex_home || '';
-        state.codexSources = data.codex_sources || [];
-        state.generatedAt = data.generated_at || '';
-        state.period = data.period?.key || requestedPeriod;
-        if (state.period === 'custom') {
-          state.customStartDate = data.period?.start_date || requestedStart;
-          state.customEndDate = data.period?.end_date || requestedEnd || state.customStartDate;
-        }
-        document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
-        updateRemoteButton();
-        populateEnvironmentFilter();
-        populateModelFilter();
-        if (state.selectedUid && !state.sessions.some(row => row.uid === state.selectedUid)) {
-          state.selectedUid = null;
-        }
-        renderAll();
-        const visibleRows = currentSelectableRows();
-        if ((selectTop || !state.selectedUid) && visibleRows.length) {
-          const first = visibleRows[0];
-          if (first) await showDetails(first.uid);
-        } else if (state.selectedUid) {
-          await showDetails(state.selectedUid, false);
-        } else {
-          clearDetails();
-        }
+        state.periodCache.set(cacheKey, data);
+        await applySessionData(data, requestedPeriod, requestedStart, requestedEnd, selectTop);
       } catch (err) {
         document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="error">${escapeHtml(t('loadFailed', { message: err.message }))}</td></tr>`;
       } finally {
@@ -3219,8 +3280,14 @@ HTML = r"""<!doctype html>
       state.projectExpanded = {};
       state.projectShowAll = {};
       updatePeriodButtons();
-      clearDetails();
-      loadData(true);
+      const cached = state.periodCache.get(periodCacheKey());
+      if (cached) {
+        applySessionData(cached, state.period, state.customStartDate, state.customEndDate, false);
+      } else {
+        renderMetrics();
+        clearDetails();
+      }
+      loadData(false);
     }
 
     function setCustomPeriod(startDate, endDate) {
@@ -3233,8 +3300,13 @@ HTML = r"""<!doctype html>
       state.calendarOpen = false;
       updateCalendarVisibility();
       updatePeriodButtons();
-      clearDetails();
-      loadData(true);
+      const cached = state.periodCache.get(periodCacheKey());
+      if (cached) {
+        applySessionData(cached, state.period, state.customStartDate, state.customEndDate, false);
+      } else {
+        clearDetails();
+      }
+      loadData(false);
     }
 
     function setPrimaryView(mode) {
@@ -3841,6 +3913,7 @@ HTML = r"""<!doctype html>
       });
       const data = await res.json();
       if (res.ok && data.ok) {
+        state.periodCache.clear();
         await loadData(false);
         renderRemoteModal(t('remoteImported'));
         document.getElementById('remoteModal').hidden = false;
@@ -3888,6 +3961,7 @@ HTML = r"""<!doctype html>
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'unknown');
+        state.periodCache.clear();
         await loadData(false);
         renderRemoteModal(t('remoteRenamed'));
       } catch (err) {
@@ -3905,6 +3979,7 @@ HTML = r"""<!doctype html>
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'unknown');
+        state.periodCache.clear();
         await loadData(false);
         renderRemoteModal(t('remoteDeleted'));
       } catch (err) {
@@ -3972,7 +4047,7 @@ HTML = r"""<!doctype html>
     populateSourceFilter();
     populateLimitSelect();
     loadData(true);
-    setInterval(() => loadData(false), 10000);
+    setInterval(() => loadData(false, { silent: true }), 10000);
   </script>
 </body>
 </html>
