@@ -47,6 +47,7 @@ def health_dashboard_url(port: int) -> str | None:
         and "project-grouped-default-view" in features
         and "project-compact-layout-v2" in features
         and "project-env-tag-in-conversation-column" in features
+        and "remote-snapshot-import-v1" in features
     ):
         return url
     return None

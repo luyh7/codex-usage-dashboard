@@ -169,6 +169,128 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(session["project"], "codex-usage-dashboard")
         self.assertEqual(session["title"], "codex-usage-dashboard")
 
+    def test_snapshot_export_contains_device_short_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            self.write_usage_file(codex_home, "session-a", 100, "2026-06-16T14:52:45.653Z")
+            store = dashboard.RemoteSnapshotStore("mac-test123", root / "remotes")
+            analyzer = dashboard.CodexUsageAnalyzer([dashboard.CodexLogSource("local", "Local", codex_home)], remote_store=store)
+            payload = analyzer.export_snapshot_payload()
+
+        self.assertEqual(payload["schema"], dashboard.SNAPSHOT_SCHEMA)
+        self.assertEqual(payload["device"]["short_code"], "mac-test123")
+        self.assertEqual(payload["snapshot"]["summary"]["session_count"], 1)
+
+    def test_remote_import_merges_by_device_short_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = dashboard.RemoteSnapshotStore("mac-local", root / "remotes")
+            first = {
+                "schema": dashboard.SNAPSHOT_SCHEMA,
+                "version": dashboard.SNAPSHOT_VERSION,
+                "device": {"short_code": "mac-remote", "label": "Mac Studio"},
+                "snapshot": {
+                    "generated_at": "2026-06-16T14:52:45Z",
+                    "sessions": [
+                        {
+                            "uid": "old-uid",
+                            "session_id": "same-session",
+                            "title": "Old",
+                            "source": "active",
+                            "environment": "macOS",
+                            "environment_id": "macos",
+                            "is_remote": False,
+                            "remote_device_short_code": "",
+                            "remote_imported_at": "",
+                            "remote_exported_at": "",
+                            "codex_home": "/remote/.codex",
+                            "path": "/remote/old.jsonl",
+                            "file_size": 1,
+                            "parse_errors": 0,
+                            "created_at": "2026-06-16T14:52:45Z",
+                            "start_at": "2026-06-16T14:52:45Z",
+                            "end_at": "2026-06-16T14:52:45Z",
+                            "updated_at": "2026-06-16T14:52:45Z",
+                            "cwd": "/work/old",
+                            "project": "old",
+                            "model": "gpt-5",
+                            "effort": "",
+                            "total_token_usage": {"total_tokens": 100},
+                            "last_token_usage": {"total_tokens": 100},
+                            "estimated_cost_usd": None,
+                            "estimated_cost_breakdown_usd": None,
+                            "price_model_known": False,
+                            "cached_input_percent": None,
+                            "token_event_count": 1,
+                            "turn_count": 1,
+                            "completed_turn_count": 0,
+                            "duration_ms_total": 0,
+                            "time_to_first_token_ms_avg": None,
+                        }
+                    ],
+                    "details_by_uid": {"old-uid": {"uid": "old-uid", "session_id": "same-session", "timeline": []}},
+                },
+            }
+            second = json.loads(json.dumps(first))
+            second["snapshot"]["sessions"][0]["uid"] = "new-uid"
+            second["snapshot"]["sessions"][0]["title"] = "New"
+            second["snapshot"]["sessions"][0]["total_token_usage"] = {"total_tokens": 250}
+            second["snapshot"]["details_by_uid"] = {"new-uid": {"uid": "new-uid", "session_id": "same-session", "timeline": []}}
+
+            self.assertTrue(store.import_snapshot(first, label="Mac Studio")["ok"])
+            self.assertTrue(store.import_snapshot(second)["ok"])
+            payload = store.read_remote("mac-remote")
+
+        assert payload is not None
+        sessions = payload["snapshot"]["sessions"]
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["title"], "New")
+        self.assertEqual(sessions[0]["total_token_usage"]["total_tokens"], 250)
+
+    def test_remote_scan_marks_imported_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            local_home = root / "local" / ".codex"
+            remote_home = root / "remote" / ".codex"
+            self.write_usage_file(local_home, "local-session", 100, "2026-06-16T14:52:45.653Z")
+            self.write_usage_file(remote_home, "remote-session", 250, "2026-06-16T15:52:45.653Z")
+
+            remote_analyzer = dashboard.CodexUsageAnalyzer(
+                [dashboard.CodexLogSource("remote-src", "Remote Source", remote_home)],
+                remote_store=dashboard.RemoteSnapshotStore("mac-remote", root / "unused"),
+            )
+            remote_payload = remote_analyzer.export_snapshot_payload()
+            store = dashboard.RemoteSnapshotStore("mac-local", root / "remotes")
+            store.import_snapshot(remote_payload, label="Mac Studio")
+
+            analyzer = dashboard.CodexUsageAnalyzer(
+                [dashboard.CodexLogSource("local", "This Mac", local_home)],
+                remote_store=store,
+            )
+            snapshot = analyzer.scan()
+
+        by_session = {row["session_id"]: row for row in snapshot["sessions"]}
+        self.assertFalse(by_session["local-session"]["is_remote"])
+        self.assertTrue(by_session["remote-session"]["is_remote"])
+        self.assertEqual(by_session["remote-session"]["environment"], "Mac Studio")
+        self.assertEqual(by_session["remote-session"]["remote_device_short_code"], "mac-remote")
+
+    def test_current_device_import_requires_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = dashboard.RemoteSnapshotStore("mac-local", Path(temp_dir) / "remotes")
+            payload = {
+                "schema": dashboard.SNAPSHOT_SCHEMA,
+                "version": dashboard.SNAPSHOT_VERSION,
+                "device": {"short_code": "mac-local", "label": "This Mac"},
+                "snapshot": {"sessions": [], "details_by_uid": {}},
+            }
+            result = store.import_snapshot(payload, label="This Mac")
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["needs_confirmation"])
+        self.assertEqual(result["reason"], "current_device")
+
     def test_html_defaults_to_project_grouped_view(self) -> None:
         html = dashboard.HTML
         project_index = html.index('data-view-button="project"')

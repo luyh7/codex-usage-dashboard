@@ -58,6 +58,9 @@ MODEL_PRICES_USD_PER_M_TOKENS = {
 }
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
+APP_NAME = "cousash"
+SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
+SNAPSHOT_VERSION = 1
 DASHBOARD_FEATURES = [
     "periods",
     "period-deltas",
@@ -70,6 +73,7 @@ DASHBOARD_FEATURES = [
     "project-grouped-default-view",
     "project-compact-layout-v2",
     "project-env-tag-in-conversation-column",
+    "remote-snapshot-import-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -79,6 +83,10 @@ SUMMARY_KEYS = (
     "source",
     "environment",
     "environment_id",
+    "is_remote",
+    "remote_device_short_code",
+    "remote_imported_at",
+    "remote_exported_at",
     "codex_home",
     "path",
     "file_size",
@@ -293,6 +301,145 @@ def safe_print(*values: Any) -> None:
         pass
 
 
+def app_config_dir() -> Path:
+    override = os.environ.get("COUSASH_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
+    system = platform.system()
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    if system == "Windows":
+        root = os.environ.get("APPDATA")
+        return Path(root) / APP_NAME if root else Path.home() / "AppData" / "Roaming" / APP_NAME
+    root = os.environ.get("XDG_CONFIG_HOME")
+    return Path(root) / APP_NAME if root else Path.home() / ".config" / APP_NAME
+
+
+def remote_snapshots_dir() -> Path:
+    return app_config_dir() / "remotes"
+
+
+def safe_json_dump(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def read_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def run_text_quiet(command: list[str]) -> str:
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
+def mac_platform_uuid() -> str:
+    output = run_text_quiet(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
+    match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', output)
+    return match.group(1).strip() if match else ""
+
+
+def windows_machine_guid() -> str:
+    output = run_text_quiet(
+        [
+            "reg",
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Cryptography",
+            "/v",
+            "MachineGuid",
+        ]
+    )
+    match = re.search(r"MachineGuid\s+REG_\w+\s+([^\r\n]+)", output)
+    if match:
+        return match.group(1).strip()
+    output = run_text_quiet(["powershell", "-NoProfile", "-Command", "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography').MachineGuid"])
+    return output.splitlines()[-1].strip() if output else ""
+
+
+def linux_machine_id() -> str:
+    for path in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if value:
+            return value
+    return ""
+
+
+def device_code_prefix() -> str:
+    system = platform.system()
+    if system == "Darwin":
+        return "mac"
+    if system == "Windows":
+        return "win"
+    if running_in_wsl():
+        return "wsl"
+    if system == "Linux":
+        return "linux"
+    return slugify_source_id(system or "device")
+
+
+def stable_device_identity() -> str:
+    system = platform.system()
+    if system == "Darwin":
+        value = mac_platform_uuid()
+    elif system == "Windows":
+        value = windows_machine_guid()
+    else:
+        value = linux_machine_id()
+    return value.strip()
+
+
+def fallback_device_seed() -> str:
+    path = app_config_dir() / "device-seed.json"
+    payload = read_json_file(path)
+    if payload and isinstance(payload.get("seed"), str) and payload["seed"]:
+        return payload["seed"]
+    seed = hashlib.sha256(f"{time.time_ns()}:{os.urandom(16).hex()}".encode("utf-8")).hexdigest()
+    safe_json_dump(path, {"seed": seed, "created_at": utc_iso(dt.datetime.now(dt.UTC))})
+    return seed
+
+
+def current_device_short_code() -> str:
+    prefix = device_code_prefix()
+    identity = stable_device_identity()
+    if not identity:
+        identity = fallback_device_seed()
+    digest = hashlib.sha256(f"{prefix}:{identity}".encode("utf-8", errors="replace")).hexdigest()[:8]
+    return f"{prefix}-{digest}"
+
+
+def default_device_label() -> str:
+    node = platform.node().strip()
+    system = platform.system() or "Device"
+    if node:
+        return node
+    if system == "Darwin":
+        return "Mac"
+    if system == "Windows":
+        return "Windows PC"
+    if running_in_wsl():
+        return "WSL"
+    return system
+
+
 def text_from_content(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -465,9 +612,9 @@ def default_codex_sources(include_windows: bool = True) -> list[CodexLogSource]:
     return dedupe_codex_sources(sources)
 
 
-def codex_source_payloads(sources: list[CodexLogSource]) -> list[dict[str, str]]:
+def codex_source_payloads(sources: list[CodexLogSource]) -> list[dict[str, Any]]:
     return [
-        {"id": source.id, "label": source.label, "codex_home": str(source.codex_home)}
+        {"id": source.id, "label": source.label, "codex_home": str(source.codex_home), "is_remote": False}
         for source in sources
     ]
 
@@ -478,8 +625,286 @@ def codex_home_display(sources: list[CodexLogSource]) -> str:
     return " · ".join(f"{source.label}: {source.codex_home}" for source in sources)
 
 
+def safe_device_code(value: Any) -> str:
+    code = str(value or "").strip().lower()
+    code = re.sub(r"[^a-z0-9_-]+", "-", code).strip("-")
+    return code[:80]
+
+
+def snapshot_session_key(session: dict[str, Any]) -> str:
+    for key in ("session_id", "uid", "path"):
+        value = session.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return hashlib.sha1(json.dumps(session, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def clone_json(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False))
+
+
+class RemoteSnapshotStore:
+    def __init__(self, current_device_code: str | None = None, root: Path | None = None):
+        self.current_device_code = safe_device_code(current_device_code or current_device_short_code())
+        self.root = root or remote_snapshots_dir()
+
+    def snapshot_path(self, device_code: str) -> Path:
+        code = safe_device_code(device_code)
+        if not code:
+            raise ValueError("missing device short code")
+        return self.root / f"{code}.json"
+
+    def validate_snapshot(self, payload: Any) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        if not isinstance(payload, dict):
+            raise ValueError("snapshot must be a JSON object")
+        if payload.get("schema") != SNAPSHOT_SCHEMA:
+            raise ValueError("unsupported snapshot schema")
+        try:
+            version = int(payload.get("version") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("snapshot version is invalid") from exc
+        if version > SNAPSHOT_VERSION:
+            raise ValueError("snapshot version is newer than this dashboard")
+        device = payload.get("device")
+        snapshot = payload.get("snapshot")
+        if not isinstance(device, dict) or not isinstance(snapshot, dict):
+            raise ValueError("snapshot is missing device or data")
+        code = safe_device_code(device.get("short_code"))
+        if not code:
+            raise ValueError("snapshot is missing device short code")
+        sessions = snapshot.get("sessions")
+        details = snapshot.get("details_by_uid")
+        if not isinstance(sessions, list) or not isinstance(details, dict):
+            raise ValueError("snapshot is missing session data")
+        return code, device, snapshot
+
+    def read_remote(self, device_code: str) -> dict[str, Any] | None:
+        return read_json_file(self.snapshot_path(device_code))
+
+    def read_all(self) -> list[dict[str, Any]]:
+        try:
+            paths = sorted(self.root.glob("*.json"))
+        except OSError:
+            return []
+        payloads: list[dict[str, Any]] = []
+        for path in paths:
+            payload = read_json_file(path)
+            if not payload:
+                continue
+            try:
+                code, _device, _snapshot = self.validate_snapshot(payload)
+            except ValueError:
+                continue
+            payloads.append(payload)
+        return payloads
+
+    def list_remotes(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for payload in self.read_all():
+            try:
+                code, device, snapshot = self.validate_snapshot(payload)
+            except ValueError:
+                continue
+            sessions = snapshot.get("sessions") if isinstance(snapshot.get("sessions"), list) else []
+            usage = normalize_usage((snapshot.get("summary") or {}).get("usage") if isinstance(snapshot.get("summary"), dict) else None)
+            rows.append(
+                {
+                    "device_short_code": code,
+                    "label": str(device.get("label") or code),
+                    "platform": str(device.get("platform") or ""),
+                    "hostname": str(device.get("hostname") or ""),
+                    "session_count": len(sessions),
+                    "usage": usage,
+                    "imported_at": payload.get("imported_at") or "",
+                    "exported_at": payload.get("exported_at") or "",
+                    "generated_at": snapshot.get("generated_at") or "",
+                }
+            )
+        return sorted(rows, key=lambda row: str(row.get("label") or row.get("device_short_code")))
+
+    def import_snapshot(
+        self,
+        incoming: dict[str, Any],
+        label: str | None = None,
+        allow_current_device: bool = False,
+    ) -> dict[str, Any]:
+        code, incoming_device, incoming_snapshot = self.validate_snapshot(incoming)
+        if code == self.current_device_code and not allow_current_device:
+            return {
+                "ok": False,
+                "needs_confirmation": True,
+                "reason": "current_device",
+                "device_short_code": code,
+                "suggested_label": str(incoming_device.get("label") or code),
+            }
+
+        existing = self.read_remote(code)
+        existing_device: dict[str, Any] = {}
+        existing_snapshot: dict[str, Any] = {}
+        if existing:
+            try:
+                _existing_code, existing_device, existing_snapshot = self.validate_snapshot(existing)
+            except ValueError:
+                existing_device = {}
+                existing_snapshot = {}
+
+        new_label = clean_text(label or str(existing_device.get("label") or incoming_device.get("label") or code), 120)
+        if not existing and not label:
+            return {
+                "ok": False,
+                "needs_label": True,
+                "device_short_code": code,
+                "suggested_label": new_label,
+                "platform": incoming_device.get("platform") or "",
+                "hostname": incoming_device.get("hostname") or "",
+            }
+
+        merged_snapshot = self.merge_snapshots(existing_snapshot, incoming_snapshot)
+        now = utc_iso(dt.datetime.now(dt.UTC))
+        stored = {
+            "schema": SNAPSHOT_SCHEMA,
+            "version": SNAPSHOT_VERSION,
+            "device": {
+                **{key: value for key, value in incoming_device.items() if isinstance(key, str)},
+                "short_code": code,
+                "label": new_label,
+            },
+            "exported_at": incoming.get("exported_at") or incoming_snapshot.get("generated_at") or now,
+            "imported_at": now,
+            "snapshot": merged_snapshot,
+        }
+        safe_json_dump(self.snapshot_path(code), stored)
+        return {"ok": True, "remote": self.remote_metadata(stored), "created": not bool(existing)}
+
+    def merge_snapshots(self, existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+        existing_sessions = existing.get("sessions") if isinstance(existing.get("sessions"), list) else []
+        incoming_sessions = incoming.get("sessions") if isinstance(incoming.get("sessions"), list) else []
+        existing_details = existing.get("details_by_uid") if isinstance(existing.get("details_by_uid"), dict) else {}
+        incoming_details = incoming.get("details_by_uid") if isinstance(incoming.get("details_by_uid"), dict) else {}
+
+        by_key: dict[str, dict[str, Any]] = {}
+        detail_by_uid: dict[str, dict[str, Any]] = {}
+        for session in existing_sessions:
+            if isinstance(session, dict):
+                cloned = clone_json(session)
+                by_key[snapshot_session_key(cloned)] = cloned
+                uid = cloned.get("uid")
+                if isinstance(uid, str) and isinstance(existing_details.get(uid), dict):
+                    detail_by_uid[uid] = clone_json(existing_details[uid])
+
+        for session in incoming_sessions:
+            if not isinstance(session, dict):
+                continue
+            cloned = clone_json(session)
+            key = snapshot_session_key(cloned)
+            old = by_key.get(key)
+            old_uid = old.get("uid") if isinstance(old, dict) else None
+            if isinstance(old_uid, str):
+                detail_by_uid.pop(old_uid, None)
+            by_key[key] = cloned
+            uid = cloned.get("uid")
+            if isinstance(uid, str) and isinstance(incoming_details.get(uid), dict):
+                detail_by_uid[uid] = clone_json(incoming_details[uid])
+
+        sessions = list(by_key.values())
+        sessions.sort(key=lambda row: str(row.get("end_at") or row.get("updated_at") or row.get("start_at") or ""), reverse=True)
+        generated_at = incoming.get("generated_at") or utc_iso(dt.datetime.now(dt.UTC))
+        return {
+            "generated_at": generated_at,
+            "codex_home": incoming.get("codex_home") or existing.get("codex_home") or "",
+            "codex_sources": incoming.get("codex_sources") if isinstance(incoming.get("codex_sources"), list) else [],
+            "sessions": sessions,
+            "details_by_uid": detail_by_uid,
+            "summary": CodexUsageAnalyzer.build_summary_static(sessions),
+            "daily_usage": CodexUsageAnalyzer.build_daily_usage_static(detail_by_uid.values()),
+        }
+
+    def remote_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        code, device, snapshot = self.validate_snapshot(payload)
+        sessions = snapshot.get("sessions") if isinstance(snapshot.get("sessions"), list) else []
+        summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+        return {
+            "device_short_code": code,
+            "label": str(device.get("label") or code),
+            "platform": str(device.get("platform") or ""),
+            "hostname": str(device.get("hostname") or ""),
+            "session_count": len(sessions),
+            "usage": normalize_usage(summary.get("usage")),
+            "imported_at": payload.get("imported_at") or "",
+            "exported_at": payload.get("exported_at") or "",
+            "generated_at": snapshot.get("generated_at") or "",
+        }
+
+    def rename_remote(self, device_code: str, label: str) -> dict[str, Any]:
+        code = safe_device_code(device_code)
+        payload = self.read_remote(code)
+        if not payload:
+            raise FileNotFoundError(code)
+        validated_code, device, _snapshot = self.validate_snapshot(payload)
+        device["label"] = clean_text(label, 120) or validated_code
+        payload["device"] = device
+        safe_json_dump(self.snapshot_path(validated_code), payload)
+        return self.remote_metadata(payload)
+
+    def delete_remote(self, device_code: str) -> None:
+        path = self.snapshot_path(device_code)
+        if not path.exists():
+            raise FileNotFoundError(device_code)
+        path.unlink()
+
+    def transformed_sessions(self) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, str]]]:
+        sessions: list[dict[str, Any]] = []
+        details: dict[str, dict[str, Any]] = {}
+        sources: list[dict[str, str]] = []
+        for payload in self.read_all():
+            try:
+                code, device, snapshot = self.validate_snapshot(payload)
+            except ValueError:
+                continue
+            label = str(device.get("label") or code)
+            source_id = f"remote-{code}"
+            sources.append({"id": source_id, "label": label, "codex_home": f"remote:{code}", "is_remote": True})
+            raw_details = snapshot.get("details_by_uid") if isinstance(snapshot.get("details_by_uid"), dict) else {}
+            for session in snapshot.get("sessions", []):
+                if not isinstance(session, dict):
+                    continue
+                transformed = self.transform_row(session, code, label, source_id, payload)
+                sessions.append({key: transformed.get(key) for key in SUMMARY_KEYS})
+                raw_uid = session.get("uid")
+                raw_detail = raw_details.get(raw_uid) if isinstance(raw_uid, str) else None
+                if isinstance(raw_detail, dict):
+                    details[transformed["uid"]] = self.transform_row(raw_detail, code, label, source_id, payload, transformed["uid"])
+        return sessions, details, sources
+
+    def transform_row(
+        self,
+        row: dict[str, Any],
+        code: str,
+        label: str,
+        source_id: str,
+        payload: dict[str, Any],
+        forced_uid: str | None = None,
+    ) -> dict[str, Any]:
+        raw_uid = str(row.get("uid") or row.get("session_id") or row.get("path") or "")
+        uid = forced_uid or hashlib.sha1(f"{code}:{raw_uid}".encode("utf-8", errors="replace")).hexdigest()[:16]
+        transformed = clone_json(row)
+        transformed["uid"] = uid
+        transformed["environment"] = label
+        transformed["environment_id"] = source_id
+        transformed["is_remote"] = True
+        transformed["remote_device_short_code"] = code
+        transformed["remote_imported_at"] = payload.get("imported_at") or ""
+        transformed["remote_exported_at"] = payload.get("exported_at") or ""
+        transformed["codex_home"] = f"remote:{code}"
+        return transformed
+
+
 class CodexUsageAnalyzer:
-    def __init__(self, codex_home: Path | list[Path] | list[CodexLogSource]):
+    def __init__(
+        self,
+        codex_home: Path | list[Path] | list[CodexLogSource],
+        remote_store: RemoteSnapshotStore | None = None,
+    ):
         if isinstance(codex_home, list):
             if codex_home and isinstance(codex_home[0], CodexLogSource):
                 sources = dedupe_codex_sources(codex_home)
@@ -492,6 +917,7 @@ class CodexUsageAnalyzer:
         self.codex_sources = sources
         self.codex_home = sources[0].codex_home
         self.codex_home_display = codex_home_display(sources)
+        self.remote_store = remote_store
         self._cache: dict[str, tuple[int, int, dict[str, Any], dict[str, Any]]] = {}
 
     def load_session_titles(self, codex_home: Path | None = None) -> dict[str, str]:
@@ -531,6 +957,7 @@ class CodexUsageAnalyzer:
         period: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        include_remotes: bool = True,
     ) -> dict[str, Any]:
         titles_by_source = {
             log_source.id: self.load_session_titles(log_source.codex_home)
@@ -554,12 +981,19 @@ class CodexUsageAnalyzer:
             sessions.append(summary)
             details_by_uid[summary["uid"]] = detail
 
+        codex_sources: list[dict[str, Any]] = codex_source_payloads(self.codex_sources)
+        if include_remotes and self.remote_store is not None:
+            remote_sessions, remote_details, remote_sources = self.remote_store.transformed_sessions()
+            sessions.extend(remote_sessions)
+            details_by_uid.update(remote_details)
+            codex_sources.extend(remote_sources)
+
         sessions.sort(key=lambda row: row["total_token_usage"].get("total_tokens", 0), reverse=True)
         generated_at = dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
         snapshot = {
             "generated_at": generated_at,
             "codex_home": self.codex_home_display,
-            "codex_sources": codex_source_payloads(self.codex_sources),
+            "codex_sources": codex_sources,
             "sessions": sessions,
             "details_by_uid": details_by_uid,
             "summary": self.build_summary(sessions),
@@ -614,6 +1048,10 @@ class CodexUsageAnalyzer:
         }
 
     def build_daily_usage(self, details: Any) -> list[dict[str, Any]]:
+        return self.build_daily_usage_static(details)
+
+    @staticmethod
+    def build_daily_usage_static(details: Any) -> list[dict[str, Any]]:
         tzinfo = dt.datetime.now().astimezone().tzinfo
         by_day: dict[str, dict[str, Any]] = {}
 
@@ -911,6 +1349,10 @@ class CodexUsageAnalyzer:
             "source": source,
             "environment": log_source.label,
             "environment_id": log_source.id,
+            "is_remote": False,
+            "remote_device_short_code": "",
+            "remote_imported_at": "",
+            "remote_exported_at": "",
             "codex_home": str(log_source.codex_home),
             "path": str(path.resolve()),
             "file_size": path.stat().st_size,
@@ -955,6 +1397,10 @@ class CodexUsageAnalyzer:
         return summary, detail
 
     def build_summary(self, sessions: list[dict[str, Any]]) -> dict[str, Any]:
+        return self.build_summary_static(sessions)
+
+    @staticmethod
+    def build_summary_static(sessions: list[dict[str, Any]]) -> dict[str, Any]:
         totals = zero_usage()
         by_model: dict[str, dict[str, Any]] = {}
         by_project: dict[str, dict[str, Any]] = {}
@@ -1090,6 +1536,34 @@ class CodexUsageAnalyzer:
             )
         return buffer.getvalue()
 
+    def export_snapshot_payload(self) -> dict[str, Any]:
+        snapshot = self.scan("all", include_remotes=False)
+        device_code = self.remote_store.current_device_code if self.remote_store else current_device_short_code()
+        now = utc_iso(dt.datetime.now(dt.UTC))
+        return {
+            "schema": SNAPSHOT_SCHEMA,
+            "version": SNAPSHOT_VERSION,
+            "exported_at": now,
+            "device": {
+                "short_code": device_code,
+                "label": default_device_label(),
+                "platform": platform.system() or "",
+                "hostname": platform.node() or "",
+            },
+            "snapshot": {
+                "generated_at": snapshot["generated_at"],
+                "codex_home": snapshot["codex_home"],
+                "codex_sources": snapshot.get("codex_sources", []),
+                "summary": snapshot["summary"],
+                "sessions": snapshot["sessions"],
+                "details_by_uid": snapshot["details_by_uid"],
+                "daily_usage": snapshot.get("daily_usage", []),
+            },
+        }
+
+    def export_snapshot_json(self) -> str:
+        return json.dumps(self.export_snapshot_payload(), ensure_ascii=False, indent=2)
+
 
 HTML = r"""<!doctype html>
 <html lang="zh-CN">
@@ -1204,6 +1678,98 @@ HTML = r"""<!doctype html>
     }
     .calendar-popover[hidden] {
       display: none;
+    }
+    .modal-backdrop[hidden] {
+      display: none;
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(23, 32, 29, 0.36);
+    }
+    .modal {
+      width: min(720px, 100%);
+      max-height: min(720px, calc(100vh - 48px));
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 20px 60px rgba(23, 32, 29, 0.22);
+    }
+    .modal-head,
+    .modal-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .modal-actions {
+      justify-content: flex-end;
+      border-top: 1px solid var(--line);
+      border-bottom: 0;
+    }
+    .modal-head h2 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.3;
+    }
+    .modal-body {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .remote-table {
+      width: 100%;
+      min-width: 0;
+      font-size: 13px;
+    }
+    .remote-table th,
+    .remote-table td {
+      position: static;
+      padding: 8px;
+      vertical-align: middle;
+    }
+    .remote-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .remote-actions button {
+      min-height: 30px;
+      padding: 0 9px;
+    }
+    .inline-form {
+      display: grid;
+      gap: 8px;
+    }
+    .inline-form label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .inline-form input {
+      width: 100%;
+      padding: 0 10px;
+    }
+    .status-line {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .status-line.error-text {
+      color: var(--danger);
+    }
+    .danger {
+      color: var(--danger);
+      border-color: #f1b4ae;
+      background: #fff7f6;
     }
     .calendar-head,
     .calendar-actions {
@@ -1665,6 +2231,12 @@ HTML = r"""<!doctype html>
     .badge.env { color: var(--accent-3); border-color: #a9c0df; background: #eef4fb; }
     .badge.env.wsl { color: var(--accent); border-color: #99c9bb; background: #eef8f4; }
     .badge.env.windows { color: var(--accent-3); border-color: #a9c0df; background: #eef4fb; }
+    .badge.env.remote { color: #7a4c12; border-color: #e3c27a; background: #fff8e5; }
+    .remote-mark {
+      margin-right: 4px;
+      font-weight: 800;
+      line-height: 1;
+    }
     .details {
       position: sticky;
       top: 94px;
@@ -1824,10 +2396,26 @@ HTML = r"""<!doctype html>
           <button class="lang-option" data-lang-button="en" type="button">EN</button>
         </div>
         <button id="refreshBtn" class="primary" title="重新扫描本地日志" data-i18n="refresh" data-i18n-title="refreshTitle">刷新</button>
+        <button id="remoteBtn" title="导入远程数据" data-i18n="importRemote" data-i18n-title="importRemoteTitle">导入远程数据</button>
+        <button id="snapshotExportBtn" title="导出当前设备快照" data-i18n="exportSnapshot" data-i18n-title="exportSnapshotTitle">导出快照</button>
         <button id="exportBtn" title="导出当前所有会话统计" data-i18n="exportCsv" data-i18n-title="exportTitle">导出 CSV</button>
       </div>
     </div>
   </header>
+
+  <input id="remoteFileInput" type="file" accept="application/json,.json" hidden>
+  <div class="modal-backdrop" id="remoteModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="remoteModalTitle">
+      <div class="modal-head">
+        <h2 id="remoteModalTitle" data-i18n="remoteData">远程数据</h2>
+        <button id="remoteCloseBtn" type="button" title="关闭" data-i18n-title="close">关闭</button>
+      </div>
+      <div class="modal-body" id="remoteModalBody"></div>
+      <div class="modal-actions">
+        <button id="remoteImportBtn" class="primary" type="button" data-i18n="importRemote">导入远程数据</button>
+      </div>
+    </div>
+  </div>
 
   <main>
     <div class="metrics" id="metrics"></div>
@@ -1928,6 +2516,9 @@ HTML = r"""<!doctype html>
       customStartDate: '',
       customEndDate: '',
       dailyUsage: [],
+      remotes: [],
+      currentDeviceShortCode: '',
+      pendingRemoteSnapshot: null,
       calendarOpen: false,
       calendarMonth: '',
       calendarDraftStart: '',
@@ -1945,8 +2536,36 @@ HTML = r"""<!doctype html>
         subtitle: '读取本地 Codex 会话日志',
         refresh: '刷新',
         refreshTitle: '重新扫描本地日志',
+        importRemote: '导入远程数据',
+        manageRemote: '管理远程数据',
+        importRemoteTitle: '导入或管理其他设备导出的快照',
+        exportSnapshot: '导出快照',
+        exportSnapshotTitle: '导出当前设备的 Cousash JSON 快照',
         exportCsv: '导出 CSV',
         exportTitle: '导出当前统计',
+        remoteData: '远程数据',
+        close: '关闭',
+        remoteEmpty: '还没有导入远程设备数据。',
+        remoteImportHelp: '选择另一台设备通过 /cousash-export 导出的 JSON 文件。',
+        remoteNeedLabel: '这是新的远程设备，请输入显示名称。',
+        remoteCurrentWarning: '这个文件来自当前设备，导入后可能与本机实时统计重复。是否仍然导入为远程数据？',
+        remoteDeleteConfirm: '删除后无法恢复。确定删除这台远程设备的数据吗？',
+        remoteImported: '远程数据已导入。',
+        remoteDeleted: '远程数据已删除。',
+        remoteRenamed: '设备名称已更新。',
+        remoteImportFailed: '导入失败：{message}',
+        remoteName: '设备名',
+        remoteCode: '设备短码',
+        remoteSessions: '会话',
+        remoteUpdated: '快照时间',
+        remoteImportedAt: '导入时间',
+        remoteActions: '操作',
+        remoteUpdate: '更新',
+        remoteRename: '重命名',
+        remoteDelete: '删除',
+        remoteSave: '保存',
+        remoteCancel: '取消',
+        remoteDevicePrefix: '远程',
         language: '语言',
         period: '统计区间',
         periodToday: '今日',
@@ -2063,8 +2682,36 @@ HTML = r"""<!doctype html>
         subtitle: 'Reading local Codex session logs',
         refresh: 'Refresh',
         refreshTitle: 'Rescan local logs',
+        importRemote: 'Import Remote',
+        manageRemote: 'Manage Remote',
+        importRemoteTitle: 'Import or manage snapshots exported from other devices',
+        exportSnapshot: 'Export Snapshot',
+        exportSnapshotTitle: 'Export this device as a Cousash JSON snapshot',
         exportCsv: 'Export CSV',
         exportTitle: 'Export current statistics',
+        remoteData: 'Remote Data',
+        close: 'Close',
+        remoteEmpty: 'No remote device data has been imported.',
+        remoteImportHelp: 'Choose a JSON file exported by /cousash-export on another device.',
+        remoteNeedLabel: 'This is a new remote device. Enter a display name.',
+        remoteCurrentWarning: 'This file is from the current device. Importing it may duplicate local realtime data. Import it as remote data anyway?',
+        remoteDeleteConfirm: 'This cannot be undone. Delete this remote device data?',
+        remoteImported: 'Remote data imported.',
+        remoteDeleted: 'Remote data deleted.',
+        remoteRenamed: 'Device name updated.',
+        remoteImportFailed: 'Import failed: {message}',
+        remoteName: 'Device',
+        remoteCode: 'Short code',
+        remoteSessions: 'Sessions',
+        remoteUpdated: 'Snapshot',
+        remoteImportedAt: 'Imported',
+        remoteActions: 'Actions',
+        remoteUpdate: 'Update',
+        remoteRename: 'Rename',
+        remoteDelete: 'Delete',
+        remoteSave: 'Save',
+        remoteCancel: 'Cancel',
+        remoteDevicePrefix: 'Remote',
         language: 'Language',
         period: 'Range',
         periodToday: 'Today',
@@ -2205,6 +2852,7 @@ HTML = r"""<!doctype html>
       document.querySelectorAll('[data-lang-button]').forEach(button => {
         button.classList.toggle('active', button.dataset.langButton === state.lang);
       });
+      updateRemoteButton();
       updatePeriodButtons();
       if (state.generatedAt) {
         document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
@@ -2390,7 +3038,8 @@ HTML = r"""<!doctype html>
     function environmentBadge(row) {
       const label = row.environment || '';
       if (!label) return '';
-      return `<span class="badge env ${escapeHtml(badgeClass(row.environment_id || label))}">${escapeHtml(label)}</span>`;
+      const remote = row.is_remote ? `<span class="remote-mark" title="${escapeHtml(t('remoteDevicePrefix'))}">↗</span>` : '';
+      return `<span class="badge env ${row.is_remote ? 'remote' : ''} ${escapeHtml(badgeClass(row.environment_id || label))}">${remote}${escapeHtml(label)}</span>`;
     }
 
     function folderIcon() {
@@ -2444,6 +3093,8 @@ HTML = r"""<!doctype html>
         state.sessions = data.sessions || [];
         state.summary = data.summary || null;
         state.dailyUsage = data.daily_usage || [];
+        state.remotes = data.remotes || [];
+        state.currentDeviceShortCode = data.current_device_short_code || '';
         state.codexHome = data.codex_home || '';
         state.codexSources = data.codex_sources || [];
         state.generatedAt = data.generated_at || '';
@@ -2453,6 +3104,7 @@ HTML = r"""<!doctype html>
           state.customEndDate = data.period?.end_date || requestedEnd || state.customStartDate;
         }
         document.getElementById('codexHome').textContent = `${state.codexHome || ''} · ${fmtDate(state.generatedAt)} ${t('scanned')}`;
+        updateRemoteButton();
         populateEnvironmentFilter();
         populateModelFilter();
         if (state.selectedUid && !state.sessions.some(row => row.uid === state.selectedUid)) {
@@ -2552,6 +3204,7 @@ HTML = r"""<!doctype html>
             workspace: workspaceKey(row),
             environment: row.environment || '',
             environment_id: row.environment_id || '',
+            is_remote: Boolean(row.is_remote),
             rows: [],
             usage: zeroClientUsage(),
             latestTime: 0,
@@ -2563,6 +3216,7 @@ HTML = r"""<!doctype html>
         group.latestTime = Math.max(group.latestTime, rowTime(row));
         if (!group.environment && row.environment) group.environment = row.environment;
         if (!group.environment_id && row.environment_id) group.environment_id = row.environment_id;
+        if (row.is_remote) group.is_remote = true;
       });
 
       return Array.from(groups.values())
@@ -3134,7 +3788,191 @@ HTML = r"""<!doctype html>
       ctx.fillText(t('countPoints', { count: points.length }), 14, height - 8);
     }
 
+    function updateRemoteButton() {
+      const button = document.getElementById('remoteBtn');
+      if (!button) return;
+      button.textContent = state.remotes.length ? t('manageRemote') : t('importRemote');
+      button.title = t('importRemoteTitle');
+    }
+
+    function openRemoteModal() {
+      renderRemoteModal();
+      document.getElementById('remoteModal').hidden = false;
+    }
+
+    function closeRemoteModal() {
+      document.getElementById('remoteModal').hidden = true;
+      state.pendingRemoteSnapshot = null;
+    }
+
+    function remoteStatus(message = '', isError = false) {
+      const el = document.getElementById('remoteStatus');
+      if (!el) return;
+      el.textContent = message;
+      el.classList.toggle('error-text', isError);
+    }
+
+    function renderRemoteModal(status = '') {
+      const body = document.getElementById('remoteModalBody');
+      const rows = state.remotes || [];
+      const table = rows.length ? `
+        <table class="remote-table">
+          <thead>
+            <tr>
+              <th>${escapeHtml(t('remoteName'))}</th>
+              <th>${escapeHtml(t('remoteCode'))}</th>
+              <th>${escapeHtml(t('remoteSessions'))}</th>
+              <th>${escapeHtml(t('remoteUpdated'))}</th>
+              <th>${escapeHtml(t('remoteImportedAt'))}</th>
+              <th>${escapeHtml(t('remoteActions'))}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => `
+              <tr>
+                <td><strong>${escapeHtml(row.label || row.device_short_code)}</strong></td>
+                <td class="path">${escapeHtml(row.device_short_code || '')}</td>
+                <td class="number">${fmt(row.session_count || 0)}</td>
+                <td>${escapeHtml(fmtDate(row.generated_at || row.exported_at))}</td>
+                <td>${escapeHtml(fmtDate(row.imported_at))}</td>
+                <td>
+                  <div class="remote-actions">
+                    <button type="button" data-remote-update="${escapeHtml(row.device_short_code)}">${escapeHtml(t('remoteUpdate'))}</button>
+                    <button type="button" data-remote-rename="${escapeHtml(row.device_short_code)}">${escapeHtml(t('remoteRename'))}</button>
+                    <button class="danger" type="button" data-remote-delete="${escapeHtml(row.device_short_code)}">${escapeHtml(t('remoteDelete'))}</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : `<div class="empty">${escapeHtml(t('remoteEmpty'))}</div>`;
+
+      body.innerHTML = `
+        <div class="status-line">${escapeHtml(t('remoteImportHelp'))}</div>
+        ${table}
+        <div class="status-line" id="remoteStatus">${escapeHtml(status)}</div>
+      `;
+      bindRemoteRows();
+      updateRemoteButton();
+    }
+
+    function bindRemoteRows() {
+      document.querySelectorAll('[data-remote-update]').forEach(button => {
+        button.addEventListener('click', () => chooseRemoteFile());
+      });
+      document.querySelectorAll('[data-remote-rename]').forEach(button => {
+        button.addEventListener('click', () => renameRemote(button.dataset.remoteRename));
+      });
+      document.querySelectorAll('[data-remote-delete]').forEach(button => {
+        button.addEventListener('click', () => deleteRemote(button.dataset.remoteDelete));
+      });
+    }
+
+    function chooseRemoteFile() {
+      const input = document.getElementById('remoteFileInput');
+      input.value = '';
+      input.click();
+    }
+
+    async function readJsonFile(file) {
+      const text = await file.text();
+      return JSON.parse(text);
+    }
+
+    async function importRemoteSnapshot(snapshot, options = {}) {
+      const res = await fetch('/api/remotes/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot, ...options }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        await loadData(false);
+        renderRemoteModal(t('remoteImported'));
+        document.getElementById('remoteModal').hidden = false;
+        return;
+      }
+      if (data.needs_label) {
+        const label = window.prompt(t('remoteNeedLabel'), data.suggested_label || '');
+        if (!label) {
+          remoteStatus('', false);
+          return;
+        }
+        await importRemoteSnapshot(snapshot, { label });
+        return;
+      }
+      if (data.needs_confirmation && data.reason === 'current_device') {
+        if (window.confirm(t('remoteCurrentWarning'))) {
+          const label = window.prompt(t('remoteNeedLabel'), data.suggested_label || '');
+          await importRemoteSnapshot(snapshot, { allow_current_device: true, label: label || data.suggested_label || '' });
+        }
+        return;
+      }
+      throw new Error(data.error || data.reason || 'unknown');
+    }
+
+    async function handleRemoteFile(file) {
+      if (!file) return;
+      try {
+        remoteStatus(t('loading'));
+        const snapshot = await readJsonFile(file);
+        await importRemoteSnapshot(snapshot);
+      } catch (err) {
+        remoteStatus(t('remoteImportFailed', { message: err.message }), true);
+      }
+    }
+
+    async function renameRemote(deviceCode) {
+      const row = state.remotes.find(item => item.device_short_code === deviceCode);
+      const label = window.prompt(t('remoteName'), row?.label || deviceCode);
+      if (!label) return;
+      try {
+        const res = await fetch('/api/remotes/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_short_code: deviceCode, label }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'unknown');
+        await loadData(false);
+        renderRemoteModal(t('remoteRenamed'));
+      } catch (err) {
+        remoteStatus(t('remoteImportFailed', { message: err.message }), true);
+      }
+    }
+
+    async function deleteRemote(deviceCode) {
+      if (!window.confirm(t('remoteDeleteConfirm'))) return;
+      try {
+        const res = await fetch('/api/remotes/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_short_code: deviceCode, confirm: true }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'unknown');
+        await loadData(false);
+        renderRemoteModal(t('remoteDeleted'));
+      } catch (err) {
+        remoteStatus(t('remoteImportFailed', { message: err.message }), true);
+      }
+    }
+
     document.getElementById('refreshBtn').addEventListener('click', () => loadData(false));
+    document.getElementById('remoteBtn').addEventListener('click', () => {
+      if (state.remotes.length) openRemoteModal();
+      else chooseRemoteFile();
+    });
+    document.getElementById('remoteImportBtn').addEventListener('click', chooseRemoteFile);
+    document.getElementById('remoteCloseBtn').addEventListener('click', closeRemoteModal);
+    document.getElementById('remoteModal').addEventListener('click', event => {
+      if (event.target.id === 'remoteModal') closeRemoteModal();
+    });
+    document.getElementById('remoteFileInput').addEventListener('change', event => {
+      handleRemoteFile(event.target.files && event.target.files[0]);
+    });
+    document.getElementById('snapshotExportBtn').addEventListener('click', () => { window.location.href = '/api/export.json'; });
     document.getElementById('exportBtn').addEventListener('click', () => { window.location.href = '/api/export.csv?' + periodParams().toString(); });
     document.getElementById('searchInput').addEventListener('input', event => { state.search = event.target.value; renderAll(); });
     document.getElementById('environmentFilter').addEventListener('change', event => { state.environment = event.target.value; renderAll(); });
@@ -3214,6 +4052,7 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                         "ok": True,
                         "app": "codex-usage-dashboard",
                         "features": DASHBOARD_FEATURES,
+                        "device_short_code": analyzer.remote_store.current_device_code if analyzer.remote_store else current_device_short_code(),
                     }
                 )
                 return
@@ -3231,6 +4070,8 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                     "summary": snapshot["summary"],
                     "sessions": snapshot["sessions"],
                     "daily_usage": snapshot.get("daily_usage", []),
+                    "current_device_short_code": analyzer.remote_store.current_device_code if analyzer.remote_store else current_device_short_code(),
+                    "remotes": analyzer.remote_store.list_remotes() if analyzer.remote_store else [],
                 }
                 self.send_json(payload)
                 return
@@ -3263,7 +4104,89 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
+            if path == "/api/export.json":
+                body = analyzer.export_snapshot_json().encode("utf-8")
+                device_code = analyzer.remote_store.current_device_code if analyzer.remote_store else current_device_short_code()
+                filename = f"cousash-{device_code}.json"
+                self.send_bytes(
+                    body,
+                    "application/json; charset=utf-8",
+                    extra_headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                )
+                return
+
+            if path == "/api/remotes":
+                store = analyzer.remote_store
+                self.send_json(
+                    {
+                        "current_device_short_code": store.current_device_code if store else current_device_short_code(),
+                        "remotes": store.list_remotes() if store else [],
+                    }
+                )
+                return
+
             self.send_json({"error": "not found"}, status=404)
+
+        def do_POST(self) -> None:
+            parsed = urlparse(self.path)
+            path = parsed.path
+            try:
+                payload = self.read_json_body()
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+
+            store = analyzer.remote_store
+            if store is None:
+                self.send_json({"ok": False, "error": "remote snapshots are not enabled"}, status=400)
+                return
+
+            try:
+                if path == "/api/remotes/import":
+                    snapshot = payload.get("snapshot")
+                    label = payload.get("label") if isinstance(payload.get("label"), str) else None
+                    allow_current = bool(payload.get("allow_current_device"))
+                    result = store.import_snapshot(snapshot, label=label, allow_current_device=allow_current)
+                    self.send_json(result, status=200 if result.get("ok") else 409)
+                    return
+
+                if path == "/api/remotes/rename":
+                    device_code = str(payload.get("device_short_code") or "")
+                    label = str(payload.get("label") or "")
+                    remote = store.rename_remote(device_code, label)
+                    self.send_json({"ok": True, "remote": remote})
+                    return
+
+                if path == "/api/remotes/delete":
+                    if payload.get("confirm") is not True:
+                        self.send_json({"ok": False, "error": "delete requires confirmation"}, status=400)
+                        return
+                    store.delete_remote(str(payload.get("device_short_code") or ""))
+                    self.send_json({"ok": True})
+                    return
+            except FileNotFoundError:
+                self.send_json({"ok": False, "error": "remote data not found"}, status=404)
+                return
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+
+            self.send_json({"ok": False, "error": "not found"}, status=404)
+
+        def read_json_body(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length") or "0")
+            if length <= 0:
+                return {}
+            if length > 100 * 1024 * 1024:
+                raise ValueError("request body is too large")
+            raw = self.rfile.read(length)
+            try:
+                payload = json.loads(raw.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError("invalid JSON body") from exc
+            if not isinstance(payload, dict):
+                raise ValueError("JSON body must be an object")
+            return payload
 
         def send_json(self, payload: Any, status: int = 200) -> None:
             body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -3409,6 +4332,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--open", action="store_true", help="Open the dashboard in the default browser.")
     parser.add_argument("--once", action="store_true", help="Scan once and print a short summary instead of serving the UI.")
     parser.add_argument("--json", action="store_true", help="With --once, print JSON.")
+    parser.add_argument(
+        "--export-snapshot",
+        nargs="?",
+        const="",
+        default=None,
+        help="Export this device's full Cousash JSON snapshot. Optionally pass an output path.",
+    )
     return parser.parse_args()
 
 
@@ -3419,7 +4349,16 @@ def main() -> int:
         if args.codex_home
         else default_codex_sources(include_windows=not args.no_auto_windows)
     )
-    analyzer = CodexUsageAnalyzer(sources)
+    remote_store = RemoteSnapshotStore()
+    analyzer = CodexUsageAnalyzer(sources, remote_store=remote_store)
+    if args.export_snapshot is not None:
+        body = analyzer.export_snapshot_json()
+        output = Path(args.export_snapshot).expanduser() if args.export_snapshot else Path.cwd() / f"cousash-{remote_store.current_device_code}.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(body + "\n", encoding="utf-8")
+        safe_print(str(output.resolve()))
+        return 0
+
     if args.once:
         snapshot = analyzer.scan()
         if args.json:

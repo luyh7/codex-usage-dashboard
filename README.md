@@ -2,7 +2,7 @@
 
 Codex-only skill for a local OpenAI Codex usage dashboard.
 
-It reads your local Codex session logs and opens a browser dashboard for per-conversation usage: total tokens, output tokens, estimated dollar cost, cache hit rate, turns, model, reasoning effort, tool calls, and token-count timeline. When launched from WSL, it can also read the mounted Windows Codex log directory and merge both environments into one dashboard.
+It reads your local Codex session logs and opens a browser dashboard for per-conversation usage: total tokens, output tokens, estimated dollar cost, cache hit rate, turns, model, reasoning effort, tool calls, and token-count timeline. It can also import JSON snapshots exported from other devices, so each machine can show local realtime usage plus manually imported remote usage.
 
 > Currently only supports OpenAI Codex. It is not a Claude Code, Cursor, Continue, or generic OpenAI API dashboard.
 <img width="1830" height="1041" alt="Codex Usage Dashboard project view" src="assets/codex-usage-dashboard.png" />
@@ -26,6 +26,13 @@ npx skills add luyh7/codex-usage-dashboard -g -a codex -y
 Then restart Codex or open a new Codex conversation. Type `/usage`, then select the **Codex Usage Dashboard** skill.
 
 The skill opens the local dashboard in your browser.
+
+You can also use:
+
+```text
+/cousash-open
+/cousash-export
+```
 
 ## Install With npx
 
@@ -56,6 +63,7 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Token-count timeline with latest entries shown first.
 - Tool call counts, project path, log file path, and session metadata.
 - Local and read-only: reads Codex session logs from one or more local Codex homes; does not modify Codex logs.
+- Manual multi-device snapshots: export `cousash-<device-short-code>.json` from one device and import it into another dashboard as remote data.
 - WSL + Windows support: when running in WSL, automatically merges WSL `~/.codex` with Windows `/mnt/c/Users/<you>/.codex` when present.
 - Cross-platform: works on Windows and macOS with Python 3.
 - No API key required.
@@ -78,9 +86,16 @@ skills/
     SKILL.md
     agents/openai.yaml
     scripts/open_dashboard.py
+    scripts/export_snapshot.py
     scripts/codex_usage_dashboard.py
     scripts/install_desktop_shortcut.py
     assets/codex_usage_dashboard.ico
+  cousash-open/
+    SKILL.md
+    agents/openai.yaml
+  cousash-export/
+    SKILL.md
+    agents/openai.yaml
 ```
 
 ## Manual Launch
@@ -102,6 +117,30 @@ The dashboard opens at:
 ```text
 http://127.0.0.1:8765/
 ```
+
+## Manual Multi-Device Usage
+
+Open the dashboard on the receiving device:
+
+```bash
+python ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
+```
+
+Export a snapshot on another device:
+
+```bash
+python ~/.codex/skills/codex-usage-dashboard/scripts/export_snapshot.py
+```
+
+The export command writes a JSON file named like:
+
+```text
+cousash-mac-9f3a72c1.json
+```
+
+In the dashboard, use **Import Remote Data** to import that JSON file. The device short code is stored inside the file and is used as the stable identity. Re-importing a newer file from the same device updates that remote data incrementally by session id. If there is no matching remote device yet, the dashboard asks for a display name.
+
+Imported remote snapshots are stored outside the skill directory in the user's application config directory, so reinstalling the skill does not remove them. Remote data can be renamed or deleted from **Manage Remote Data**; deletion is permanent.
 
 To force specific log roots, pass `--codex-home` one or more times:
 
@@ -137,7 +176,7 @@ This is a local dashboard. It does not upload your Codex logs. It starts a local
 
 - Codex-only: designed for OpenAI Codex Desktop/CLI local session logs.
 - Cost is an estimate from public API prices and may not match ChatGPT/Codex subscription billing.
-- Remote syncing across machines is not included. WSL + Windows works on the same machine when the Windows profile is mounted under `/mnt/c`.
+- Automatic remote syncing across machines is not included. Multi-device support is manual export/import. WSL + Windows works on the same machine when the Windows profile is mounted under `/mnt/c`.
 
 ## Keywords
 

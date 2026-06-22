@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cousash Open"
+  short_description: "Open Codex usage."
+  default_prompt: "/cousash-open"
