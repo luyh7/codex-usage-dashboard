@@ -27,13 +27,6 @@ Then restart Codex or open a new Codex conversation. Type `/usage`, then select 
 
 The skill opens the local dashboard in your browser.
 
-You can also use:
-
-```text
-/cousash-open
-/cousash-export
-```
-
 ## Install With npx
 
 GitHub installer:
@@ -90,12 +83,6 @@ skills/
     scripts/codex_usage_dashboard.py
     scripts/install_desktop_shortcut.py
     assets/codex_usage_dashboard.ico
-  cousash-open/
-    SKILL.md
-    agents/openai.yaml
-  cousash-export/
-    SKILL.md
-    agents/openai.yaml
 ```
 
 ## Manual Launch
@@ -126,7 +113,7 @@ Open the dashboard on the receiving device:
 python ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
 ```
 
-Export a snapshot on another device:
+Export a snapshot on another device from the dashboard's **Export Snapshot** button, or run:
 
 ```bash
 python ~/.codex/skills/codex-usage-dashboard/scripts/export_snapshot.py

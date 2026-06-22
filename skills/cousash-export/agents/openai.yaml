@@ -1,4 +1,0 @@
-interface:
-  display_name: "Cousash Export"
-  short_description: "Export device usage."
-  default_prompt: "/cousash-export"

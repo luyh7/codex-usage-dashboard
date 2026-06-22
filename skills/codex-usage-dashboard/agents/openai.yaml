@@ -1,4 +1,4 @@
 interface:
   display_name: "Cousash Usage Dashboard"
-  short_description: "Open or export Codex usage."
-  default_prompt: "/cousash-open"
+  short_description: "Open Codex usage."
+  default_prompt: "Open Codex usage."

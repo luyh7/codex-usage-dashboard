@@ -8,11 +8,11 @@ const cp = require("child_process");
 
 const SKILL_NAME = "codex-usage-dashboard";
 const repoRoot = path.resolve(__dirname, "..");
-const sourceSkillsRoot = path.join(repoRoot, "skills");
-const sourceSkill = path.join(sourceSkillsRoot, SKILL_NAME);
+const sourceSkill = path.join(repoRoot, "skills", SKILL_NAME);
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const targetRoot = path.join(codexHome, "skills");
 const targetSkill = path.join(targetRoot, SKILL_NAME);
+const removedAliasSkills = ["cousash-open", "cousash-export"];
 const args = new Set(process.argv.slice(2));
 
 function copyRecursive(src, dest) {
@@ -62,30 +62,25 @@ if (!fs.existsSync(sourceSkill)) {
 }
 
 fs.mkdirSync(targetRoot, { recursive: true });
-for (const entry of fs.readdirSync(sourceSkillsRoot)) {
-  const source = path.join(sourceSkillsRoot, entry);
-  if (!fs.statSync(source).isDirectory()) continue;
-  const target = path.join(targetRoot, entry);
-  if (args.has("--force") || args.has("-f")) {
-    removeIfExists(target);
-  }
-  copyRecursive(source, target);
+for (const name of removedAliasSkills) {
+  removeIfExists(path.join(targetRoot, name));
 }
+if (args.has("--force") || args.has("-f")) {
+  removeIfExists(targetSkill);
+}
+copyRecursive(sourceSkill, targetSkill);
 
-console.log(`Installed Cousash skills to: ${targetRoot}`);
+console.log(`Installed ${SKILL_NAME} to: ${targetSkill}`);
 console.log("");
 console.log("Codex-only: this is a Codex skill and currently only works in OpenAI Codex.");
 console.log("Restart Codex or open a new Codex conversation, then ask:");
-console.log("  /cousash-open to open my Codex usage dashboard");
-console.log("  /cousash-export to export this device's snapshot");
+console.log("  Use $codex-usage-dashboard to open my Codex usage dashboard");
 console.log("");
 console.log("Standard skills CLI install:");
 console.log("  npx skills add luyh7/codex-usage-dashboard -g -a codex -y");
 console.log("");
 console.log("Direct launch:");
 console.log(`  python "${path.join(targetSkill, "scripts", "open_dashboard.py")}"`);
-console.log("Direct export:");
-console.log(`  python "${path.join(targetSkill, "scripts", "export_snapshot.py")}"`);
 
 if (args.has("--shortcut")) {
   runPython(path.join(targetSkill, "scripts", "install_desktop_shortcut.py"));

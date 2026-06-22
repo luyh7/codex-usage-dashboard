@@ -12,10 +12,8 @@ It does not modify Codex files. Bind address defaults to 127.0.0.1.
 from __future__ import annotations
 
 import argparse
-import csv
 import datetime as dt
 import hashlib
-import io
 import json
 import os
 import platform
@@ -1471,71 +1469,6 @@ class CodexUsageAnalyzer:
         snapshot = self.scan(period, start_date, end_date)
         return snapshot["details_by_uid"].get(uid)
 
-    def export_csv(
-        self,
-        period: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-    ) -> str:
-        snapshot = self.scan(period, start_date, end_date)
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(
-            [
-                "rank",
-                "title",
-                "session_id",
-                "source",
-                "environment",
-                "codex_home",
-                "model",
-                "project",
-                "start_at",
-                "end_at",
-                "total_tokens",
-                "estimated_cost_usd",
-                "cached_input_percent",
-                "input_tokens",
-                "cached_input_tokens",
-                "output_tokens",
-                "reasoning_output_tokens",
-                "turn_count",
-                "completed_turn_count",
-                "effort",
-                "cwd",
-                "path",
-            ]
-        )
-        for index, session in enumerate(snapshot["sessions"], start=1):
-            usage = normalize_usage(session.get("total_token_usage"))
-            writer.writerow(
-                [
-                    index,
-                    session.get("title", ""),
-                    session.get("session_id", ""),
-                    session.get("source", ""),
-                    session.get("environment", ""),
-                    session.get("codex_home", ""),
-                    session.get("model", ""),
-                    session.get("project", ""),
-                    session.get("start_at", ""),
-                    session.get("end_at", ""),
-                    usage["total_tokens"],
-                    session.get("estimated_cost_usd", ""),
-                    session.get("cached_input_percent", ""),
-                    usage["input_tokens"],
-                    usage["cached_input_tokens"],
-                    usage["output_tokens"],
-                    usage["reasoning_output_tokens"],
-                    session.get("turn_count", ""),
-                    session.get("completed_turn_count", ""),
-                    session.get("effort", ""),
-                    session.get("cwd", ""),
-                    session.get("path", ""),
-                ]
-            )
-        return buffer.getvalue()
-
     def export_snapshot_payload(self) -> dict[str, Any]:
         snapshot = self.scan("all", include_remotes=False)
         device_code = self.remote_store.current_device_code if self.remote_store else current_device_short_code()
@@ -1727,23 +1660,48 @@ HTML = r"""<!doctype html>
     .remote-table {
       width: 100%;
       min-width: 0;
+      table-layout: fixed;
       font-size: 13px;
     }
+    .remote-table th:nth-child(1) { width: 18%; }
+    .remote-table th:nth-child(2) { width: 18%; }
+    .remote-table th:nth-child(3) { width: 9%; }
+    .remote-table th:nth-child(4) { width: 15%; }
+    .remote-table th:nth-child(5) { width: 15%; }
+    .remote-table th:nth-child(6) { width: 25%; }
     .remote-table th,
     .remote-table td {
       position: static;
       padding: 8px;
       vertical-align: middle;
     }
+    .remote-table th {
+      text-align: left;
+    }
+    .remote-table .remote-count {
+      font-variant-numeric: tabular-nums;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .remote-table .remote-date,
+    .remote-table .remote-code {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .remote-table .remote-action-cell {
+      text-align: right;
+    }
     .remote-actions {
       display: flex;
       gap: 6px;
       justify-content: flex-end;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      white-space: nowrap;
     }
     .remote-actions button {
       min-height: 30px;
-      padding: 0 9px;
+      padding: 0 8px;
     }
     .inline-form {
       display: grid;
@@ -2398,7 +2356,6 @@ HTML = r"""<!doctype html>
         <button id="refreshBtn" class="primary" title="重新扫描本地日志" data-i18n="refresh" data-i18n-title="refreshTitle">刷新</button>
         <button id="remoteBtn" title="导入远程数据" data-i18n="importRemote" data-i18n-title="importRemoteTitle">导入远程数据</button>
         <button id="snapshotExportBtn" title="导出当前设备快照" data-i18n="exportSnapshot" data-i18n-title="exportSnapshotTitle">导出快照</button>
-        <button id="exportBtn" title="导出当前所有会话统计" data-i18n="exportCsv" data-i18n-title="exportTitle">导出 CSV</button>
       </div>
     </div>
   </header>
@@ -2541,12 +2498,10 @@ HTML = r"""<!doctype html>
         importRemoteTitle: '导入或管理其他设备导出的快照',
         exportSnapshot: '导出快照',
         exportSnapshotTitle: '导出当前设备的 Cousash JSON 快照',
-        exportCsv: '导出 CSV',
-        exportTitle: '导出当前统计',
         remoteData: '远程数据',
         close: '关闭',
         remoteEmpty: '还没有导入远程设备数据。',
-        remoteImportHelp: '选择另一台设备通过 /cousash-export 导出的 JSON 文件。',
+        remoteImportHelp: '选择另一台设备导出的 Cousash JSON 快照文件。',
         remoteNeedLabel: '这是新的远程设备，请输入显示名称。',
         remoteCurrentWarning: '这个文件来自当前设备，导入后可能与本机实时统计重复。是否仍然导入为远程数据？',
         remoteDeleteConfirm: '删除后无法恢复。确定删除这台远程设备的数据吗？',
@@ -2687,12 +2642,10 @@ HTML = r"""<!doctype html>
         importRemoteTitle: 'Import or manage snapshots exported from other devices',
         exportSnapshot: 'Export Snapshot',
         exportSnapshotTitle: 'Export this device as a Cousash JSON snapshot',
-        exportCsv: 'Export CSV',
-        exportTitle: 'Export current statistics',
         remoteData: 'Remote Data',
         close: 'Close',
         remoteEmpty: 'No remote device data has been imported.',
-        remoteImportHelp: 'Choose a JSON file exported by /cousash-export on another device.',
+        remoteImportHelp: 'Choose a Cousash JSON snapshot exported on another device.',
         remoteNeedLabel: 'This is a new remote device. Enter a display name.',
         remoteCurrentWarning: 'This file is from the current device. Importing it may duplicate local realtime data. Import it as remote data anyway?',
         remoteDeleteConfirm: 'This cannot be undone. Delete this remote device data?',
@@ -3831,11 +3784,11 @@ HTML = r"""<!doctype html>
             ${rows.map(row => `
               <tr>
                 <td><strong>${escapeHtml(row.label || row.device_short_code)}</strong></td>
-                <td class="path">${escapeHtml(row.device_short_code || '')}</td>
-                <td class="number">${fmt(row.session_count || 0)}</td>
-                <td>${escapeHtml(fmtDate(row.generated_at || row.exported_at))}</td>
-                <td>${escapeHtml(fmtDate(row.imported_at))}</td>
-                <td>
+                <td class="path remote-code">${escapeHtml(row.device_short_code || '')}</td>
+                <td class="remote-count">${fmt(row.session_count || 0)}</td>
+                <td class="remote-date">${escapeHtml(fmtDate(row.generated_at || row.exported_at))}</td>
+                <td class="remote-date">${escapeHtml(fmtDate(row.imported_at))}</td>
+                <td class="remote-action-cell">
                   <div class="remote-actions">
                     <button type="button" data-remote-update="${escapeHtml(row.device_short_code)}">${escapeHtml(t('remoteUpdate'))}</button>
                     <button type="button" data-remote-rename="${escapeHtml(row.device_short_code)}">${escapeHtml(t('remoteRename'))}</button>
@@ -3973,7 +3926,6 @@ HTML = r"""<!doctype html>
       handleRemoteFile(event.target.files && event.target.files[0]);
     });
     document.getElementById('snapshotExportBtn').addEventListener('click', () => { window.location.href = '/api/export.json'; });
-    document.getElementById('exportBtn').addEventListener('click', () => { window.location.href = '/api/export.csv?' + periodParams().toString(); });
     document.getElementById('searchInput').addEventListener('input', event => { state.search = event.target.value; renderAll(); });
     document.getElementById('environmentFilter').addEventListener('change', event => { state.environment = event.target.value; renderAll(); });
     document.getElementById('sourceFilter').addEventListener('change', event => { state.source = event.target.value; renderAll(); });
@@ -4088,22 +4040,6 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 self.send_json(detail)
                 return
 
-            if path == "/api/export.csv":
-                period = query.get("period", ["today"])[0]
-                start_date = query.get("start", [""])[0] or None
-                end_date = query.get("end", [""])[0] or None
-                body = analyzer.export_csv(period, start_date, end_date).encode("utf-8-sig")
-                if period == "custom" and start_date:
-                    filename = f"codex-usage-{start_date}-{end_date or start_date}.csv"
-                else:
-                    filename = f"codex-usage-{period if period in PERIOD_KEYS else 'today'}.csv"
-                self.send_bytes(
-                    body,
-                    "text/csv; charset=utf-8",
-                    extra_headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-                )
-                return
-
             if path == "/api/export.json":
                 body = analyzer.export_snapshot_json().encode("utf-8")
                 device_code = analyzer.remote_store.current_device_code if analyzer.remote_store else current_device_short_code()
@@ -4208,7 +4144,10 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 for key, value in extra_headers.items():
                     self.send_header(key, value)
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     return Handler
 
