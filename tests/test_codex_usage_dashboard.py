@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +21,20 @@ dashboard = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(dashboard)
 
+OPENER_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "skills"
+    / "codex-usage-dashboard"
+    / "scripts"
+    / "open_dashboard.py"
+)
+
+opener_spec = importlib.util.spec_from_file_location("open_dashboard", OPENER_PATH)
+assert opener_spec is not None
+opener = importlib.util.module_from_spec(opener_spec)
+assert opener_spec.loader is not None
+opener_spec.loader.exec_module(opener)
+
 
 class CodexUsageDashboardTests(unittest.TestCase):
     def write_usage_file(
@@ -30,7 +46,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
         cwd: str | None = None,
     ) -> Path:
         sessions_dir = codex_home / "sessions"
-        sessions_dir.mkdir(parents=True)
+        sessions_dir.mkdir(parents=True, exist_ok=True)
         path = sessions_dir / f"rollout-2026-06-16T22-52-45-{session_id}.jsonl"
         rows = [
             {
@@ -169,6 +185,50 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(session["project"], "codex-usage-dashboard")
         self.assertEqual(session["title"], "codex-usage-dashboard")
 
+    def test_git_worktree_sessions_group_under_main_project_root(self) -> None:
+        if shutil.which("git") is None:
+            self.skipTest("git is not available")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = root / "codex-usage-dashboard"
+            worktree = root / "codex-usage-dashboard-feature"
+            subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True, text=True)
+            (repo / "README.md").write_text("test\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "add", "-b", "feature/worktree-stats", str(worktree)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            codex_home = root / ".codex"
+            self.write_usage_file(codex_home, "main-session", 100, "2026-06-16T14:52:45.653Z", cwd=str(repo))
+            self.write_usage_file(codex_home, "worktree-session", 250, "2026-06-16T15:52:45.653Z", cwd=str(worktree))
+
+            analyzer = dashboard.CodexUsageAnalyzer([dashboard.CodexLogSource("local", "Local", codex_home)])
+            snapshot = analyzer.scan()
+
+        by_session = {row["session_id"]: row for row in snapshot["sessions"]}
+        self.assertEqual(by_session["main-session"]["project"], "codex-usage-dashboard")
+        self.assertEqual(by_session["worktree-session"]["project"], "codex-usage-dashboard")
+        self.assertEqual(by_session["main-session"]["project_root"], str(repo.resolve()))
+        self.assertEqual(by_session["worktree-session"]["project_root"], str(repo.resolve()))
+        self.assertEqual(by_session["worktree-session"]["workspace_root"], str(worktree.resolve()))
+        self.assertEqual(by_session["worktree-session"]["project_branch"], "feature/worktree-stats")
+        self.assertTrue(by_session["worktree-session"]["is_git_worktree"])
+
+        by_project = {row["project_root"]: row for row in snapshot["summary"]["by_project"]}
+        self.assertEqual(by_project[str(repo.resolve())]["sessions"], 2)
+        self.assertEqual(by_project[str(repo.resolve())]["usage"]["total_tokens"], 350)
+
     def test_snapshot_export_contains_device_short_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -304,11 +364,43 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("function renderProjectTable()", html)
         self.assertIn("function projectGroups()", html)
         self.assertIn("function folderIcon()", html)
+        self.assertIn("function branchIcon()", html)
+        self.assertIn("function branchBadge(row)", html)
+        self.assertIn("return row.project_root || row.cwd", html)
+        self.assertIn("${branchIcon()}</span>", html)
+        self.assertNotIn("${branchIcon()}${escapeHtml(label)}</span>", html)
         self.assertIn("compactProject", html)
         self.assertIn("archivedDelta", html)
         self.assertLess(html.index("${folderIcon()}"), html.index('<span class="project-name"'))
         self.assertLess(html.index('<div class="project-title-cell">'), html.index("${environmentBadge(group)}"))
         self.assertLess(html.index("${environmentBadge(group)}"), html.index('<div class="project-meta">'))
+        self.assertIn("git-worktree-project-grouping", dashboard.DASHBOARD_FEATURES)
+
+    def test_opener_health_check_reads_full_payload(self) -> None:
+        class Response:
+            status = 200
+
+            def __enter__(self) -> "Response":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def read(self) -> bytes:
+                payload = {
+                    "ok": True,
+                    "app": "codex-usage-dashboard",
+                    "padding": "x" * 512,
+                    "features": dashboard.DASHBOARD_FEATURES,
+                }
+                return json.dumps(payload).encode("utf-8")
+
+        original_urlopen = opener.urlopen
+        try:
+            opener.urlopen = lambda *_args, **_kwargs: Response()
+            self.assertEqual(opener.health_dashboard_url(8765), "http://127.0.0.1:8765/")
+        finally:
+            opener.urlopen = original_urlopen
 
 
 if __name__ == "__main__":

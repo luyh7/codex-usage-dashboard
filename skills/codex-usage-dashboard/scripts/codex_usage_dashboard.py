@@ -71,6 +71,7 @@ DASHBOARD_FEATURES = [
     "project-grouped-default-view",
     "project-compact-layout-v2",
     "project-env-tag-in-conversation-column",
+    "git-worktree-project-grouping",
     "remote-snapshot-import-v1",
 ]
 
@@ -95,6 +96,10 @@ SUMMARY_KEYS = (
     "updated_at",
     "cwd",
     "project",
+    "project_root",
+    "workspace_root",
+    "project_branch",
+    "is_git_worktree",
     "model",
     "effort",
     "total_token_usage",
@@ -289,6 +294,133 @@ def folder_name_from_path(value: str) -> str:
         return ""
     parts = [part for part in re.split(r"[\\/]+", text) if part]
     return parts[-1] if parts else text
+
+
+class ProjectInfo(NamedTuple):
+    project: str
+    project_root: str
+    workspace_root: str
+    project_branch: str
+    is_git_worktree: bool
+
+
+def _path_from_cwd(value: str) -> Path | None:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return None
+    if re.match(r"^[A-Za-z]:[\\/]", text):
+        if platform.system() == "Windows":
+            path = Path(text).expanduser()
+            return path if path.exists() else None
+        converted = windows_path_to_wsl_path(text)
+        return converted if converted is not None and converted.exists() else None
+    path = Path(text).expanduser()
+    return path if path.exists() else None
+
+
+def _git_output(cwd: Path, *args: str) -> str:
+    git = shutil.which("git")
+    if not git:
+        return ""
+    return run_text_quiet([git, "-C", str(cwd), *args])
+
+
+def _git_common_dir(workspace: Path) -> Path | None:
+    output = _git_output(workspace, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not output:
+        return None
+    try:
+        return Path(output.splitlines()[-1]).expanduser().resolve()
+    except OSError:
+        return None
+
+
+def _git_workspace_root(cwd: Path) -> Path | None:
+    output = _git_output(cwd, "rev-parse", "--show-toplevel")
+    if not output:
+        return None
+    try:
+        return Path(output.splitlines()[-1]).expanduser().resolve()
+    except OSError:
+        return None
+
+
+def _parse_git_worktree_list(output: str) -> tuple[Path | None, dict[str, str]]:
+    main_workspace: Path | None = None
+    branches: dict[str, str] = {}
+    current_workspace: Path | None = None
+    current_bare = False
+    current_branch = ""
+
+    def finish_entry() -> None:
+        nonlocal main_workspace, current_workspace, current_bare, current_branch
+        if current_workspace is None:
+            return
+        workspace_key = str(current_workspace)
+        branches[workspace_key] = current_branch
+        if main_workspace is None and not current_bare:
+            main_workspace = current_workspace
+
+    for line in output.splitlines():
+        if not line.strip():
+            finish_entry()
+            current_workspace = None
+            current_bare = False
+            current_branch = ""
+            continue
+        if line.startswith("worktree "):
+            finish_entry()
+            current_bare = False
+            current_branch = ""
+            raw_path = line.removeprefix("worktree ").strip()
+            try:
+                current_workspace = Path(raw_path).expanduser().resolve()
+            except OSError:
+                current_workspace = None
+        elif line == "bare":
+            current_bare = True
+        elif line.startswith("branch "):
+            current_branch = line.removeprefix("branch ").strip().removeprefix("refs/heads/")
+
+    finish_entry()
+    return main_workspace, branches
+
+
+def git_project_info(cwd: str) -> ProjectInfo:
+    fallback_project = folder_name_from_path(cwd)
+    fallback_root = str(cwd or "").strip()
+    path = _path_from_cwd(cwd)
+    if path is None:
+        return ProjectInfo(fallback_project, fallback_root, fallback_root, "", False)
+
+    workspace = _git_workspace_root(path)
+    if workspace is None:
+        root = str(path.resolve()) if path.exists() else fallback_root
+        return ProjectInfo(folder_name_from_path(root), root, root, "", False)
+
+    branch = _git_output(workspace, "branch", "--show-current")
+    branch = branch.splitlines()[-1].strip() if branch else ""
+    project_root = workspace
+    is_worktree = False
+    common_dir = _git_common_dir(workspace)
+    if common_dir is not None:
+        output = _git_output(workspace, "worktree", "list", "--porcelain")
+        main_workspace, branches = _parse_git_worktree_list(output)
+        workspace_key = str(workspace)
+        if branches.get(workspace_key):
+            branch = branches[workspace_key]
+        if main_workspace is not None:
+            project_root = main_workspace
+            is_worktree = workspace != main_workspace
+
+    project_root_text = str(project_root)
+    return ProjectInfo(
+        folder_name_from_path(project_root_text),
+        project_root_text,
+        str(workspace),
+        branch,
+        is_worktree,
+    )
 
 
 def safe_print(*values: Any) -> None:
@@ -935,6 +1067,7 @@ class CodexUsageAnalyzer:
         self._snapshot_cache_signature: tuple[Any, ...] | None = None
         self._snapshot_cache: dict[str, Any] | None = None
         self._period_cache: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
+        self._project_info_cache: dict[str, ProjectInfo] = {}
 
     def load_session_titles(self, codex_home: Path | None = None) -> dict[str, str]:
         titles: dict[str, str] = {}
@@ -1077,7 +1210,7 @@ class CodexUsageAnalyzer:
             usage = normalize_usage(ranged_detail.get("total_token_usage"))
             if ranged_detail.get("token_event_count", 0) <= 0 and usage["total_tokens"] <= 0:
                 continue
-            sessions.append({field: ranged_detail[field] for field in SUMMARY_KEYS})
+            sessions.append({field: ranged_detail.get(field) for field in SUMMARY_KEYS})
             details_by_uid[ranged_detail["uid"]] = ranged_detail
 
         sessions.sort(key=lambda row: row["total_token_usage"].get("total_tokens", 0), reverse=True)
@@ -1221,6 +1354,14 @@ class CodexUsageAnalyzer:
         summary, detail = self.parse_file(path, source, log_source)
         self._cache[cache_key] = (stat.st_mtime_ns, stat.st_size, summary, detail)
         return summary, detail
+
+    def project_info_for_cwd(self, cwd: str) -> ProjectInfo:
+        key = str(cwd or "")
+        cached = self._project_info_cache.get(key)
+        if cached is None:
+            cached = git_project_info(key)
+            self._project_info_cache[key] = cached
+        return cached
 
     def parse_file(
         self,
@@ -1389,6 +1530,7 @@ class CodexUsageAnalyzer:
             cached_percent = round(total_usage.get("cached_input_tokens", 0) / input_tokens * 100, 1)
         estimated_cost_usd = estimate_cost_usd(total_usage, model)
         estimated_cost_breakdown_usd = estimate_cost_breakdown_usd(total_usage, model)
+        project_info = self.project_info_for_cwd(cwd)
 
         detail: dict[str, Any] = {
             "uid": uid,
@@ -1411,7 +1553,11 @@ class CodexUsageAnalyzer:
             "end_at": end_at,
             "updated_at": utc_from_mtime(path),
             "cwd": cwd,
-            "project": folder_name_from_path(cwd),
+            "project": project_info.project,
+            "project_root": project_info.project_root,
+            "workspace_root": project_info.workspace_root,
+            "project_branch": project_info.project_branch,
+            "is_git_worktree": project_info.is_git_worktree,
             "model": model,
             "effort": effort,
             "originator": originator,
@@ -1476,10 +1622,14 @@ class CodexUsageAnalyzer:
             by_model[model]["sessions"] += 1
             by_model[model]["usage"] = add_usage(by_model[model]["usage"], usage)
 
-            project = str(session.get("project") or "unknown")
-            by_project.setdefault(project, {"project": project, "sessions": 0, "usage": zero_usage()})
-            by_project[project]["sessions"] += 1
-            by_project[project]["usage"] = add_usage(by_project[project]["usage"], usage)
+            project_key = str(session.get("project_root") or session.get("project") or "unknown")
+            project = str(session.get("project") or folder_name_from_path(project_key) or "unknown")
+            by_project.setdefault(
+                project_key,
+                {"project": project, "project_root": project_key, "sessions": 0, "usage": zero_usage()},
+            )
+            by_project[project_key]["sessions"] += 1
+            by_project[project_key]["usage"] = add_usage(by_project[project_key]["usage"], usage)
 
             environment_id = str(session.get("environment_id") or "local")
             environment = str(session.get("environment") or environment_id)
@@ -2240,6 +2390,21 @@ HTML = r"""<!doctype html>
     .badge.env.wsl { color: var(--accent); border-color: #99c9bb; background: #eef8f4; }
     .badge.env.windows { color: var(--accent-3); border-color: #a9c0df; background: #eef4fb; }
     .badge.env.remote { color: #7a4c12; border-color: #e3c27a; background: #fff8e5; }
+    .badge.branch {
+      width: 24px;
+      min-width: 24px;
+      min-height: 22px;
+      justify-content: center;
+      padding: 2px;
+      color: #5b4aa0;
+      border-color: #c3b8ee;
+      background: #f4f1ff;
+    }
+    .branch-icon {
+      width: 13px;
+      height: 13px;
+      flex: 0 0 auto;
+    }
     .remote-mark {
       margin-right: 4px;
       font-weight: 800;
@@ -2668,6 +2833,10 @@ HTML = r"""<!doctype html>
         totalDuration: '总耗时',
         ttftAvg: 'TTFT 均值',
         project: '项目',
+        projectRoot: '项目根目录',
+        workspaceRoot: '工作树目录',
+        branch: '分支',
+        worktree: '工作树',
         cwd: '工作目录',
         logFile: '日志文件',
         codexHome: 'Codex home',
@@ -2812,6 +2981,10 @@ HTML = r"""<!doctype html>
         totalDuration: 'Total duration',
         ttftAvg: 'Avg TTFT',
         project: 'Project',
+        projectRoot: 'Project root',
+        workspaceRoot: 'Worktree dir',
+        branch: 'Branch',
+        worktree: 'Worktree',
         cwd: 'Working dir',
         logFile: 'Log file',
         codexHome: 'Codex home',
@@ -3027,7 +3200,7 @@ HTML = r"""<!doctype html>
     }
 
     function workspaceKey(row) {
-      return row.cwd || row.project || row.path || row.session_id || 'unknown';
+      return row.project_root || row.cwd || row.project || row.path || row.session_id || 'unknown';
     }
 
     function projectKey(row) {
@@ -3052,6 +3225,26 @@ HTML = r"""<!doctype html>
           <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.2a2 2 0 0 1-1.6-.8l-.4-.6A2 2 0 0 0 9.2 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"></path>
         </svg>
       `;
+    }
+
+    function branchIcon() {
+      return `
+        <svg class="branch-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="6" r="3"></circle>
+          <circle cx="18" cy="18" r="3"></circle>
+          <path d="M6 9v3a6 6 0 0 0 6 6h3"></path>
+          <path d="M6 9v12"></path>
+        </svg>
+      `;
+    }
+
+    function branchBadge(row) {
+      if (!row.is_git_worktree) return '';
+      const label = row.project_branch || shortPath(row.workspace_root || row.cwd) || t('worktree');
+      const title = row.workspace_root || row.cwd
+        ? `${label} · ${row.workspace_root || row.cwd}`
+        : label;
+      return `<span class="badge branch" title="${escapeHtml(title)}" aria-label="${escapeHtml(label)}">${branchIcon()}</span>`;
     }
 
     function sourceBadge(source) {
@@ -3164,7 +3357,8 @@ HTML = r"""<!doctype html>
         if (state.model !== 'all' && (row.model || 'unknown') !== state.model) return false;
         if (!needle) return true;
         const haystack = [
-          row.title, row.session_id, row.model, row.project, row.cwd, row.path, row.source, row.environment
+          row.title, row.session_id, row.model, row.project, row.project_root,
+          row.workspace_root, row.project_branch, row.cwd, row.path, row.source, row.environment
         ].join(' ').toLowerCase();
         return haystack.includes(needle);
       });
@@ -3554,10 +3748,11 @@ HTML = r"""<!doctype html>
           <td class="title-cell" title="${escapeHtml((row.title || row.session_id) + (timeValue ? ' · ' + fmtDate(timeValue) : ''))}">
             <div class="title-line">
               ${compactProject ? sourceBadge(row.source) : ''}
+              ${compactProject ? branchBadge(row) : ''}
               <div class="title-main">${escapeHtml(row.title || row.session_id)}</div>
               <div class="title-time">${escapeHtml(fmtRelativeTime(timeValue))}</div>
             </div>
-            ${compactProject ? '' : `<div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>`}
+            ${compactProject ? '' : `<div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source)} ${branchBadge(row)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>`}
           </td>
           <td class="number" title="${fmt(usage.total_tokens)} tokens"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
           <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
@@ -3726,6 +3921,9 @@ HTML = r"""<!doctype html>
           ${kv(t('ttftAvg'), fmtDuration(detail.time_to_first_token_ms_avg))}
           ${kv(t('environment'), detail.environment || '')}
           ${kv(t('project'), detail.project || '')}
+          ${kv(t('projectRoot'), detail.project_root || '', 'path')}
+          ${detail.is_git_worktree ? kv(t('workspaceRoot'), detail.workspace_root || '', 'path') : ''}
+          ${detail.project_branch ? kv(t('branch'), detail.project_branch || '') : ''}
           ${kv(t('cwd'), detail.cwd || '', 'path')}
           ${kv(t('codexHome'), detail.codex_home || '', 'path')}
           ${kv(t('logFile'), detail.path || '', 'path')}
