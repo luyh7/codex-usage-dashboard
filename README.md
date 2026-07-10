@@ -52,7 +52,8 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Per-conversation Codex usage from local session logs.
 - Default project view, grouped by environment and workspace, with switches for recent and total-token list views.
 - Compact list columns for total tokens, output tokens, cost, cache hit rate, turns, model, and reasoning effort.
-- Detail view with token breakdown and estimated dollar cost for input, cached input, output, and reasoning.
+- Detail view with token breakdown, estimated dollar cost, and hoverable unit prices for input, cached input, cache writes, output, and reasoning.
+- Effective-dated pricing with per-request GPT-5.6 short/long context tiers, so earlier usage is not repriced when a new model launches.
 - Token-count timeline with latest entries shown first.
 - Tool call counts, project path, log file path, and session metadata.
 - Local and read-only: reads Codex session logs from one or more local Codex homes; does not modify Codex logs.
@@ -162,7 +163,7 @@ This is a local dashboard. It does not upload your Codex logs. It starts a local
 ## Limitations
 
 - Codex-only: designed for OpenAI Codex Desktop/CLI local session logs.
-- Cost is an estimate from public API prices and may not match ChatGPT/Codex subscription billing.
+- Cost is an estimate from public standard API prices and may not match ChatGPT/Codex subscription billing.
 - Automatic remote syncing across machines is not included. Multi-device support is manual export/import. WSL + Windows works on the same machine when the Windows profile is mounted under `/mnt/c`.
 
 ## Keywords

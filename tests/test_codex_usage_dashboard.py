@@ -136,6 +136,306 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(summary["title"], expected)
         self.assertEqual(detail["first_user_prompt"], expected)
 
+    def test_gpt_5_6_prices_start_at_beijing_launch_time(self) -> None:
+        usage = {
+            "input_tokens": 3_000_000,
+            "cached_input_tokens": 1_000_000,
+            "cache_write_tokens": 1_000_000,
+            "output_tokens": 1_000_000,
+            "total_tokens": 4_000_000,
+        }
+
+        self.assertIsNone(
+            dashboard.estimate_cost_usd(
+                usage,
+                "gpt-5.6-sol",
+                "2026-07-09T16:59:59.999999Z",
+            )
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(
+                usage,
+                "gpt-5.6-sol",
+                "2026-07-09T17:00:00Z",
+            ),
+            68.5,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(
+                usage,
+                "gpt-5.6",
+                "2026-07-10T01:00:00+08:00",
+            ),
+            68.5,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(
+                usage,
+                "gpt-5.6-terra",
+                "2026-07-09T17:00:00Z",
+            ),
+            34.25,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(
+                usage,
+                "gpt-5.6-luna",
+                "2026-07-09T17:00:00Z",
+            ),
+            13.7,
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "gpt-5.6-sol",
+                "2026-07-09T17:00:00Z",
+                input_tokens=272_000,
+            ),
+            dashboard.GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "gpt-5.6-sol",
+                "2026-07-09T17:00:00Z",
+                input_tokens=272_001,
+            ),
+            dashboard.GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+        )
+
+        legacy_usage = {
+            "input_tokens": 1_000_000,
+            "output_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+        }
+        self.assertEqual(
+            dashboard.estimate_cost_usd(legacy_usage, "gpt-5.4", "2026-07-09T16:59:59Z"),
+            17.5,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(legacy_usage, "gpt-5.4", "2026-07-09T17:00:00Z"),
+            17.5,
+        )
+        legacy_cache_write_usage = {
+            "input_tokens": 1_000_000,
+            "cache_write_tokens": 500_000,
+            "total_tokens": 1_000_000,
+        }
+        self.assertEqual(
+            dashboard.estimate_cost_usd(
+                legacy_cache_write_usage,
+                "gpt-5.4",
+                "2026-07-09T16:59:59Z",
+            ),
+            2.5,
+        )
+        self.assertIsNone(dashboard.price_for_model("gpt-5.99"))
+
+    def test_cross_launch_session_is_priced_by_event_model_and_time(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout-2026-07-10T00-59-00-pricing.jsonl"
+            rows = [
+                {
+                    "timestamp": "2026-07-09T16:59:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "pricing-session",
+                        "cwd": "/work/pricing",
+                        "model": "gpt-5.4",
+                    },
+                },
+                {
+                    "timestamp": "2026-07-09T16:59:00Z",
+                    "type": "turn_context",
+                    "payload": {"turn_id": "before", "model": "gpt-5.4"},
+                },
+                {
+                    "timestamp": "2026-07-09T16:59:59.999999Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 1_000_000,
+                                "cached_input_tokens": 0,
+                                "cache_write_tokens": 0,
+                                "output_tokens": 1_000_000,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 2_000_000,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 1_000_000,
+                                "cached_input_tokens": 0,
+                                "cache_write_tokens": 0,
+                                "output_tokens": 1_000_000,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 2_000_000,
+                            },
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-09T17:00:00Z",
+                    "type": "turn_context",
+                    "payload": {"turn_id": "after", "model": "gpt-5.6-sol"},
+                },
+                {
+                    "timestamp": "2026-07-09T17:00:00Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 4_000_000,
+                                "cached_input_tokens": 1_000_000,
+                                "cache_write_tokens": 1_000_000,
+                                "output_tokens": 2_000_000,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 6_000_000,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 3_000_000,
+                                "cached_input_tokens": 1_000_000,
+                                "cache_write_tokens": 1_000_000,
+                                "output_tokens": 1_000_000,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 4_000_000,
+                            },
+                        },
+                    },
+                },
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+            analyzer = dashboard.CodexUsageAnalyzer(Path(temp_dir))
+            _summary, detail = analyzer.parse_file(path, "active")
+
+            before = analyzer.detail_for_period(
+                detail,
+                dashboard.parse_timestamp("2026-07-09T16:00:00Z"),
+                dashboard.parse_timestamp("2026-07-09T16:59:59.999999Z"),
+            )
+            after = analyzer.detail_for_period(
+                detail,
+                dashboard.parse_timestamp("2026-07-09T17:00:00Z"),
+                dashboard.parse_timestamp("2026-07-09T18:00:00Z"),
+            )
+
+        self.assertEqual([row["model"] for row in detail["timeline"]], ["gpt-5.4", "gpt-5.6-sol"])
+        self.assertEqual(detail["estimated_cost_usd"], 86.0)
+        self.assertEqual(detail["estimated_cost_breakdown_usd"]["input_tokens"], 12.5)
+        self.assertEqual(detail["estimated_cost_breakdown_usd"]["cached_input_tokens"], 1.0)
+        self.assertEqual(detail["estimated_cost_breakdown_usd"]["cache_write_tokens"], 12.5)
+        self.assertEqual(detail["estimated_cost_breakdown_usd"]["output_tokens"], 60.0)
+        self.assertEqual([row["model"] for row in detail["applied_price_segments"]], ["gpt-5.4", "gpt-5.6-sol"])
+        self.assertEqual([row["context_tier"] for row in detail["applied_price_segments"]], [None, "long"])
+        self.assertEqual(before["estimated_cost_usd"], 17.5)
+        self.assertEqual(after["estimated_cost_usd"], 68.5)
+        self.assertEqual(detail["estimated_cost_usd"], before["estimated_cost_usd"] + after["estimated_cost_usd"])
+
+    def test_period_usage_handles_cumulative_counter_resets(self) -> None:
+        detail = {
+            "uid": "reset-session",
+            "model": "gpt-5",
+            "timeline": [
+                {
+                    "timestamp": "2026-07-09T10:00:00Z",
+                    "model": "gpt-5",
+                    "total_token_usage": {"input_tokens": 100, "total_tokens": 100},
+                },
+                {
+                    "timestamp": "2026-07-09T11:00:00Z",
+                    "model": "gpt-5",
+                    "total_token_usage": {"input_tokens": 20, "total_tokens": 20},
+                },
+                {
+                    "timestamp": "2026-07-09T12:00:00Z",
+                    "model": "gpt-5",
+                    "total_token_usage": {"input_tokens": 50, "total_tokens": 50},
+                },
+            ],
+            "tasks": [],
+            "total_token_usage": {"input_tokens": 50, "total_tokens": 50},
+            "start_at": "2026-07-09T10:00:00Z",
+            "end_at": "2026-07-09T12:00:00Z",
+        }
+        analyzer = dashboard.CodexUsageAnalyzer(Path("/tmp/nonexistent-codex-home"))
+        full = dashboard.pricing_for_timeline(detail["timeline"], "gpt-5")
+        ranged = analyzer.detail_for_period(
+            detail,
+            dashboard.parse_timestamp("2026-07-09T11:00:00Z"),
+            dashboard.parse_timestamp("2026-07-09T12:00:00Z"),
+        )
+        daily = dashboard.CodexUsageAnalyzer.build_daily_usage_static([detail])
+
+        self.assertEqual(full["applied_price_segments"][0]["usage"]["input_tokens"], 150)
+        self.assertEqual(ranged["total_token_usage"]["input_tokens"], 50)
+        self.assertEqual(ranged["total_token_usage"]["total_tokens"], 50)
+        self.assertEqual(daily[0]["usage"]["input_tokens"], 150)
+        self.assertEqual(daily[0]["usage"]["total_tokens"], 150)
+
+    def test_old_remote_snapshot_preserves_stored_cost_and_normalizes_cache_write_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = dashboard.RemoteSnapshotStore("mac-local", Path(temp_dir) / "remotes")
+            payload = {
+                "schema": dashboard.SNAPSHOT_SCHEMA,
+                "version": dashboard.SNAPSHOT_VERSION,
+                "device": {"short_code": "mac-remote", "label": "Remote Mac"},
+                "snapshot": {
+                    "generated_at": "2026-07-09T17:01:00Z",
+                    "sessions": [
+                        {
+                            "uid": "old-uid",
+                            "session_id": "old-session",
+                            "model": "gpt-5.6-sol",
+                            "total_token_usage": {
+                                "input_tokens": 200,
+                                "cache_write_input_tokens": 25,
+                                "total_tokens": 200,
+                            },
+                            "estimated_cost_usd": 17.5,
+                            "estimated_cost_breakdown_usd": {"input_tokens": 17.5},
+                            "price_model_known": True,
+                        }
+                    ],
+                    "details_by_uid": {
+                        "old-uid": {
+                            "uid": "old-uid",
+                            "session_id": "old-session",
+                            "model": "gpt-5.6-sol",
+                            "end_at": "2026-07-09T17:00:00Z",
+                            "total_token_usage": {
+                                "input_tokens": 200,
+                                "cache_write_input_tokens": 25,
+                                "total_tokens": 200,
+                            },
+                            "estimated_cost_usd": 17.5,
+                            "estimated_cost_breakdown_usd": {"input_tokens": 17.5},
+                            "price_model_known": True,
+                            "timeline": [
+                                {
+                                    "timestamp": "2026-07-09T16:59:59Z",
+                                    "total_token_usage": {"input_tokens": 100, "total_tokens": 100},
+                                },
+                                {
+                                    "timestamp": "2026-07-09T17:00:00Z",
+                                    "total_token_usage": {
+                                        "input_tokens": 200,
+                                        "cache_write_input_tokens": 25,
+                                        "total_tokens": 200,
+                                    },
+                                },
+                            ],
+                        }
+                    },
+                },
+            }
+            self.assertTrue(store.import_snapshot(payload, label="Remote Mac")["ok"])
+            sessions, details, _sources = store.transformed_sessions()
+
+        self.assertEqual(sessions[0]["estimated_cost_usd"], 17.5)
+        self.assertEqual(details[sessions[0]["uid"]]["estimated_cost_usd"], 17.5)
+        self.assertEqual(sessions[0]["total_token_usage"]["cache_write_tokens"], 25)
+        self.assertEqual(details[sessions[0]["uid"]]["timeline"][1]["total_token_usage"]["cache_write_tokens"], 25)
+
     def test_scan_combines_multiple_codex_homes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -375,10 +675,21 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertLess(html.index('<div class="project-title-cell">'), html.index("${environmentBadge(group)}"))
         self.assertLess(html.index("${environmentBadge(group)}"), html.index('<div class="project-meta">'))
         self.assertIn("git-worktree-project-grouping", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("effective-dated-pricing-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("function unitPriceTooltip(segments, usageKey, baseTitle = '')", html)
+        self.assertIn("function fmtUsdRate(value)", html)
+        self.assertIn("String.fromCharCode(10)", html)
+        self.assertIn('class="price-tooltip-trigger"', html)
+        self.assertIn('tabindex="0"', html)
+        self.assertIn("unitPriceSegment", html)
+        self.assertIn("cache_write_tokens", html)
 
     def test_opener_health_check_reads_full_payload(self) -> None:
         class Response:
             status = 200
+
+            def __init__(self, features: list[str]):
+                self.features = features
 
             def __enter__(self) -> "Response":
                 return self
@@ -391,14 +702,18 @@ class CodexUsageDashboardTests(unittest.TestCase):
                     "ok": True,
                     "app": "codex-usage-dashboard",
                     "padding": "x" * 512,
-                    "features": dashboard.DASHBOARD_FEATURES,
+                    "features": self.features,
                 }
                 return json.dumps(payload).encode("utf-8")
 
         original_urlopen = opener.urlopen
         try:
-            opener.urlopen = lambda *_args, **_kwargs: Response()
+            opener.urlopen = lambda *_args, **_kwargs: Response(dashboard.DASHBOARD_FEATURES)
             self.assertEqual(opener.health_dashboard_url(8765), "http://127.0.0.1:8765/")
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "effective-dated-pricing-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
         finally:
             opener.urlopen = original_urlopen
 

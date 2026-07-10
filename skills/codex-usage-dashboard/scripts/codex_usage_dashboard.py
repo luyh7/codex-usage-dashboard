@@ -35,12 +35,13 @@ from urllib.parse import parse_qs, urlparse
 TOKEN_KEYS = (
     "input_tokens",
     "cached_input_tokens",
+    "cache_write_tokens",
     "output_tokens",
     "reasoning_output_tokens",
     "total_tokens",
 )
 
-MODEL_PRICES_USD_PER_M_TOKENS = {
+LEGACY_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.5": {"input": 5.00, "cached_input": 0.50, "output": 30.00},
     "gpt-5.4": {"input": 2.50, "cached_input": 0.25, "output": 15.00},
     "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.50},
@@ -54,6 +55,31 @@ MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5": {"input": 1.25, "cached_input": 0.125, "output": 10.00},
     "gpt-5-codex": {"input": 1.25, "cached_input": 0.125, "output": 10.00},
 }
+
+# 2026-07-10 01:00 in Asia/Shanghai.
+GPT_5_6_PRICING_EFFECTIVE_AT = dt.datetime(2026, 7, 9, 17, 0, 0, tzinfo=dt.UTC)
+GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
+    "gpt-5.6-sol": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
+    "gpt-5.6-terra": {"input": 2.50, "cached_input": 0.25, "cache_write_input": 3.125, "output": 15.00},
+    "gpt-5.6-luna": {"input": 1.00, "cached_input": 0.10, "cache_write_input": 1.25, "output": 6.00},
+}
+# The long-context tier applies to the full request above 272K input tokens.
+GPT_5_6_LONG_CONTEXT_INPUT_THRESHOLD = 272_000
+GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
+    "gpt-5.6-sol": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
+    "gpt-5.6-terra": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 22.50},
+    "gpt-5.6-luna": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 9.00},
+}
+MODEL_PRICES_USD_PER_M_TOKENS = {
+    **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
+}
+MODEL_PRICE_SCHEDULES = (
+    (None, LEGACY_MODEL_PRICES_USD_PER_M_TOKENS),
+    (GPT_5_6_PRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
+)
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
 APP_NAME = "cousash"
@@ -73,6 +99,7 @@ DASHBOARD_FEATURES = [
     "project-env-tag-in-conversation-column",
     "git-worktree-project-grouping",
     "remote-snapshot-import-v1",
+    "effective-dated-pricing-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -125,6 +152,8 @@ def normalize_usage(value: Any) -> dict[str, int]:
     if isinstance(value, dict):
         for key in TOKEN_KEYS:
             raw = value.get(key, 0)
+            if key == "cache_write_tokens" and key not in value:
+                raw = value.get("cache_write_input_tokens", 0)
             if isinstance(raw, (int, float)):
                 usage[key] = int(raw)
     return usage
@@ -138,50 +167,258 @@ def subtract_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int
     return {key: max(int(left.get(key, 0)) - int(right.get(key, 0)), 0) for key in TOKEN_KEYS}
 
 
-def rate_for_model(model: str, rates: dict[str, dict[str, float]]) -> dict[str, float] | None:
+def rate_entry_for_model(
+    model: str,
+    rates: dict[str, dict[str, float]],
+) -> tuple[str, dict[str, float]] | None:
     model_key = (model or "").lower()
     if model_key in rates:
-        return rates[model_key]
+        return model_key, rates[model_key]
     for key in sorted(rates, key=len, reverse=True):
-        if model_key.startswith(key):
-            return rates[key]
+        if model_key.startswith(key + "-"):
+            return key, rates[key]
     return None
 
 
-def price_for_model(model: str) -> dict[str, float] | None:
-    return rate_for_model(model, MODEL_PRICES_USD_PER_M_TOKENS)
+def rate_for_model(model: str, rates: dict[str, dict[str, float]]) -> dict[str, float] | None:
+    entry = rate_entry_for_model(model, rates)
+    return entry[1] if entry else None
 
 
-def estimate_cost_usd(usage: dict[str, int], model: str) -> float | None:
-    price = price_for_model(model)
-    if not price:
+def price_schedule_at(timestamp: Any = None) -> tuple[dt.datetime | None, dict[str, dict[str, float]]]:
+    if timestamp is None:
+        return MODEL_PRICE_SCHEDULES[-1]
+    if isinstance(timestamp, dt.datetime):
+        moment = timestamp if timestamp.tzinfo is not None else timestamp.replace(tzinfo=dt.UTC)
+        moment = moment.astimezone(dt.UTC)
+    else:
+        moment = parse_timestamp(timestamp)
+    if moment is None:
+        return MODEL_PRICE_SCHEDULES[-1]
+    for effective_at, rates in reversed(MODEL_PRICE_SCHEDULES):
+        if effective_at is None or moment >= effective_at:
+            return effective_at, rates
+    return MODEL_PRICE_SCHEDULES[0]
+
+
+def price_entry_for_model(
+    model: str,
+    timestamp: Any = None,
+    input_tokens: int | None = None,
+) -> dict[str, Any] | None:
+    effective_at, rates = price_schedule_at(timestamp)
+    entry = rate_entry_for_model(model, rates)
+    if not entry:
         return None
+    canonical_model, prices = entry
+    context_tier = None
+    if canonical_model in GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS:
+        context_tier = "short"
+        if input_tokens is not None and input_tokens > GPT_5_6_LONG_CONTEXT_INPUT_THRESHOLD:
+            long_entry = rate_entry_for_model(
+                model,
+                GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+            )
+            if long_entry is not None:
+                canonical_model, prices = long_entry
+                context_tier = "long"
+    return {
+        "model": canonical_model,
+        "effective_at": utc_iso(effective_at) if effective_at is not None else None,
+        "context_tier": context_tier,
+        "prices": prices,
+    }
+
+
+def price_for_model(
+    model: str,
+    timestamp: Any = None,
+    input_tokens: int | None = None,
+) -> dict[str, float] | None:
+    entry = price_entry_for_model(model, timestamp, input_tokens)
+    return entry["prices"] if entry else None
+
+
+def usage_cost_parts(usage: dict[str, int], price: dict[str, float]) -> dict[str, float] | None:
     input_tokens = max(int(usage.get("input_tokens", 0)), 0)
     cached_tokens = min(max(int(usage.get("cached_input_tokens", 0)), 0), input_tokens)
-    uncached_tokens = input_tokens - cached_tokens
-    output_tokens = max(int(usage.get("output_tokens", 0)), 0)
-    cost = (
-        uncached_tokens * price["input"]
-        + cached_tokens * price["cached_input"]
-        + output_tokens * price["output"]
-    ) / 1_000_000
-    return round(cost, 6)
-
-
-def estimate_cost_breakdown_usd(usage: dict[str, int], model: str) -> dict[str, float] | None:
-    price = price_for_model(model)
-    if not price:
-        return None
-    input_tokens = max(int(usage.get("input_tokens", 0)), 0)
-    cached_tokens = min(max(int(usage.get("cached_input_tokens", 0)), 0), input_tokens)
-    uncached_tokens = input_tokens - cached_tokens
+    cache_write_tokens = min(
+        max(int(usage.get("cache_write_tokens", usage.get("cache_write_input_tokens", 0))), 0),
+        input_tokens - cached_tokens,
+    )
+    uncached_tokens = input_tokens - cached_tokens - cache_write_tokens
     output_tokens = max(int(usage.get("output_tokens", 0)), 0)
     reasoning_tokens = min(max(int(usage.get("reasoning_output_tokens", 0)), 0), output_tokens)
+    cache_write_price = price.get("cache_write_input", price["input"])
     return {
-        "input_tokens": round(uncached_tokens * price["input"] / 1_000_000, 6),
-        "cached_input_tokens": round(cached_tokens * price["cached_input"] / 1_000_000, 6),
-        "output_tokens": round(output_tokens * price["output"] / 1_000_000, 6),
-        "reasoning_output_tokens": round(reasoning_tokens * price["output"] / 1_000_000, 6),
+        "input_tokens": uncached_tokens * price["input"] / 1_000_000,
+        "cached_input_tokens": cached_tokens * price["cached_input"] / 1_000_000,
+        "cache_write_tokens": cache_write_tokens * cache_write_price / 1_000_000,
+        "output_tokens": output_tokens * price["output"] / 1_000_000,
+        "reasoning_output_tokens": reasoning_tokens * price["output"] / 1_000_000,
+    }
+
+
+def total_cost_from_parts(parts: dict[str, float]) -> float:
+    return sum(
+        parts.get(key, 0.0)
+        for key in ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens")
+    )
+
+
+def estimate_cost_usd(usage: dict[str, int], model: str, timestamp: Any = None) -> float | None:
+    price = price_for_model(model, timestamp, max(int(usage.get("input_tokens", 0)), 0))
+    if not price:
+        return None
+    parts = usage_cost_parts(usage, price)
+    if parts is None:
+        return None
+    return round(total_cost_from_parts(parts), 6)
+
+
+def estimate_cost_breakdown_usd(
+    usage: dict[str, int],
+    model: str,
+    timestamp: Any = None,
+) -> dict[str, float] | None:
+    price = price_for_model(model, timestamp, max(int(usage.get("input_tokens", 0)), 0))
+    if not price:
+        return None
+    parts = usage_cost_parts(usage, price)
+    if parts is None:
+        return None
+    return {key: round(value, 6) for key, value in parts.items()}
+
+
+def usage_has_tokens(usage: dict[str, int]) -> bool:
+    return any(int(usage.get(key, 0)) > 0 for key in TOKEN_KEYS)
+
+
+def timeline_usage_delta(current: dict[str, int], previous: dict[str, int]) -> dict[str, int]:
+    counters = ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "total_tokens")
+    if any(int(current.get(key, 0)) < int(previous.get(key, 0)) for key in counters):
+        return current
+    return subtract_usage(current, previous)
+
+
+def timeline_rows_with_deltas(
+    timeline: Any,
+) -> list[tuple[dict[str, Any], dt.datetime, dict[str, int], dict[str, int]]]:
+    if not isinstance(timeline, list):
+        return []
+    rows = [
+        row
+        for row in timeline
+        if isinstance(row, dict) and parse_timestamp(row.get("timestamp")) is not None
+    ]
+    rows.sort(key=lambda row: parse_timestamp(row.get("timestamp")) or dt.datetime.min.replace(tzinfo=dt.UTC))
+
+    result: list[tuple[dict[str, Any], dt.datetime, dict[str, int], dict[str, int]]] = []
+    previous_usage = zero_usage()
+    for row in rows:
+        timestamp = parse_timestamp(row.get("timestamp"))
+        if timestamp is None:
+            continue
+        cumulative_usage = normalize_usage(row.get("total_token_usage"))
+        delta_usage = timeline_usage_delta(cumulative_usage, previous_usage)
+        previous_usage = cumulative_usage
+        result.append((row, timestamp, cumulative_usage, delta_usage))
+    return result
+
+
+def pricing_for_timeline(
+    timeline: list[dict[str, Any]],
+    fallback_model: str,
+    fallback_usage: dict[str, int] | None = None,
+    fallback_timestamp: Any = None,
+) -> dict[str, Any]:
+    items: list[tuple[dict[str, int], str, Any, bool]] = []
+    for row, _timestamp, _cumulative_usage, delta_usage in timeline_rows_with_deltas(timeline):
+        if usage_has_tokens(delta_usage):
+            items.append(
+                (
+                    delta_usage,
+                    str(row.get("model") or fallback_model),
+                    row.get("timestamp"),
+                    True,
+                )
+            )
+
+    if not items:
+        items.append((normalize_usage(fallback_usage), fallback_model, fallback_timestamp, False))
+
+    known = True
+    total_parts = {
+        key: 0.0
+        for key in (
+            "input_tokens",
+            "cached_input_tokens",
+            "cache_write_tokens",
+            "output_tokens",
+            "reasoning_output_tokens",
+        )
+    }
+    segments_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+    for usage, model, timestamp, is_request_usage in items:
+        request_input_tokens = max(int(usage.get("input_tokens", 0)), 0) if is_request_usage else None
+        entry = price_entry_for_model(model, timestamp, request_input_tokens)
+        if entry is None:
+            known = False
+            continue
+        parts = usage_cost_parts(usage, entry["prices"])
+        if parts is None:
+            known = False
+            continue
+        for key, value in parts.items():
+            total_parts[key] += value
+
+        if not usage_has_tokens(usage):
+            continue
+        prices = entry["prices"]
+        segment_key = (
+            entry["model"],
+            entry["effective_at"],
+            entry["context_tier"],
+            prices.get("input"),
+            prices.get("cached_input"),
+            prices.get("cache_write_input"),
+            prices.get("output"),
+        )
+        segment = segments_by_key.setdefault(
+            segment_key,
+            {
+                "model": entry["model"],
+                "effective_at": entry["effective_at"],
+                "context_tier": entry["context_tier"],
+                "prices": dict(prices),
+                "usage": zero_usage(),
+                "estimated_cost_usd": 0.0,
+                "estimated_cost_breakdown_usd": {
+                    key: 0.0 for key in total_parts
+                },
+            },
+        )
+        segment["usage"] = add_usage(segment["usage"], usage)
+        segment["estimated_cost_usd"] += total_cost_from_parts(parts)
+        for key, value in parts.items():
+            segment["estimated_cost_breakdown_usd"][key] += value
+
+    segments = list(segments_by_key.values())
+    for segment in segments:
+        segment["estimated_cost_usd"] = round(segment["estimated_cost_usd"], 6)
+        segment["estimated_cost_breakdown_usd"] = {
+            key: round(value, 6)
+            for key, value in segment["estimated_cost_breakdown_usd"].items()
+        }
+
+    return {
+        "estimated_cost_usd": round(total_cost_from_parts(total_parts), 6) if known else None,
+        "estimated_cost_breakdown_usd": (
+            {key: round(value, 6) for key, value in total_parts.items()} if known else None
+        ),
+        "price_model_known": known,
+        "applied_price_segments": segments,
     }
 
 
@@ -773,6 +1010,20 @@ def clone_json(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False))
 
 
+def normalize_usage_fields(row: dict[str, Any]) -> None:
+    for key in ("total_token_usage", "last_token_usage"):
+        if isinstance(row.get(key), dict):
+            row[key] = normalize_usage(row[key])
+    timeline = row.get("timeline")
+    if isinstance(timeline, list):
+        for item in timeline:
+            if not isinstance(item, dict):
+                continue
+            for key in ("total_token_usage", "last_token_usage"):
+                if isinstance(item.get(key), dict):
+                    item[key] = normalize_usage(item[key])
+
+
 def path_state_signature(path: Path) -> tuple[str, int | None, int | None]:
     try:
         stat = path.stat()
@@ -1014,11 +1265,57 @@ class RemoteSnapshotStore:
                 if not isinstance(session, dict):
                     continue
                 transformed = self.transform_row(session, code, label, source_id, payload)
-                sessions.append({key: transformed.get(key) for key in SUMMARY_KEYS})
                 raw_uid = session.get("uid")
                 raw_detail = raw_details.get(raw_uid) if isinstance(raw_uid, str) else None
                 if isinstance(raw_detail, dict):
-                    details[transformed["uid"]] = self.transform_row(raw_detail, code, label, source_id, payload, transformed["uid"])
+                    transformed_detail = self.transform_row(
+                        raw_detail,
+                        code,
+                        label,
+                        source_id,
+                        payload,
+                        transformed["uid"],
+                    )
+                    remote_timeline = transformed_detail.get("timeline")
+                    timeline_rows: list[dict[str, Any]] = []
+                    if isinstance(remote_timeline, list):
+                        timeline_rows = [
+                            row
+                            for row in remote_timeline
+                            if isinstance(row, dict)
+                            and usage_has_tokens(normalize_usage(row.get("total_token_usage")))
+                        ]
+                    can_reprice = bool(timeline_rows) and all(
+                        isinstance(row.get("model"), str) and bool(row.get("model"))
+                        for row in timeline_rows
+                    )
+                    if can_reprice:
+                        pricing = pricing_for_timeline(
+                            remote_timeline,
+                            str(transformed_detail.get("model") or transformed.get("model") or ""),
+                            normalize_usage(
+                                transformed_detail.get("total_token_usage")
+                                or transformed.get("total_token_usage")
+                            ),
+                            transformed_detail.get("end_at") or transformed.get("end_at"),
+                        )
+                        transformed_detail.update(pricing)
+                        for key in (
+                            "estimated_cost_usd",
+                            "estimated_cost_breakdown_usd",
+                            "price_model_known",
+                        ):
+                            transformed[key] = pricing[key]
+                    else:
+                        for key in (
+                            "estimated_cost_usd",
+                            "estimated_cost_breakdown_usd",
+                            "price_model_known",
+                        ):
+                            transformed_detail[key] = transformed.get(key)
+                        transformed_detail.setdefault("applied_price_segments", [])
+                    details[transformed["uid"]] = transformed_detail
+                sessions.append({key: transformed.get(key) for key in SUMMARY_KEYS})
         return sessions, details, sources
 
     def transform_row(
@@ -1033,6 +1330,7 @@ class RemoteSnapshotStore:
         raw_uid = str(row.get("uid") or row.get("session_id") or row.get("path") or "")
         uid = forced_uid or hashlib.sha1(f"{code}:{raw_uid}".encode("utf-8", errors="replace")).hexdigest()[:16]
         transformed = clone_json(row)
+        normalize_usage_fields(transformed)
         transformed["uid"] = uid
         transformed["environment"] = label
         transformed["environment_id"] = source_id
@@ -1237,20 +1535,9 @@ class CodexUsageAnalyzer:
         by_day: dict[str, dict[str, Any]] = {}
 
         for detail in details:
-            all_timeline = [
-                row
-                for row in detail.get("timeline", [])
-                if parse_timestamp(row.get("timestamp")) is not None
-            ]
-            all_timeline.sort(key=lambda row: parse_timestamp(row.get("timestamp")) or dt.datetime.min.replace(tzinfo=dt.UTC))
-            previous_usage = zero_usage()
-            for row in all_timeline:
-                timestamp = parse_timestamp(row.get("timestamp"))
-                if timestamp is None:
-                    continue
-                cumulative_usage = normalize_usage(row.get("total_token_usage"))
-                delta_usage = subtract_usage(cumulative_usage, previous_usage)
-                previous_usage = cumulative_usage
+            for _row, timestamp, _cumulative_usage, delta_usage in timeline_rows_with_deltas(
+                detail.get("timeline", [])
+            ):
                 if delta_usage["total_tokens"] <= 0:
                     continue
                 day = timestamp.astimezone(tzinfo).date().isoformat()
@@ -1260,39 +1547,23 @@ class CodexUsageAnalyzer:
         return sorted(by_day.values(), key=lambda row: row["date"])
 
     def detail_for_period(self, detail: dict[str, Any], start_at: dt.datetime, end_at: dt.datetime) -> dict[str, Any]:
-        all_timeline = [
-            row
-            for row in detail.get("timeline", [])
-            if parse_timestamp(row.get("timestamp")) is not None
-        ]
-        all_timeline.sort(key=lambda row: parse_timestamp(row.get("timestamp")) or dt.datetime.min.replace(tzinfo=dt.UTC))
-
-        baseline_usage = zero_usage()
         timeline: list[dict[str, Any]] = []
-        previous_usage = zero_usage()
-        for row in all_timeline:
-            timestamp = parse_timestamp(row.get("timestamp"))
-            if timestamp is None:
-                continue
-            cumulative_usage = normalize_usage(row.get("total_token_usage"))
+        total_usage = zero_usage()
+        last_usage = zero_usage()
+        for row, timestamp, _cumulative_usage, delta_usage in timeline_rows_with_deltas(
+            detail.get("timeline", [])
+        ):
             if timestamp < start_at:
-                baseline_usage = cumulative_usage
-                previous_usage = cumulative_usage
                 continue
             if timestamp > end_at:
                 break
 
+            total_usage = add_usage(total_usage, delta_usage)
+            last_usage = delta_usage
             relative_row = dict(row)
-            relative_row["total_token_usage"] = subtract_usage(cumulative_usage, baseline_usage)
-            relative_row["last_token_usage"] = subtract_usage(cumulative_usage, previous_usage)
+            relative_row["total_token_usage"] = dict(total_usage)
+            relative_row["last_token_usage"] = dict(delta_usage)
             timeline.append(relative_row)
-            previous_usage = cumulative_usage
-
-        end_usage = normalize_usage(all_timeline[-1].get("total_token_usage")) if timeline else zero_usage()
-        if timeline:
-            end_usage = add_usage(baseline_usage, normalize_usage(timeline[-1].get("total_token_usage")))
-        total_usage = subtract_usage(end_usage, baseline_usage)
-        last_usage = normalize_usage(timeline[-1].get("last_token_usage")) if timeline else zero_usage()
         cached_percent = None
         input_tokens = total_usage.get("input_tokens", 0)
         if input_tokens:
@@ -1321,9 +1592,14 @@ class CodexUsageAnalyzer:
         ranged["tasks"] = tasks
         ranged["total_token_usage"] = total_usage
         ranged["last_token_usage"] = last_usage
-        ranged["estimated_cost_usd"] = estimate_cost_usd(total_usage, str(detail.get("model") or ""))
-        ranged["estimated_cost_breakdown_usd"] = estimate_cost_breakdown_usd(total_usage, str(detail.get("model") or ""))
-        ranged["price_model_known"] = ranged["estimated_cost_usd"] is not None
+        ranged.update(
+            pricing_for_timeline(
+                timeline,
+                str(detail.get("model") or ""),
+                total_usage,
+                timeline[-1].get("timestamp") if timeline else end_at,
+            )
+        )
         ranged["cached_input_percent"] = cached_percent
         ranged["token_event_count"] = len(timeline)
         ranged["turn_count"] = len(tasks) or len(timeline)
@@ -1471,6 +1747,7 @@ class CodexUsageAnalyzer:
                         timeline.append(
                             {
                                 "timestamp": timestamp,
+                                "model": model,
                                 "total_token_usage": total_usage,
                                 "last_token_usage": last_usage,
                                 "model_context_window": model_context_window,
@@ -1528,8 +1805,7 @@ class CodexUsageAnalyzer:
         input_tokens = total_usage.get("input_tokens", 0)
         if input_tokens:
             cached_percent = round(total_usage.get("cached_input_tokens", 0) / input_tokens * 100, 1)
-        estimated_cost_usd = estimate_cost_usd(total_usage, model)
-        estimated_cost_breakdown_usd = estimate_cost_breakdown_usd(total_usage, model)
+        pricing = pricing_for_timeline(timeline, model, total_usage, end_at)
         project_info = self.project_info_for_cwd(cwd)
 
         detail: dict[str, Any] = {
@@ -1564,9 +1840,10 @@ class CodexUsageAnalyzer:
             "cli_version": cli_version,
             "total_token_usage": total_usage,
             "last_token_usage": last_usage,
-            "estimated_cost_usd": estimated_cost_usd,
-            "estimated_cost_breakdown_usd": estimated_cost_breakdown_usd,
-            "price_model_known": estimated_cost_usd is not None,
+            "estimated_cost_usd": pricing["estimated_cost_usd"],
+            "estimated_cost_breakdown_usd": pricing["estimated_cost_breakdown_usd"],
+            "price_model_known": pricing["price_model_known"],
+            "applied_price_segments": pricing["applied_price_segments"],
             "cached_input_percent": cached_percent,
             "model_context_window": model_context_window,
             "token_event_count": token_event_count,
@@ -2471,8 +2748,20 @@ HTML = r"""<!doctype html>
       color: var(--text);
       font-weight: 650;
     }
+    .price-tooltip-trigger {
+      cursor: help;
+      text-decoration-line: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 3px;
+    }
+    .price-tooltip-trigger:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 2px;
+    }
     .breakdown-row .bar-fill.input { background: var(--accent-3); }
     .breakdown-row .bar-fill.cached { background: var(--accent); }
+    .breakdown-row .bar-fill.cache-write { background: #b64b72; }
     .breakdown-row .bar-fill.output { background: var(--accent-2); }
     .breakdown-row .bar-fill.reasoning { background: #6f6a25; }
     canvas {
@@ -2493,6 +2782,9 @@ HTML = r"""<!doctype html>
     .mini-table {
       min-width: 0;
       font-size: 12px;
+    }
+    .timeline-table {
+      min-width: 680px;
     }
     .mini-table th, .mini-table td {
       padding: 7px 8px;
@@ -2540,6 +2832,8 @@ HTML = r"""<!doctype html>
       .project-meta { justify-content: flex-start; flex-wrap: wrap; }
       .project-session-row .title-cell { padding-left: 42px; }
       .bar-row { grid-template-columns: 1fr; gap: 4px; }
+      .breakdown-row { grid-template-columns: 64px minmax(0, 1fr) minmax(112px, auto); gap: 6px; }
+      .breakdown-value { gap: 5px; }
       .kv { grid-template-columns: 1fr; gap: 2px; }
     }
   </style>
@@ -2701,7 +2995,7 @@ HTML = r"""<!doctype html>
       reloadAfterLoad: false,
     };
 
-    const tokenKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
+    const tokenKeys = ['input_tokens', 'cached_input_tokens', 'cache_write_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
     const projectPreviewLimit = 5;
 
     const I18N = {
@@ -2823,8 +3117,12 @@ HTML = r"""<!doctype html>
         turnSuffix: '{count} 轮',
         input: '输入',
         cached: '缓存',
+        cacheWrite: '缓存写入',
         reasoning: '推理',
         reasoningCostTitle: '推理花费按输出单价估算，已包含在输出花费中',
+        unitPriceSegment: '{model}：{price} / 100万 tokens · 该档合计 {tokens} tokens',
+        priceShortContext: '（短上下文）',
+        priceLongContext: '（长上下文）',
         cumulativeChart: '累计曲线',
         metadata: '元数据',
         totalTokens: '总 tokens',
@@ -2971,8 +3269,12 @@ HTML = r"""<!doctype html>
         turnSuffix: '{count} turns',
         input: 'Input',
         cached: 'Cached',
+        cacheWrite: 'Cache write',
         reasoning: 'Reasoning',
         reasoningCostTitle: 'Reasoning cost is estimated at the output rate and is included in output cost.',
+        unitPriceSegment: '{model}: {price} / 1M tokens · {tokens} tokens at this rate',
+        priceShortContext: ' (short context)',
+        priceLongContext: ' (long context)',
         cumulativeChart: 'Cumulative Chart',
         metadata: 'Metadata',
         totalTokens: 'Total tokens',
@@ -3125,6 +3427,14 @@ HTML = r"""<!doctype html>
       if (!Number.isFinite(number)) return 'N/A';
       if (number > 0 && number < 0.01) return '$' + number.toFixed(4);
       return '$' + number.toFixed(2);
+    }
+
+    function fmtUsdRate(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return 'N/A';
+      if (Math.abs(number - Number(number.toFixed(2))) < 1e-9) return '$' + number.toFixed(2);
+      if (Math.abs(number - Number(number.toFixed(3))) < 1e-9) return '$' + number.toFixed(3);
+      return '$' + number.toFixed(4);
     }
 
     function fmt(n) {
@@ -3873,9 +4183,14 @@ HTML = r"""<!doctype html>
 
     function renderDetails(detail) {
       const usage = usageOf(detail);
-      const uncachedInputTokens = Math.max(0, Number(usage.input_tokens || 0) - Number(usage.cached_input_tokens || 0));
+      const cacheWriteTokens = Math.max(0, Number(usage.cache_write_tokens || 0));
+      const uncachedInputTokens = Math.max(
+        0,
+        Number(usage.input_tokens || 0) - Number(usage.cached_input_tokens || 0) - cacheWriteTokens,
+      );
       const costs = detail.estimated_cost_breakdown_usd || {};
-      const max = Math.max(1, uncachedInputTokens, usage.cached_input_tokens || 0, usage.output_tokens || 0, usage.reasoning_output_tokens || 0);
+      const priceSegments = Array.isArray(detail.applied_price_segments) ? detail.applied_price_segments : [];
+      const max = Math.max(1, uncachedInputTokens, usage.cached_input_tokens || 0, cacheWriteTokens, usage.output_tokens || 0, usage.reasoning_output_tokens || 0);
       const toolRows = Object.entries(detail.tool_counts || {}).slice(0, 8).map(([name, count]) =>
         `<tr><td>${escapeHtml(name)}</td><td class="number">${fmt(count)}</td></tr>`
       ).join('');
@@ -3889,6 +4204,7 @@ HTML = r"""<!doctype html>
             <td class="number">${fmt(last.total_tokens)}</td>
             <td class="number">${fmt(last.input_tokens)}</td>
             <td class="number">${fmt(last.cached_input_tokens)}</td>
+            <td class="number">${fmt(last.cache_write_tokens)}</td>
             <td class="number">${fmt(last.output_tokens)}</td>
             <td class="number">${fmt(last.reasoning_output_tokens)}</td>
           </tr>
@@ -3901,10 +4217,11 @@ HTML = r"""<!doctype html>
         <div>${environmentBadge(detail)} ${sourceBadge(detail.source)} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
 
         <div class="breakdown">
-          ${breakdownRow(t('input'), 'input', uncachedInputTokens, max, costs.input_tokens)}
-          ${breakdownRow(t('cached'), 'cached', usage.cached_input_tokens, max, costs.cached_input_tokens)}
-          ${breakdownRow(t('output'), 'output', usage.output_tokens, max, costs.output_tokens)}
-          ${breakdownRow(t('reasoning'), 'reasoning', usage.reasoning_output_tokens, max, costs.reasoning_output_tokens, t('reasoningCostTitle'))}
+          ${breakdownRow(t('input'), 'input', uncachedInputTokens, max, costs.input_tokens, unitPriceTooltip(priceSegments, 'input_tokens'))}
+          ${breakdownRow(t('cached'), 'cached', usage.cached_input_tokens, max, costs.cached_input_tokens, unitPriceTooltip(priceSegments, 'cached_input_tokens'))}
+          ${cacheWriteTokens ? breakdownRow(t('cacheWrite'), 'cache-write', cacheWriteTokens, max, costs.cache_write_tokens, unitPriceTooltip(priceSegments, 'cache_write_tokens')) : ''}
+          ${breakdownRow(t('output'), 'output', usage.output_tokens, max, costs.output_tokens, unitPriceTooltip(priceSegments, 'output_tokens'))}
+          ${breakdownRow(t('reasoning'), 'reasoning', usage.reasoning_output_tokens, max, costs.reasoning_output_tokens, unitPriceTooltip(priceSegments, 'reasoning_output_tokens', t('reasoningCostTitle')))}
         </div>
 
         <div class="section-label">${escapeHtml(t('cumulativeChart'))}</div>
@@ -3937,18 +4254,56 @@ HTML = r"""<!doctype html>
         ${toolRows ? `<table class="mini-table"><thead><tr><th>${escapeHtml(t('tool'))}</th><th>${escapeHtml(t('count'))}</th></tr></thead><tbody>${toolRows}</tbody></table>` : `<div class="notice">${escapeHtml(t('noToolCalls'))}</div>`}
 
         <div class="section-label">${escapeHtml(t('timelineDetails'))}</div>
-        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table"><thead><tr><th>${escapeHtml(t('timelineTime'))}</th><th>${escapeHtml(t('timelineTotal'))}</th><th>${escapeHtml(t('input'))}</th><th>${escapeHtml(t('cached'))}</th><th>${escapeHtml(t('output'))}</th><th>${escapeHtml(t('reasoning'))}</th></tr></thead><tbody>${timelineRows}</tbody></table></div>` : `<div class="notice">${escapeHtml(t('noTimeline'))}</div>`}
+        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table timeline-table"><thead><tr><th>${escapeHtml(t('timelineTime'))}</th><th>${escapeHtml(t('timelineTotal'))}</th><th>${escapeHtml(t('input'))}</th><th>${escapeHtml(t('cached'))}</th><th>${escapeHtml(t('cacheWrite'))}</th><th>${escapeHtml(t('output'))}</th><th>${escapeHtml(t('reasoning'))}</th></tr></thead><tbody>${timelineRows}</tbody></table></div>` : `<div class="notice">${escapeHtml(t('noTimeline'))}</div>`}
       `;
       drawTimeline(detail.timeline || []);
     }
 
+    function segmentTokenCount(segment, usageKey) {
+      const usage = segment && segment.usage ? segment.usage : {};
+      if (usageKey === 'input_tokens') {
+        return Math.max(0, Number(usage.input_tokens || 0) - Number(usage.cached_input_tokens || 0) - Number(usage.cache_write_tokens || 0));
+      }
+      return Math.max(0, Number(usage[usageKey] || 0));
+    }
+
+    function unitPriceTooltip(segments, usageKey, baseTitle = '') {
+      const rateKey = {
+        input_tokens: 'input',
+        cached_input_tokens: 'cached_input',
+        cache_write_tokens: 'cache_write_input',
+        output_tokens: 'output',
+        reasoning_output_tokens: 'output',
+      }[usageKey];
+      const lines = (segments || []).flatMap(segment => {
+        const tokens = segmentTokenCount(segment, usageKey);
+        const rawPrice = segment?.prices?.[rateKey]
+          ?? (usageKey === 'cache_write_tokens' ? segment?.prices?.input : undefined);
+        const price = Number(rawPrice);
+        if (!tokens || !Number.isFinite(price)) return [];
+        const tier = segment.context_tier === 'long'
+          ? t('priceLongContext')
+          : (segment.context_tier === 'short' ? t('priceShortContext') : '');
+        return [t('unitPriceSegment', {
+          model: `${segment.model || 'unknown'}${tier}`,
+          price: fmtUsdRate(price),
+          tokens: fmt(tokens),
+        })];
+      });
+      return [baseTitle, ...lines].filter(Boolean).join(String.fromCharCode(10));
+    }
+
     function breakdownRow(label, cls, value, max, cost, title = '') {
       const pct = Math.max(2, Math.round(Number(value || 0) / max * 100));
+      const costText = fmtUsd(cost);
+      const costAttrs = title
+        ? ` class="price-tooltip-trigger" tabindex="0" title="${escapeHtml(title)}" aria-label="${escapeHtml(`${label}: ${costText}. ${title.split(String.fromCharCode(10)).join('. ')}`)}"`
+        : '';
       return `
-        <div class="breakdown-row" title="${escapeHtml(title)}">
+        <div class="breakdown-row">
           <div>${escapeHtml(label)}</div>
           <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
-          <div class="breakdown-value"><span>${fmt(value)}</span><strong>${fmtUsd(cost)}</strong></div>
+          <div class="breakdown-value"><span>${fmt(value)}</span><strong${costAttrs}>${costText}</strong></div>
         </div>
       `;
     }

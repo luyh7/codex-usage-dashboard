@@ -60,6 +60,7 @@ def health_dashboard_url(port: int) -> str | None:
         and "project-env-tag-in-conversation-column" in features
         and "git-worktree-project-grouping" in features
         and "remote-snapshot-import-v1" in features
+        and "effective-dated-pricing-v1" in features
     ):
         return url
     return None
