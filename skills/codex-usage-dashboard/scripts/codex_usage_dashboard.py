@@ -101,11 +101,20 @@ DASHBOARD_FEATURES = [
     "remote-snapshot-import-v1",
     "effective-dated-pricing-v1",
     "bounded-period-scan-v1",
+    "fork-aware-subagent-usage-v1",
 ]
 
 SUMMARY_KEYS = (
     "uid",
     "session_id",
+    "root_session_id",
+    "parent_thread_id",
+    "forked_from_id",
+    "thread_source",
+    "is_subagent",
+    "agent_path",
+    "agent_nickname",
+    "agent_role",
     "title",
     "source",
     "environment",
@@ -132,6 +141,10 @@ SUMMARY_KEYS = (
     "effort",
     "total_token_usage",
     "last_token_usage",
+    "branch_total_token_usage",
+    "inherited_token_usage",
+    "inherited_token_event_count",
+    "fork_usage_resolved",
     "estimated_cost_usd",
     "estimated_cost_breakdown_usd",
     "price_model_known",
@@ -297,7 +310,12 @@ def usage_has_tokens(usage: dict[str, int]) -> bool:
 
 def timeline_usage_delta(current: dict[str, int], previous: dict[str, int]) -> dict[str, int]:
     counters = ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "total_tokens")
-    if any(int(current.get(key, 0)) < int(previous.get(key, 0)) for key in counters):
+    current_total = int(current.get("total_tokens", 0))
+    previous_total = int(previous.get("total_tokens", 0))
+    if current_total or previous_total:
+        if current_total < previous_total:
+            return current
+    elif any(int(current.get(key, 0)) < int(previous.get(key, 0)) for key in counters):
         return current
     return subtract_usage(current, previous)
 
@@ -325,6 +343,74 @@ def timeline_rows_with_deltas(
         previous_usage = cumulative_usage
         result.append((row, timestamp, cumulative_usage, delta_usage))
     return result
+
+
+def timeline_usage_fingerprint(row: dict[str, Any]) -> tuple[int, ...]:
+    total = normalize_usage(row.get("total_token_usage"))
+    last = normalize_usage(row.get("last_token_usage"))
+    return tuple(total[key] for key in TOKEN_KEYS) + tuple(last[key] for key in TOKEN_KEYS)
+
+
+def inherited_timeline_prefix_length(
+    child_timeline: Any,
+    parent_timeline: Any,
+) -> int:
+    if not isinstance(child_timeline, list) or not isinstance(parent_timeline, list):
+        return 0
+    child_rows = [row for row in child_timeline if isinstance(row, dict)]
+    parent_rows = [row for row in parent_timeline if isinstance(row, dict)]
+    if not child_rows or not parent_rows:
+        return 0
+
+    child_fingerprints = [timeline_usage_fingerprint(row) for row in child_rows]
+    parent_fingerprints = [timeline_usage_fingerprint(row) for row in parent_rows]
+    best = 0
+    for start, fingerprint in enumerate(parent_fingerprints):
+        if fingerprint != child_fingerprints[0]:
+            continue
+        length = 0
+        while (
+            length < len(child_fingerprints)
+            and start + length < len(parent_fingerprints)
+            and child_fingerprints[length] == parent_fingerprints[start + length]
+        ):
+            length += 1
+        best = max(best, length)
+    return best
+
+
+def rebase_timeline_after_prefix(
+    timeline: Any,
+    inherited_event_count: int,
+    inherited_usage_override: dict[str, int] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, int], dict[str, int]]:
+    rows = [row for row in timeline if isinstance(row, dict)] if isinstance(timeline, list) else []
+    inherited_event_count = min(max(int(inherited_event_count), 0), len(rows))
+    if inherited_usage_override is not None:
+        inherited_usage = normalize_usage(inherited_usage_override)
+    else:
+        inherited_usage = (
+            normalize_usage(rows[inherited_event_count - 1].get("total_token_usage"))
+            if inherited_event_count
+            else zero_usage()
+        )
+    previous_usage = dict(inherited_usage)
+    total_usage = zero_usage()
+    last_usage = zero_usage()
+    rebased: list[dict[str, Any]] = []
+
+    for row in rows[inherited_event_count:]:
+        current_usage = normalize_usage(row.get("total_token_usage"))
+        delta_usage = timeline_usage_delta(current_usage, previous_usage)
+        previous_usage = current_usage
+        total_usage = add_usage(total_usage, delta_usage)
+        last_usage = delta_usage
+        relative_row = dict(row)
+        relative_row["total_token_usage"] = dict(total_usage)
+        relative_row["last_token_usage"] = dict(delta_usage)
+        rebased.append(relative_row)
+
+    return rebased, total_usage, last_usage, inherited_usage
 
 
 def pricing_for_timeline(
@@ -853,6 +939,25 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def first_session_meta_payload(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle):
+                if index >= 32:
+                    break
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if item.get("type") != "session_meta":
+                    continue
+                payload = item.get("payload")
+                return payload if isinstance(payload, dict) else {}
+    except OSError:
+        return {}
+    return {}
+
+
 class CodexLogSource(NamedTuple):
     id: str
     label: str
@@ -1012,7 +1117,12 @@ def clone_json(value: Any) -> Any:
 
 
 def normalize_usage_fields(row: dict[str, Any]) -> None:
-    for key in ("total_token_usage", "last_token_usage"):
+    for key in (
+        "total_token_usage",
+        "last_token_usage",
+        "branch_total_token_usage",
+        "inherited_token_usage",
+    ):
         if isinstance(row.get(key), dict):
             row[key] = normalize_usage(row[key])
     timeline = row.get("timeline")
@@ -1423,11 +1533,13 @@ class CodexUsageAnalyzer:
         end_date: str | None = None,
         include_remotes: bool = True,
     ) -> dict[str, Any]:
-        files = self.iter_session_files()
+        all_files = self.iter_session_files()
+        files = all_files
         if period:
             key, start_at, _end_at, start_key, end_key = local_period_bounds(period, start_date, end_date)
             if start_at is not None:
                 files = self.files_modified_since(files, start_at)
+                files = self.files_with_fork_dependencies(files, all_files)
                 signature = self.scan_signature(files, include_remotes)
                 cache_key = (key, start_key, end_key, include_remotes)
                 cached = self._bounded_snapshot_cache.get(cache_key)
@@ -1472,6 +1584,200 @@ class CodexUsageAnalyzer:
                 continue
         return candidates
 
+    @staticmethod
+    def files_with_fork_dependencies(
+        candidates: list[tuple[CodexLogSource, Path, str]],
+        all_files: list[tuple[CodexLogSource, Path, str]],
+    ) -> list[tuple[CodexLogSource, Path, str]]:
+        metadata_by_path: dict[str, dict[str, Any]] = {}
+        files_by_thread: dict[tuple[str, str], tuple[CodexLogSource, Path, str]] = {}
+        for item in all_files:
+            log_source, path, _source = item
+            path_key = str(path.resolve())
+            payload = first_session_meta_payload(path)
+            metadata_by_path[path_key] = payload
+            session_id = payload.get("id") or payload.get("session_id")
+            if isinstance(session_id, str) and session_id:
+                files_by_thread.setdefault((log_source.id, session_id), item)
+
+        selected = {str(item[1].resolve()): item for item in candidates}
+        queue = list(candidates)
+        while queue:
+            log_source, path, _source = queue.pop()
+            payload = metadata_by_path.get(str(path.resolve()), {})
+            forked_from_id = payload.get("forked_from_id")
+            if not isinstance(forked_from_id, str) or not forked_from_id:
+                continue
+            dependency = files_by_thread.get((log_source.id, forked_from_id))
+            if dependency is None:
+                continue
+            dependency_key = str(dependency[1].resolve())
+            if dependency_key in selected:
+                continue
+            selected[dependency_key] = dependency
+            queue.append(dependency)
+
+        return [item for item in all_files if str(item[1].resolve()) in selected]
+
+    @staticmethod
+    def normalize_subagent_usage(
+        local_rows: list[tuple[dict[str, Any], dict[str, Any]]],
+    ) -> None:
+        details_by_thread: dict[tuple[str, str], dict[str, Any]] = {}
+        raw_timelines: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for _summary, detail in local_rows:
+            environment_id = str(detail.get("environment_id") or "")
+            session_id = str(detail.get("session_id") or "")
+            if not session_id:
+                continue
+            key = (environment_id, session_id)
+            details_by_thread.setdefault(key, detail)
+            timeline = detail.get("timeline")
+            if key not in raw_timelines and isinstance(timeline, list):
+                raw_timelines[key] = clone_json(timeline)
+
+        for summary, detail in local_rows:
+            if not (detail.get("is_subagent") or detail.get("forked_from_id")):
+                continue
+
+            environment_id = str(detail.get("environment_id") or "")
+            match_source_id = str(
+                detail.get("forked_from_id") or detail.get("parent_thread_id") or ""
+            )
+            child_timeline = detail.get("timeline")
+            if not isinstance(child_timeline, list):
+                continue
+
+            parent_key = (environment_id, match_source_id)
+            parent_detail = details_by_thread.get(parent_key)
+            parent_timeline = raw_timelines.get(parent_key)
+            fork_at = parse_timestamp(detail.get("created_at"))
+            parent_timeline_at_fork = parent_timeline
+            if fork_at is not None and isinstance(parent_timeline, list):
+                parent_timeline_at_fork = [
+                    row
+                    for row in parent_timeline
+                    if (
+                        (parent_timestamp := parse_timestamp(row.get("timestamp"))) is not None
+                        and parent_timestamp <= fork_at
+                    )
+                ]
+            inherited_event_count = inherited_timeline_prefix_length(
+                child_timeline,
+                parent_timeline_at_fork,
+            )
+
+            usage_before_fork = zero_usage()
+            if isinstance(parent_timeline_at_fork, list):
+                for parent_row in parent_timeline_at_fork:
+                    usage_before_fork = normalize_usage(parent_row.get("total_token_usage"))
+
+            inherited_override: dict[str, int] | None = None
+            resolved = False
+            if inherited_event_count:
+                resolved = True
+            elif not detail.get("forked_from_id"):
+                inherited_override = zero_usage()
+                resolved = True
+            elif parent_detail is not None:
+                if not child_timeline or not usage_has_tokens(usage_before_fork):
+                    inherited_override = zero_usage()
+                    resolved = True
+                else:
+                    first_total = normalize_usage(child_timeline[0].get("total_token_usage"))
+                    first_last = normalize_usage(child_timeline[0].get("last_token_usage"))
+                    if first_total == first_last:
+                        inherited_override = zero_usage()
+                        resolved = True
+                    elif timeline_usage_delta(first_total, usage_before_fork) == first_last:
+                        inherited_override = usage_before_fork
+                        resolved = True
+            elif not child_timeline:
+                inherited_override = zero_usage()
+                resolved = True
+
+            detail["fork_usage_resolved"] = resolved
+            if not resolved:
+                detail["timeline"] = []
+                detail["total_token_usage"] = zero_usage()
+                detail["last_token_usage"] = zero_usage()
+                detail["estimated_cost_usd"] = None
+                detail["estimated_cost_breakdown_usd"] = None
+                detail["price_model_known"] = False
+                detail["applied_price_segments"] = []
+                detail["cached_input_percent"] = None
+                detail["token_event_count"] = 0
+                summary.update({key: detail.get(key) for key in SUMMARY_KEYS})
+                continue
+
+            rebased, total_usage, last_usage, inherited_usage = rebase_timeline_after_prefix(
+                child_timeline,
+                inherited_event_count,
+                inherited_override,
+            )
+            detail["timeline"] = rebased
+            detail["total_token_usage"] = total_usage
+            detail["last_token_usage"] = last_usage
+            detail["inherited_token_usage"] = inherited_usage
+            detail["inherited_token_event_count"] = inherited_event_count
+
+            inherited_cutoff = None
+            if inherited_event_count:
+                inherited_cutoff = parse_timestamp(
+                    child_timeline[inherited_event_count - 1].get("timestamp")
+                )
+            if inherited_cutoff is not None:
+                detail["tasks"] = [
+                    task
+                    for task in detail.get("tasks", [])
+                    if (
+                        (task_timestamp := parse_timestamp(task.get("timestamp"))) is not None
+                        and task_timestamp > inherited_cutoff
+                    )
+                ]
+
+            tasks = detail.get("tasks", [])
+            durations_ms = [
+                int(task["duration_ms"])
+                for task in tasks
+                if isinstance(task.get("duration_ms"), (int, float))
+            ]
+            ttf_ms = [
+                int(task["time_to_first_token_ms"])
+                for task in tasks
+                if isinstance(task.get("time_to_first_token_ms"), (int, float))
+            ]
+            input_tokens = total_usage.get("input_tokens", 0)
+            detail["cached_input_percent"] = (
+                round(total_usage.get("cached_input_tokens", 0) / input_tokens * 100, 1)
+                if input_tokens
+                else None
+            )
+            detail["token_event_count"] = len(rebased)
+            detail["turn_count"] = len(tasks) or len(rebased)
+            detail["completed_turn_count"] = len(tasks)
+            detail["duration_ms_total"] = sum(durations_ms)
+            detail["duration_ms_avg"] = (
+                int(sum(durations_ms) / len(durations_ms)) if durations_ms else None
+            )
+            detail["time_to_first_token_ms_avg"] = (
+                int(sum(ttf_ms) / len(ttf_ms)) if ttf_ms else None
+            )
+            detail.update(
+                pricing_for_timeline(
+                    rebased,
+                    str(detail.get("model") or ""),
+                    total_usage,
+                    rebased[-1].get("timestamp") if rebased else detail.get("end_at"),
+                )
+            )
+            if rebased:
+                detail["start_at"] = str(rebased[0].get("timestamp") or detail.get("created_at") or "")
+                detail["end_at"] = str(rebased[-1].get("timestamp") or detail.get("end_at") or "")
+                detail["model_context_window"] = rebased[-1].get("model_context_window")
+                detail["latest_rate_limits"] = rebased[-1].get("rate_limits")
+            summary.update({key: detail.get(key) for key in SUMMARY_KEYS})
+
     def build_snapshot(
         self,
         files: list[tuple[CodexLogSource, Path, str]],
@@ -1484,15 +1790,23 @@ class CodexUsageAnalyzer:
         }
         sessions: list[dict[str, Any]] = []
         details_by_uid: dict[str, dict[str, Any]] = {}
+        local_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
         for log_source, path, source in files:
             try:
-                summary, detail = self.parse_file_cached(path, source, log_source)
+                cached_summary, cached_detail = self.parse_file_cached(path, source, log_source)
             except OSError:
                 continue
 
+            summary = clone_json(cached_summary)
+            detail = clone_json(cached_detail)
+            local_rows.append((summary, detail))
+
+        self.normalize_subagent_usage(local_rows)
+
+        for summary, detail in local_rows:
             session_id = summary.get("session_id")
-            titles = titles_by_source.get(log_source.id, {})
+            titles = titles_by_source.get(str(summary.get("environment_id") or ""), {})
             if isinstance(session_id, str) and session_id in titles:
                 summary["title"] = titles[session_id]
                 detail["title"] = titles[session_id]
@@ -1689,6 +2003,15 @@ class CodexUsageAnalyzer:
         log_source = log_source or self.codex_sources[0]
         uid = hashlib.sha1(f"{log_source.id}:{path.resolve()}".encode("utf-8", errors="replace")).hexdigest()[:16]
         session_id = ""
+        root_session_id = ""
+        parent_thread_id = ""
+        forked_from_id = ""
+        thread_source = ""
+        is_subagent = False
+        agent_path = ""
+        agent_nickname = ""
+        agent_role = ""
+        session_meta_seen = False
         title = ""
         cwd = ""
         model = ""
@@ -1737,12 +2060,68 @@ class CodexUsageAnalyzer:
             payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
 
             if item_type == "session_meta":
-                session_id = str(payload.get("id") or session_id)
-                cwd = str(payload.get("cwd") or cwd)
-                created_at = str(payload.get("timestamp") or created_at)
-                originator = str(payload.get("originator") or originator)
-                cli_version = str(payload.get("cli_version") or cli_version)
-                model = str(payload.get("model") or payload.get("model_slug") or model)
+                if not session_meta_seen:
+                    session_meta_seen = True
+                    session_id = str(payload.get("id") or payload.get("session_id") or session_id)
+                    root_session_id = str(payload.get("session_id") or session_id)
+                    cwd = str(payload.get("cwd") or cwd)
+                    created_at = str(payload.get("timestamp") or created_at)
+                    originator = str(payload.get("originator") or originator)
+                    cli_version = str(payload.get("cli_version") or cli_version)
+                    model = str(payload.get("model") or payload.get("model_slug") or model)
+
+                    raw_thread_source = payload.get("thread_source")
+                    if isinstance(raw_thread_source, str):
+                        thread_source = raw_thread_source
+
+                    raw_source = payload.get("source")
+                    subagent_meta: dict[str, Any] = {}
+                    if isinstance(raw_source, dict) and isinstance(raw_source.get("subagent"), dict):
+                        subagent_meta = raw_source["subagent"]
+                    spawn_meta = (
+                        subagent_meta.get("thread_spawn")
+                        if isinstance(subagent_meta.get("thread_spawn"), dict)
+                        else subagent_meta
+                    )
+                    parent_thread_id = str(
+                        payload.get("parent_thread_id")
+                        or spawn_meta.get("parent_thread_id")
+                        or subagent_meta.get("parent_thread_id")
+                        or ""
+                    )
+                    forked_from_id = str(
+                        payload.get("forked_from_id")
+                        or spawn_meta.get("forked_from_id")
+                        or subagent_meta.get("forked_from_id")
+                        or ""
+                    )
+                    agent_path = str(
+                        payload.get("agent_path")
+                        or spawn_meta.get("agent_path")
+                        or subagent_meta.get("agent_path")
+                        or ""
+                    )
+                    agent_nickname = str(
+                        payload.get("agent_nickname")
+                        or spawn_meta.get("agent_nickname")
+                        or subagent_meta.get("agent_nickname")
+                        or ""
+                    )
+                    agent_role = str(
+                        payload.get("agent_role")
+                        or spawn_meta.get("agent_role")
+                        or subagent_meta.get("agent_role")
+                        or ""
+                    )
+                    is_subagent = bool(
+                        subagent_meta
+                        or parent_thread_id
+                        or thread_source.lower() == "subagent"
+                    )
+                    if is_subagent and not parent_thread_id:
+                        parent_thread_id = forked_from_id or (
+                            root_session_id if root_session_id != session_id else ""
+                        )
 
             elif item_type == "turn_context":
                 turn_id = payload.get("turn_id")
@@ -1833,9 +2212,19 @@ class CodexUsageAnalyzer:
         if not session_id:
             match = re.search(r"rollout-[^-]+-[^-]+-(.+?)\.jsonl$", path.name)
             session_id = match.group(1) if match else uid
+        if not root_session_id:
+            root_session_id = session_id
 
         if not title:
-            title = first_user_prompt or folder_name_from_path(cwd) or path.stem
+            agent_leaf = agent_path.rstrip("/").rsplit("/", 1)[-1] if agent_path else ""
+            agent_labels = [agent_nickname] if agent_nickname else []
+            if agent_leaf and all(agent_leaf.casefold() != label.casefold() for label in agent_labels):
+                agent_labels.append(agent_leaf)
+            title = (
+                " · ".join(agent_labels)
+                if is_subagent and agent_labels
+                else first_user_prompt or folder_name_from_path(cwd) or path.stem
+            )
 
         if not start_at:
             start_at = created_at or utc_from_mtime(path) or ""
@@ -1852,6 +2241,14 @@ class CodexUsageAnalyzer:
         detail: dict[str, Any] = {
             "uid": uid,
             "session_id": session_id,
+            "root_session_id": root_session_id,
+            "parent_thread_id": parent_thread_id,
+            "forked_from_id": forked_from_id,
+            "thread_source": thread_source,
+            "is_subagent": is_subagent,
+            "agent_path": agent_path,
+            "agent_nickname": agent_nickname,
+            "agent_role": agent_role,
             "title": title,
             "source": source,
             "environment": log_source.label,
@@ -1881,6 +2278,10 @@ class CodexUsageAnalyzer:
             "cli_version": cli_version,
             "total_token_usage": total_usage,
             "last_token_usage": last_usage,
+            "branch_total_token_usage": total_usage,
+            "inherited_token_usage": zero_usage(),
+            "inherited_token_event_count": 0,
+            "fork_usage_resolved": not is_subagent,
             "estimated_cost_usd": pricing["estimated_cost_usd"],
             "estimated_cost_breakdown_usd": pricing["estimated_cost_breakdown_usd"],
             "price_model_known": pricing["price_model_known"],
@@ -3181,6 +3582,13 @@ HTML = r"""<!doctype html>
         cwd: '工作目录',
         logFile: '日志文件',
         codexHome: 'Codex home',
+        threadType: '线程类型',
+        subagent: '子代理',
+        parentThread: '父线程',
+        inheritedTokens: '继承基线',
+        branchTotalTokens: '分支原始累计',
+        forkBaselineStatus: '基线状态',
+        forkBaselineUnresolved: '未解析',
         firstUserPrompt: '首条用户消息',
         lastReplySummary: '最后回复摘要',
         toolCalls: '工具调用',
@@ -3333,6 +3741,13 @@ HTML = r"""<!doctype html>
         cwd: 'Working dir',
         logFile: 'Log file',
         codexHome: 'Codex home',
+        threadType: 'Thread type',
+        subagent: 'Subagent',
+        parentThread: 'Parent thread',
+        inheritedTokens: 'Inherited baseline',
+        branchTotalTokens: 'Raw branch total',
+        forkBaselineStatus: 'Baseline status',
+        forkBaselineUnresolved: 'Unresolved',
         firstUserPrompt: 'First User Message',
         lastReplySummary: 'Last Reply Summary',
         toolCalls: 'Tool Calls',
@@ -4291,7 +4706,7 @@ HTML = r"""<!doctype html>
       document.getElementById('detailStatus').textContent = t('countEvents', { count: fmt(detail.token_event_count) });
       document.getElementById('detailsBody').innerHTML = `
         <div class="detail-title">${escapeHtml(detail.title || detail.session_id)}</div>
-        <div>${environmentBadge(detail)} ${sourceBadge(detail.source)} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
+        <div>${environmentBadge(detail)} ${sourceBadge(detail.source)} ${detail.is_subagent ? `<span class="badge">${escapeHtml(t('subagent'))}</span>` : ''} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
 
         <div class="breakdown">
           ${breakdownRow(t('input'), 'input', uncachedInputTokens, max, costs.input_tokens, unitPriceTooltip(priceSegments, 'input_tokens'))}
@@ -4322,6 +4737,11 @@ HTML = r"""<!doctype html>
           ${kv(t('codexHome'), detail.codex_home || '', 'path')}
           ${kv(t('logFile'), detail.path || '', 'path')}
           ${kv('Session ID', detail.session_id || '', 'path')}
+          ${detail.is_subagent ? kv(t('threadType'), t('subagent')) : ''}
+          ${detail.parent_thread_id ? kv(t('parentThread'), detail.parent_thread_id, 'path') : ''}
+          ${detail.is_subagent ? kv(t('inheritedTokens'), fmt(detail.inherited_token_usage?.total_tokens || 0)) : ''}
+          ${detail.is_subagent ? kv(t('branchTotalTokens'), fmt(detail.branch_total_token_usage?.total_tokens || 0)) : ''}
+          ${detail.is_subagent && detail.fork_usage_resolved === false ? kv(t('forkBaselineStatus'), t('forkBaselineUnresolved')) : ''}
         </div>
 
         ${detail.first_user_prompt ? `<div class="section-label">${escapeHtml(t('firstUserPrompt'))}</div><div class="notice">${escapeHtml(detail.first_user_prompt)}</div>` : ''}

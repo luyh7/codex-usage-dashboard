@@ -54,6 +54,7 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Compact list columns for total tokens, output tokens, cost, cache hit rate, turns, model, and reasoning effort.
 - Detail view with token breakdown, estimated dollar cost, and hoverable unit prices for input, cached input, cache writes, output, and reasoning.
 - Effective-dated pricing with per-request GPT-5.6 short/long context tiers, so earlier usage is not repriced when a new model launches.
+- Fork-aware subagent accounting: inherited parent history is removed from child totals, costs, and timelines instead of being counted again.
 - Token-count timeline with latest entries shown first.
 - Tool call counts, project path, log file path, and session metadata.
 - Local and read-only: reads Codex session logs from one or more local Codex homes; does not modify Codex logs.

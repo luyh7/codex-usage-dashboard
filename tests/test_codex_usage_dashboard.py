@@ -39,6 +39,165 @@ opener_spec.loader.exec_module(opener)
 
 
 class CodexUsageDashboardTests(unittest.TestCase):
+    def write_rollout_rows(
+        self,
+        codex_home: Path,
+        thread_id: str,
+        rows: list[dict],
+    ) -> Path:
+        sessions_dir = codex_home / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        path = sessions_dir / f"rollout-2026-07-10T10-00-00-{thread_id}.jsonl"
+        path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def total_only_usage(total_tokens: int) -> dict:
+        return {
+            "input_tokens": total_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    def total_only_token_event(
+        self,
+        timestamp: str,
+        cumulative_tokens: int,
+        incremental_tokens: int,
+    ) -> dict:
+        return {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": self.total_only_usage(cumulative_tokens),
+                    "last_token_usage": self.total_only_usage(incremental_tokens),
+                },
+            },
+        }
+
+    def write_parent_and_subagent_rollouts(self, codex_home: Path) -> tuple[Path, Path]:
+        parent_id = "parent-thread"
+        child_id = "child-thread"
+
+        def usage(input_tokens: int, cached_tokens: int, output_tokens: int, total_tokens: int) -> dict:
+            return {
+                "input_tokens": input_tokens,
+                "cached_input_tokens": cached_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            }
+
+        def token_event(timestamp: str, cumulative: dict, incremental: dict) -> dict:
+            return {
+                "timestamp": timestamp,
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": cumulative,
+                        "last_token_usage": incremental,
+                    },
+                },
+            }
+
+        parent_rows = [
+            {
+                "timestamp": "2026-07-10T10:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": parent_id,
+                    "session_id": parent_id,
+                    "thread_source": "user",
+                    "cwd": "/work/shared-project",
+                    "model": "gpt-5",
+                },
+            },
+            token_event(
+                "2026-07-10T10:01:00Z",
+                usage(80, 20, 20, 100),
+                usage(80, 20, 20, 100),
+            ),
+            token_event(
+                "2026-07-10T10:05:00Z",
+                usage(200, 50, 50, 250),
+                usage(120, 30, 30, 150),
+            ),
+            token_event(
+                "2026-07-10T10:20:00Z",
+                usage(260, 60, 70, 330),
+                usage(60, 10, 20, 80),
+            ),
+        ]
+        child_rows = [
+            {
+                "timestamp": "2026-07-10T10:10:00.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": child_id,
+                    "session_id": parent_id,
+                    "thread_source": "subagent",
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {
+                                "parent_thread_id": parent_id,
+                                "depth": 1,
+                                "agent_path": "/root/audit",
+                                "agent_nickname": "Audit",
+                            }
+                        }
+                    },
+                    "cwd": "/work/shared-project",
+                    "model": "gpt-5",
+                },
+            },
+            {
+                "timestamp": "2026-07-10T10:10:00.001Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": parent_id,
+                    "session_id": parent_id,
+                    "thread_source": "user",
+                    "cwd": "/work/shared-project",
+                    "model": "gpt-5",
+                },
+            },
+            token_event(
+                "2026-07-10T10:10:00.002Z",
+                usage(80, 20, 20, 100),
+                usage(80, 20, 20, 100),
+            ),
+            token_event(
+                "2026-07-10T10:10:00.003Z",
+                usage(200, 50, 50, 250),
+                usage(120, 30, 30, 150),
+            ),
+            {
+                "timestamp": "2026-07-10T10:10:01Z",
+                "type": "turn_context",
+                "payload": {
+                    "turn_id": "child-turn",
+                    "cwd": "/work/shared-project",
+                    "model": "gpt-5",
+                },
+            },
+            token_event(
+                "2026-07-10T10:11:00Z",
+                usage(250, 60, 60, 310),
+                usage(50, 10, 10, 60),
+            ),
+            token_event(
+                "2026-07-10T10:12:00Z",
+                usage(320, 80, 80, 400),
+                usage(70, 20, 20, 90),
+            ),
+        ]
+
+        return (
+            self.write_rollout_rows(codex_home, parent_id, parent_rows),
+            self.write_rollout_rows(codex_home, child_id, child_rows),
+        )
+
     def write_usage_file(
         self,
         codex_home: Path,
@@ -137,6 +296,332 @@ class CodexUsageDashboardTests(unittest.TestCase):
         expected = "生成milestones0004的文档，如果现有文档有缺失的内容，询问我补充。"
         self.assertEqual(summary["title"], expected)
         self.assertEqual(detail["first_user_prompt"], expected)
+
+    def test_subagent_identity_uses_first_session_meta(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            _parent_path, child_path = self.write_parent_and_subagent_rollouts(codex_home)
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+
+            summary, detail = analyzer.parse_file(child_path, "active")
+
+        self.assertEqual(summary["session_id"], "child-thread")
+        self.assertEqual(detail["session_id"], "child-thread")
+
+    def test_subagent_usage_excludes_inherited_parent_timeline_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            self.write_parent_and_subagent_rollouts(codex_home)
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            snapshot = analyzer.scan()
+
+        child = next(
+            row
+            for row in snapshot["sessions"]
+            if str(row["path"]).endswith("-child-thread.jsonl")
+        )
+        child_usage = child["total_token_usage"]
+        self.assertEqual(child_usage["input_tokens"], 120)
+        self.assertEqual(child_usage["cached_input_tokens"], 30)
+        self.assertEqual(child_usage["output_tokens"], 30)
+        self.assertEqual(child_usage["total_tokens"], 150)
+        detail = snapshot["details_by_uid"][child["uid"]]
+        self.assertEqual(detail["inherited_token_usage"]["total_tokens"], 250)
+        self.assertEqual(
+            [row["total_token_usage"]["total_tokens"] for row in detail["timeline"]],
+            [60, 150],
+        )
+        ranged = analyzer.detail_for_period(
+            detail,
+            dt.datetime(2026, 7, 10, 10, 10, 30, tzinfo=dt.UTC),
+            dt.datetime(2026, 7, 10, 10, 12, 30, tzinfo=dt.UTC),
+        )
+        self.assertEqual(ranged["total_token_usage"]["total_tokens"], 150)
+
+    def test_parent_and_subagent_summary_does_not_double_count_inherited_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            self.write_parent_and_subagent_rollouts(codex_home)
+            snapshot = dashboard.CodexUsageAnalyzer(codex_home).scan()
+
+        self.assertEqual(snapshot["summary"]["session_count"], 2)
+        self.assertEqual(snapshot["summary"]["usage"]["total_tokens"], 480)
+        self.assertEqual(len(snapshot["summary"]["by_project"]), 1)
+        project = snapshot["summary"]["by_project"][0]
+        self.assertEqual(project["sessions"], 2)
+        self.assertEqual(project["usage"]["total_tokens"], 480)
+        self.assertEqual(
+            sum(row["usage"]["total_tokens"] for row in snapshot["daily_usage"]),
+            480,
+        )
+
+    def test_subagent_before_parent_first_token_resolves_zero_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            parent_id = "parent-before-first-token"
+            child_id = "child-before-first-token"
+            self.write_rollout_rows(
+                codex_home,
+                parent_id,
+                [
+                    {
+                        "timestamp": "2026-07-10T10:00:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": parent_id,
+                            "session_id": parent_id,
+                            "thread_source": "user",
+                            "cwd": "/work/early-fork",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-10T10:10:00Z", 100, 100),
+                ],
+            )
+            self.write_rollout_rows(
+                codex_home,
+                child_id,
+                [
+                    {
+                        "timestamp": "2026-07-10T10:05:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": child_id,
+                            "session_id": parent_id,
+                            "thread_source": "subagent",
+                            "source": {
+                                "subagent": {
+                                    "thread_spawn": {
+                                        "parent_thread_id": parent_id,
+                                        "forked_from_id": parent_id,
+                                        "agent_path": "/root/early-fork",
+                                    }
+                                }
+                            },
+                            "cwd": "/work/early-fork",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-10T10:06:00Z", 60, 60),
+                ],
+            )
+
+            snapshot = dashboard.CodexUsageAnalyzer(codex_home).scan()
+
+        child = next(row for row in snapshot["sessions"] if row["session_id"] == child_id)
+        detail = snapshot["details_by_uid"][child["uid"]]
+        self.assertEqual(child["forked_from_id"], parent_id)
+        self.assertTrue(child["fork_usage_resolved"])
+        self.assertEqual(child["inherited_token_event_count"], 0)
+        self.assertEqual(child["inherited_token_usage"]["total_tokens"], 0)
+        self.assertEqual(child["total_token_usage"]["total_tokens"], 60)
+        self.assertEqual(detail["branch_total_token_usage"]["total_tokens"], 60)
+        self.assertEqual(
+            [row["total_token_usage"]["total_tokens"] for row in detail["timeline"]],
+            [60],
+        )
+
+    def test_subagent_last_n_slice_with_counter_reset_sums_event_deltas(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            parent_id = "parent-last-n"
+            child_id = "child-last-n"
+            parent_rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": parent_id,
+                        "session_id": parent_id,
+                        "thread_source": "user",
+                        "cwd": "/work/last-n",
+                        "model": "gpt-5",
+                    },
+                },
+                self.total_only_token_event("2026-07-10T10:01:00Z", 100, 100),
+                self.total_only_token_event("2026-07-10T10:02:00Z", 200, 100),
+                self.total_only_token_event("2026-07-10T10:03:00Z", 300, 100),
+                self.total_only_token_event("2026-07-10T10:04:00Z", 400, 100),
+                self.total_only_token_event("2026-07-10T10:05:00Z", 500, 100),
+            ]
+            child_rows = [
+                {
+                    "timestamp": "2026-07-10T10:06:00.000Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": child_id,
+                        "session_id": parent_id,
+                        "thread_source": "subagent",
+                        "source": {
+                            "subagent": {
+                                "thread_spawn": {
+                                    "parent_thread_id": parent_id,
+                                    "forked_from_id": parent_id,
+                                    "agent_path": "/root/last-n",
+                                }
+                            }
+                        },
+                        "cwd": "/work/last-n",
+                        "model": "gpt-5",
+                    },
+                },
+                self.total_only_token_event("2026-07-10T10:06:00.001Z", 200, 100),
+                self.total_only_token_event("2026-07-10T10:06:00.002Z", 300, 100),
+                self.total_only_token_event("2026-07-10T10:07:00Z", 360, 60),
+                self.total_only_token_event("2026-07-10T10:08:00Z", 40, 40),
+                self.total_only_token_event("2026-07-10T10:09:00Z", 90, 50),
+            ]
+            self.write_rollout_rows(codex_home, parent_id, parent_rows)
+            self.write_rollout_rows(codex_home, child_id, child_rows)
+
+            snapshot = dashboard.CodexUsageAnalyzer(codex_home).scan()
+
+        child = next(row for row in snapshot["sessions"] if row["session_id"] == child_id)
+        detail = snapshot["details_by_uid"][child["uid"]]
+        self.assertTrue(child["fork_usage_resolved"])
+        self.assertEqual(child["inherited_token_event_count"], 2)
+        self.assertEqual(child["inherited_token_usage"]["total_tokens"], 300)
+        self.assertEqual(child["branch_total_token_usage"]["total_tokens"], 90)
+        self.assertEqual(child["total_token_usage"]["total_tokens"], 150)
+        self.assertEqual(child["last_token_usage"]["total_tokens"], 50)
+        self.assertEqual(
+            [row["last_token_usage"]["total_tokens"] for row in detail["timeline"]],
+            [60, 40, 50],
+        )
+        self.assertEqual(
+            [row["total_token_usage"]["total_tokens"] for row in detail["timeline"]],
+            [60, 100, 150],
+        )
+
+    def test_bounded_period_loads_old_fork_parent_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            parent_id = "parent-period-dependency"
+            child_id = "child-period-dependency"
+            parent_path = self.write_rollout_rows(
+                codex_home,
+                parent_id,
+                [
+                    {
+                        "timestamp": "2026-07-08T13:00:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": parent_id,
+                            "session_id": parent_id,
+                            "thread_source": "user",
+                            "cwd": "/work/period-dependency",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-08T14:00:00Z", 100, 100),
+                    self.total_only_token_event("2026-07-08T15:00:00Z", 250, 150),
+                ],
+            )
+            child_path = self.write_rollout_rows(
+                codex_home,
+                child_id,
+                [
+                    {
+                        "timestamp": "2026-07-09T01:00:00.000Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": child_id,
+                            "session_id": parent_id,
+                            "parent_thread_id": parent_id,
+                            "forked_from_id": parent_id,
+                            "thread_source": "subagent",
+                            "cwd": "/work/period-dependency",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-09T01:00:00.001Z", 100, 100),
+                    self.total_only_token_event("2026-07-09T01:00:00.002Z", 250, 150),
+                    self.total_only_token_event("2026-07-09T02:00:00Z", 320, 70),
+                ],
+            )
+            _key, period_start, _period_end, _start_key, _end_key = dashboard.local_period_bounds(
+                "custom",
+                "2026-07-09",
+                "2026-07-09",
+            )
+            assert period_start is not None
+            parent_mtime = period_start.timestamp() - 1
+            child_mtime = period_start.timestamp() + 1
+            os.utime(parent_path, (parent_mtime, parent_mtime))
+            os.utime(child_path, (child_mtime, child_mtime))
+
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            parsed_paths: list[Path] = []
+            original_parse_file = analyzer.parse_file
+
+            def recording_parse_file(
+                path: Path,
+                source: str,
+                log_source: dashboard.CodexLogSource | None = None,
+            ) -> tuple[dict, dict]:
+                parsed_paths.append(path.resolve())
+                return original_parse_file(path, source, log_source)
+
+            analyzer.parse_file = recording_parse_file
+            snapshot = analyzer.scan("custom", "2026-07-09", "2026-07-09")
+
+        self.assertIn(parent_path.resolve(), parsed_paths)
+        self.assertIn(child_path.resolve(), parsed_paths)
+        self.assertEqual([row["session_id"] for row in snapshot["sessions"]], [child_id])
+        child = snapshot["sessions"][0]
+        self.assertTrue(child["fork_usage_resolved"])
+        self.assertEqual(child["inherited_token_event_count"], 2)
+        self.assertEqual(child["inherited_token_usage"]["total_tokens"], 250)
+        self.assertEqual(child["total_token_usage"]["total_tokens"], 70)
+        self.assertEqual(snapshot["summary"]["usage"]["total_tokens"], 70)
+
+    def test_missing_fork_parent_keeps_branch_total_but_excludes_exact_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            missing_parent_id = "missing-parent"
+            child_id = "child-with-missing-parent"
+            self.write_usage_file(
+                codex_home,
+                "independent-thread",
+                75,
+                "2026-07-10T10:00:00Z",
+                cwd="/work/missing-parent",
+            )
+            self.write_rollout_rows(
+                codex_home,
+                child_id,
+                [
+                    {
+                        "timestamp": "2026-07-10T10:05:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": child_id,
+                            "session_id": missing_parent_id,
+                            "parent_thread_id": missing_parent_id,
+                            "forked_from_id": missing_parent_id,
+                            "thread_source": "subagent",
+                            "cwd": "/work/missing-parent",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-10T10:05:01Z", 250, 250),
+                    self.total_only_token_event("2026-07-10T10:06:00Z", 400, 150),
+                ],
+            )
+
+            snapshot = dashboard.CodexUsageAnalyzer(codex_home).scan()
+
+        child = next(row for row in snapshot["sessions"] if row["session_id"] == child_id)
+        detail = snapshot["details_by_uid"][child["uid"]]
+        self.assertFalse(child["fork_usage_resolved"])
+        self.assertEqual(child["branch_total_token_usage"]["total_tokens"], 400)
+        self.assertEqual(child["total_token_usage"]["total_tokens"], 0)
+        self.assertEqual(child["last_token_usage"]["total_tokens"], 0)
+        self.assertEqual(child["token_event_count"], 0)
+        self.assertEqual(detail["timeline"], [])
+        self.assertEqual(snapshot["summary"]["session_count"], 2)
+        self.assertEqual(snapshot["summary"]["usage"]["total_tokens"], 75)
+        self.assertEqual(snapshot["summary"]["by_project"][0]["usage"]["total_tokens"], 75)
 
     def test_gpt_5_6_prices_start_at_beijing_launch_time(self) -> None:
         usage = {
