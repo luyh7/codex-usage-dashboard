@@ -100,6 +100,7 @@ DASHBOARD_FEATURES = [
     "git-worktree-project-grouping",
     "remote-snapshot-import-v1",
     "effective-dated-pricing-v1",
+    "bounded-period-scan-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -1365,6 +1366,10 @@ class CodexUsageAnalyzer:
         self._snapshot_cache_signature: tuple[Any, ...] | None = None
         self._snapshot_cache: dict[str, Any] | None = None
         self._period_cache: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
+        self._bounded_snapshot_cache: dict[
+            tuple[str, str | None, str | None, bool],
+            tuple[tuple[Any, ...], dict[str, Any]],
+        ] = {}
         self._project_info_cache: dict[str, ProjectInfo] = {}
 
     def load_session_titles(self, codex_home: Path | None = None) -> dict[str, str]:
@@ -1419,6 +1424,23 @@ class CodexUsageAnalyzer:
         include_remotes: bool = True,
     ) -> dict[str, Any]:
         files = self.iter_session_files()
+        if period:
+            key, start_at, _end_at, start_key, end_key = local_period_bounds(period, start_date, end_date)
+            if start_at is not None:
+                files = self.files_modified_since(files, start_at)
+                signature = self.scan_signature(files, include_remotes)
+                cache_key = (key, start_key, end_key, include_remotes)
+                cached = self._bounded_snapshot_cache.get(cache_key)
+                if cached is not None and cached[0] == signature:
+                    return cached[1]
+
+                snapshot = self.build_snapshot(files, include_remotes, include_daily_usage=False)
+                snapshot = self.filter_snapshot_by_period(snapshot, key, start_key, end_key)
+                self._bounded_snapshot_cache[cache_key] = (signature, snapshot)
+                if len(self._bounded_snapshot_cache) > 16:
+                    self._bounded_snapshot_cache.pop(next(iter(self._bounded_snapshot_cache)))
+                return snapshot
+
         signature = self.scan_signature(files, include_remotes)
         if self._snapshot_cache_signature != signature or self._snapshot_cache is None:
             self._snapshot_cache = self.build_snapshot(files, include_remotes)
@@ -1435,10 +1457,26 @@ class CodexUsageAnalyzer:
             return cached
         return snapshot
 
+    @staticmethod
+    def files_modified_since(
+        files: list[tuple[CodexLogSource, Path, str]],
+        start_at: dt.datetime,
+    ) -> list[tuple[CodexLogSource, Path, str]]:
+        cutoff_ns = int(start_at.timestamp() * 1_000_000_000)
+        candidates: list[tuple[CodexLogSource, Path, str]] = []
+        for item in files:
+            try:
+                if item[1].stat().st_mtime_ns >= cutoff_ns:
+                    candidates.append(item)
+            except OSError:
+                continue
+        return candidates
+
     def build_snapshot(
         self,
         files: list[tuple[CodexLogSource, Path, str]],
         include_remotes: bool,
+        include_daily_usage: bool = True,
     ) -> dict[str, Any]:
         titles_by_source = {
             log_source.id: self.load_session_titles(log_source.codex_home)
@@ -1478,7 +1516,8 @@ class CodexUsageAnalyzer:
             "sessions": sessions,
             "details_by_uid": details_by_uid,
             "summary": self.build_summary(sessions),
-            "daily_usage": self.build_daily_usage(details_by_uid.values()),
+            "daily_usage": self.build_daily_usage(details_by_uid.values()) if include_daily_usage else [],
+            "daily_usage_complete": include_daily_usage,
             "period": {"key": "all", "start_at": None, "end_at": generated_at},
         }
         return snapshot
@@ -1517,6 +1556,8 @@ class CodexUsageAnalyzer:
             "sessions": sessions,
             "details_by_uid": details_by_uid,
             "summary": self.build_summary(sessions),
+            "daily_usage": self.build_daily_usage(details_by_uid.values()),
+            "daily_usage_complete": False,
             "period": {
                 "key": key,
                 "start_at": utc_iso(start_at),
@@ -2983,6 +3024,8 @@ HTML = r"""<!doctype html>
       customEndDate: '',
       periodCache: new Map(),
       dailyUsage: [],
+      dailyUsageComplete: false,
+      dailyUsageLoading: false,
       remotes: [],
       currentDeviceShortCode: '',
       pendingRemoteSnapshot: null,
@@ -3576,10 +3619,24 @@ HTML = r"""<!doctype html>
       return `${period}|${startDate || ''}|${endDate || ''}`;
     }
 
+    function mergeDailyUsage(currentRows, incomingRows) {
+      const rowsByDate = new Map((currentRows || []).map(row => [row.date, row]));
+      (incomingRows || []).forEach(row => {
+        if (row && row.date) rowsByDate.set(row.date, row);
+      });
+      return Array.from(rowsByDate.values()).sort((left, right) => String(left.date).localeCompare(String(right.date)));
+    }
+
     async function applySessionData(data, requestedPeriod, requestedStart, requestedEnd, selectTop = true) {
       state.sessions = data.sessions || [];
       state.summary = data.summary || null;
-      state.dailyUsage = data.daily_usage || [];
+      const incomingDailyUsage = data.daily_usage || [];
+      if (data.daily_usage_complete) {
+        state.dailyUsage = incomingDailyUsage;
+        state.dailyUsageComplete = true;
+      } else {
+        state.dailyUsage = mergeDailyUsage(state.dailyUsage, incomingDailyUsage);
+      }
       state.remotes = data.remotes || [];
       state.currentDeviceShortCode = data.current_device_short_code || '';
       state.codexHome = data.codex_home || '';
@@ -3896,6 +3953,26 @@ HTML = r"""<!doctype html>
       state.calendarMonth = monthKey(dateFromKey(seed) || new Date());
       updateCalendarVisibility();
       renderCalendar();
+      loadDailyUsage();
+    }
+
+    function loadDailyUsage() {
+      if (state.dailyUsageComplete || state.dailyUsageLoading) return Promise.resolve();
+      state.dailyUsageLoading = true;
+      return fetch('/api/daily-usage', { cache: 'no-store' })
+        .then(res => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(data => {
+          state.dailyUsage = data.daily_usage || [];
+          state.dailyUsageComplete = data.daily_usage_complete !== false;
+          if (state.calendarOpen) renderCalendar();
+        })
+        .catch(() => {})
+        .finally(() => {
+          state.dailyUsageLoading = false;
+        });
     }
 
     function closeCalendar() {
@@ -4467,6 +4544,7 @@ HTML = r"""<!doctype html>
       const data = await res.json();
       if (res.ok && data.ok) {
         state.periodCache.clear();
+        state.dailyUsageComplete = false;
         await loadData(false);
         renderRemoteModal(t('remoteImported'));
         document.getElementById('remoteModal').hidden = false;
@@ -4533,6 +4611,7 @@ HTML = r"""<!doctype html>
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'unknown');
         state.periodCache.clear();
+        state.dailyUsageComplete = false;
         await loadData(false);
         renderRemoteModal(t('remoteDeleted'));
       } catch (err) {
@@ -4650,10 +4729,22 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                     "summary": snapshot["summary"],
                     "sessions": snapshot["sessions"],
                     "daily_usage": snapshot.get("daily_usage", []),
+                    "daily_usage_complete": snapshot.get("daily_usage_complete", False),
                     "current_device_short_code": analyzer.remote_store.current_device_code if analyzer.remote_store else current_device_short_code(),
                     "remotes": analyzer.remote_store.list_remotes() if analyzer.remote_store else [],
                 }
                 self.send_json(payload)
+                return
+
+            if path == "/api/daily-usage":
+                snapshot = analyzer.scan()
+                self.send_json(
+                    {
+                        "generated_at": snapshot["generated_at"],
+                        "daily_usage": snapshot.get("daily_usage", []),
+                        "daily_usage_complete": snapshot.get("daily_usage_complete", True),
+                    }
+                )
                 return
 
             if path == "/api/session":

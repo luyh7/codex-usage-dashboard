@@ -1,5 +1,7 @@
+import datetime as dt
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -465,6 +467,45 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(environments["wsl-session"], "WSL")
         self.assertEqual(environments["windows-session"], "Windows")
 
+    def test_bounded_period_skips_logs_not_modified_since_period_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            _key, period_start, _period_end, _start_key, _end_key = dashboard.local_period_bounds("today")
+            assert period_start is not None
+            old_timestamp = dashboard.utc_iso(period_start - dt.timedelta(seconds=1))
+            current_timestamp = dashboard.utc_iso(dt.datetime.now(dt.UTC))
+            old_path = self.write_usage_file(codex_home, "old-session", 100, old_timestamp)
+            current_path = self.write_usage_file(codex_home, "current-session", 250, current_timestamp)
+            old_mtime = period_start.timestamp() - 1
+            os.utime(old_path, (old_mtime, old_mtime))
+
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            parsed_paths: list[Path] = []
+            original_parse_file = analyzer.parse_file
+
+            def recording_parse_file(
+                path: Path,
+                source: str,
+                log_source: dashboard.CodexLogSource | None = None,
+            ) -> tuple[dict, dict]:
+                parsed_paths.append(path)
+                return original_parse_file(path, source, log_source)
+
+            analyzer.parse_file = recording_parse_file
+            today = analyzer.scan("today")
+
+            self.assertEqual([row["session_id"] for row in today["sessions"]], ["current-session"])
+            self.assertIn(current_path, parsed_paths)
+            self.assertNotIn(old_path, parsed_paths)
+            self.assertFalse(today["daily_usage_complete"])
+
+            parsed_paths.clear()
+            all_time = analyzer.scan("all")
+
+            self.assertEqual({row["session_id"] for row in all_time["sessions"]}, {"old-session", "current-session"})
+            self.assertIn(old_path, parsed_paths)
+            self.assertTrue(all_time["daily_usage_complete"])
+
     def test_windows_cwd_uses_folder_name_for_project(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir) / ".codex"
@@ -683,6 +724,8 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn('tabindex="0"', html)
         self.assertIn("unitPriceSegment", html)
         self.assertIn("cache_write_tokens", html)
+        self.assertIn("function loadDailyUsage()", html)
+        self.assertIn("/api/daily-usage", html)
 
     def test_opener_health_check_reads_full_payload(self) -> None:
         class Response:
