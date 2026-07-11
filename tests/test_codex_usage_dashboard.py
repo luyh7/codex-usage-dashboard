@@ -1979,6 +1979,24 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("state.snapshotToken !== requestedToken", html)
         self.assertIn("void showDetails(first.uid)", html)
 
+    def test_html_shows_loading_animation_for_interactive_data_requests(self) -> None:
+        html = dashboard.HTML
+        overlay_start = html.index('<div class="loading-overlay" id="loadingOverlay"')
+        overlay_tag = html[overlay_start:html.index(">", overlay_start)]
+
+        self.assertNotIn(" hidden", overlay_tag)
+        self.assertNotIn("aria-busy", overlay_tag)
+        self.assertIn('role="status"', overlay_tag)
+        self.assertIn('aria-live="polite"', overlay_tag)
+        self.assertIn('<main id="dashboardMain" aria-busy="true">', html)
+        self.assertIn('class="loading-spinner"', html)
+        self.assertIn("@keyframes loading-spin", html)
+        self.assertIn(".loading-overlay[hidden]", html)
+        self.assertIn("function setLoadingIndicator(active, silent = false)", html)
+        self.assertIn("setLoadingIndicator(true, options.silent === true);", html)
+        self.assertIn("main.setAttribute('aria-busy', active ? 'true' : 'false');", html)
+        self.assertIn("setLoadingIndicator(false);", html)
+
     def test_http_snapshot_token_serves_consistent_detail_and_rejects_stale_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir) / ".codex"

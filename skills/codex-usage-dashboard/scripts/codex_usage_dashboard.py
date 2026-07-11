@@ -3398,6 +3398,51 @@ HTML = r"""<!doctype html>
       color: var(--text);
       font-size: 14px;
     }
+    body.data-loading {
+      overflow: hidden;
+    }
+    .loading-overlay[hidden] {
+      display: none;
+    }
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(245, 247, 246, 0.82);
+      backdrop-filter: blur(2px);
+    }
+    .loading-indicator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      font-weight: 650;
+    }
+    .loading-spinner {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 22px;
+      border: 3px solid #c8d5d0;
+      border-top-color: var(--accent);
+      border-right-color: var(--accent-2);
+      border-radius: 50%;
+      animation: loading-spin 0.75s linear infinite;
+    }
+    @keyframes loading-spin {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .loading-spinner { animation: none; }
+    }
     header {
       position: sticky;
       top: 0;
@@ -4233,6 +4278,12 @@ HTML = r"""<!doctype html>
   </style>
 </head>
 <body>
+  <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite" aria-atomic="true">
+    <div class="loading-indicator">
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <span data-i18n="loadingData">正在加载用量数据</span>
+    </div>
+  </div>
   <header>
     <div class="header-inner">
       <div class="brand">
@@ -4277,7 +4328,7 @@ HTML = r"""<!doctype html>
     </div>
   </div>
 
-  <main>
+  <main id="dashboardMain" aria-busy="true">
     <div class="metrics" id="metrics"></div>
 
     <div class="controls">
@@ -4472,6 +4523,7 @@ HTML = r"""<!doctype html>
         reasoningEffort: '推理强度',
         conversationDetails: '对话明细',
         loading: '加载中',
+        loadingData: '正在加载用量数据',
         notSelected: '未选择',
         selectRow: '点击左侧任意一行查看 token 明细和时间线。',
         scanning: '扫描中',
@@ -4631,6 +4683,7 @@ HTML = r"""<!doctype html>
         reasoningEffort: 'Reasoning',
         conversationDetails: 'Details',
         loading: 'Loading',
+        loadingData: 'Loading usage data',
         notSelected: 'No selection',
         selectRow: 'Select a row to inspect token details and timeline.',
         scanning: 'Scanning',
@@ -5038,13 +5091,26 @@ HTML = r"""<!doctype html>
       }
     }
 
+    function setLoadingIndicator(active, silent = false) {
+      const overlay = document.getElementById('loadingOverlay');
+      const main = document.getElementById('dashboardMain');
+      const visible = Boolean(active && !silent);
+      overlay.hidden = !visible;
+      main.setAttribute('aria-busy', active ? 'true' : 'false');
+      document.body.classList.toggle('data-loading', visible);
+    }
+
     async function loadData(selectTop = true, options = {}) {
       if (state.loading) {
-        if (!options.silent) state.reloadAfterLoad = true;
+        if (!options.silent) {
+          state.reloadAfterLoad = true;
+          setLoadingIndicator(true);
+        }
         return;
       }
       state.loading = true;
       state.reloadAfterLoad = false;
+      setLoadingIndicator(true, options.silent === true);
       const requestedPeriod = state.period;
       const requestedStart = state.customStartDate;
       const requestedEnd = state.customEndDate;
@@ -5074,7 +5140,9 @@ HTML = r"""<!doctype html>
         state.loading = false;
         if (state.reloadAfterLoad) {
           state.reloadAfterLoad = false;
-          loadData(true);
+          void loadData(true);
+        } else {
+          setLoadingIndicator(false);
         }
       }
     }
