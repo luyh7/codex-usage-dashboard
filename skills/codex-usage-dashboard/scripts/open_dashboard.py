@@ -63,6 +63,11 @@ def health_dashboard_url(port: int) -> str | None:
         and "effective-dated-pricing-v1" in features
         and "bounded-period-scan-v1" in features
         and "fork-aware-subagent-usage-v1" in features
+        and "fast-rollout-projection-v1" in features
+        and "snapshot-detail-token-v1" in features
+        and "persistent-parse-cache-v1" in features
+        and "append-resume-v1" in features
+        and "parallel-cold-parse-v1" in features
     ):
         return url
     return None

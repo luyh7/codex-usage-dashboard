@@ -12,23 +12,28 @@ It does not modify Codex files. Bind address defaults to 127.0.0.1.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import hashlib
 import json
+import multiprocessing
 import os
 import platform
 import re
+import secrets
 import socket
 import signal
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 import webbrowser
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Iterator, NamedTuple
 from urllib.parse import parse_qs, urlparse
 
 
@@ -85,6 +90,20 @@ PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
 APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
+PARSE_CACHE_VERSION = 2
+PARSE_CACHE_SAMPLE_BYTES = 4096
+DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
+DEFAULT_PARSE_MIN_FILES = 8
+DEFAULT_PARSE_MIN_BYTES = 256 * 1024 * 1024
+
+
+def environment_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 DASHBOARD_FEATURES = [
     "periods",
     "period-deltas",
@@ -102,6 +121,11 @@ DASHBOARD_FEATURES = [
     "effective-dated-pricing-v1",
     "bounded-period-scan-v1",
     "fork-aware-subagent-usage-v1",
+    "fast-rollout-projection-v1",
+    "snapshot-detail-token-v1",
+    "persistent-parse-cache-v1",
+    "append-resume-v1",
+    "parallel-cold-parse-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -325,19 +349,25 @@ def timeline_rows_with_deltas(
 ) -> list[tuple[dict[str, Any], dt.datetime, dict[str, int], dict[str, int]]]:
     if not isinstance(timeline, list):
         return []
-    rows = [
-        row
-        for row in timeline
-        if isinstance(row, dict) and parse_timestamp(row.get("timestamp")) is not None
-    ]
-    rows.sort(key=lambda row: parse_timestamp(row.get("timestamp")) or dt.datetime.min.replace(tzinfo=dt.UTC))
-
-    result: list[tuple[dict[str, Any], dt.datetime, dict[str, int], dict[str, int]]] = []
-    previous_usage = zero_usage()
-    for row in rows:
+    rows: list[tuple[dict[str, Any], dt.datetime]] = []
+    ordered = True
+    previous_timestamp: dt.datetime | None = None
+    for row in timeline:
+        if not isinstance(row, dict):
+            continue
         timestamp = parse_timestamp(row.get("timestamp"))
         if timestamp is None:
             continue
+        if previous_timestamp is not None and timestamp < previous_timestamp:
+            ordered = False
+        previous_timestamp = timestamp
+        rows.append((row, timestamp))
+    if not ordered:
+        rows.sort(key=lambda item: item[1])
+
+    result: list[tuple[dict[str, Any], dt.datetime, dict[str, int], dict[str, int]]] = []
+    previous_usage = zero_usage()
+    for row, timestamp in rows:
         cumulative_usage = normalize_usage(row.get("total_token_usage"))
         delta_usage = timeline_usage_delta(cumulative_usage, previous_usage)
         previous_usage = cumulative_usage
@@ -773,6 +803,10 @@ def remote_snapshots_dir() -> Path:
     return app_config_dir() / "remotes"
 
 
+def parse_cache_path() -> Path:
+    return app_config_dir() / "parsed-files-v2.sqlite3"
+
+
 def safe_json_dump(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -920,6 +954,95 @@ def text_from_content(content: Any) -> str:
 def is_synthetic_user_context(text: str) -> bool:
     stripped = text.strip()
     return stripped.startswith("# AGENTS.md instructions for ") or stripped.startswith("<environment_context>")
+
+
+FAST_ROLLOUT_MIN_BYTES = 4096
+FAST_ROLLOUT_HEADER = re.compile(
+    rb'^\{"timestamp":"(?P<timestamp>[0-9T:.+Z-]+)",'
+    rb'"type":"(?P<outer>response_item|event_msg)",'
+    rb'"payload":\{"type":"(?P<inner>[a-zA-Z0-9_-]+)"(?:,|\})'
+)
+FAST_IGNORED_ROLLOUT_TYPES = {
+    ("response_item", "custom_tool_call_output"),
+    ("response_item", "function_call_output"),
+    ("response_item", "image_generation_call"),
+    ("response_item", "reasoning"),
+    ("response_item", "tool_search_output"),
+    ("event_msg", "image_generation_end"),
+}
+
+
+class RolloutReadStats:
+    def __init__(self) -> None:
+        self.fast_skipped_line_count = 0
+        self.fast_skipped_bytes = 0
+        self.bytes_read = 0
+
+
+def fast_ignored_rollout_projection(raw_line: bytes) -> dict[str, Any] | None:
+    if len(raw_line) < FAST_ROLLOUT_MIN_BYTES or not raw_line.endswith(b"}}\n"):
+        return None
+    match = FAST_ROLLOUT_HEADER.match(raw_line)
+    if match is None:
+        return None
+    outer = match.group("outer").decode("ascii")
+    inner = match.group("inner").decode("ascii")
+    if (outer, inner) not in FAST_IGNORED_ROLLOUT_TYPES:
+        return None
+    return {
+        "timestamp": match.group("timestamp").decode("ascii"),
+        "type": outer,
+        "payload": {"type": inner},
+    }
+
+
+def read_rollout_jsonl(
+    path: Path,
+    start_offset: int = 0,
+    stats: RolloutReadStats | None = None,
+    end_offset: int | None = None,
+) -> Iterator[dict[str, Any]]:
+    stats = stats or RolloutReadStats()
+    first_line = start_offset == 0
+    if end_offset is None:
+        end_offset = path.stat().st_size
+    with path.open("rb") as handle:
+        if start_offset:
+            handle.seek(start_offset)
+        remaining = max(0, end_offset - start_offset)
+        while remaining:
+            raw_line = handle.readline(remaining)
+            if not raw_line:
+                break
+            remaining -= len(raw_line)
+            complete_line = raw_line.endswith(b"\n")
+            projection = fast_ignored_rollout_projection(raw_line)
+            if projection is not None:
+                stats.bytes_read += len(raw_line)
+                stats.fast_skipped_line_count += 1
+                stats.fast_skipped_bytes += len(raw_line)
+                first_line = False
+                yield projection
+                continue
+
+            encoding = "utf-8-sig" if first_line else "utf-8"
+            first_line = False
+            line = raw_line.decode(encoding, errors="replace").strip()
+            if not line:
+                if complete_line:
+                    stats.bytes_read += len(raw_line)
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                if not complete_line:
+                    return
+                stats.bytes_read += len(raw_line)
+                yield {"__parse_error__": True}
+                continue
+            stats.bytes_read += len(raw_line)
+            if isinstance(item, dict):
+                yield item
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -1141,6 +1264,72 @@ def path_state_signature(path: Path) -> tuple[str, int | None, int | None]:
     except OSError:
         return (str(path), None, None)
     return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def file_stat_tuple(stat: os.stat_result) -> tuple[int, int, int, int]:
+    return int(stat.st_dev), int(stat.st_ino), stat.st_mtime_ns, stat.st_size
+
+
+def file_change_requires_retry(
+    before: tuple[int, int, int, int],
+    after: tuple[int, int, int, int],
+    parsed_size: int,
+) -> bool:
+    before_device, before_inode, before_mtime_ns, before_size = before
+    after_device, after_inode, after_mtime_ns, after_size = after
+    if before_device != after_device or before_inode != after_inode:
+        return True
+    if after_size < before_size or after_size < parsed_size:
+        return True
+    return after_size == before_size and after_mtime_ns != before_mtime_ns
+
+
+def file_parse_markers(path: Path, size: int) -> tuple[bool, str, str]:
+    try:
+        with path.open("rb") as handle:
+            prefix = handle.read(min(PARSE_CACHE_SAMPLE_BYTES, size))
+            if size:
+                handle.seek(size - 1)
+                append_safe = handle.read(1) == b"\n"
+            else:
+                append_safe = True
+            tail_start = max(0, size - PARSE_CACHE_SAMPLE_BYTES)
+            handle.seek(tail_start)
+            tail = handle.read(size - tail_start)
+    except OSError:
+        return False, "", ""
+    return (
+        append_safe,
+        hashlib.sha256(prefix).hexdigest(),
+        hashlib.sha256(tail).hexdigest(),
+    )
+
+
+def file_matches_cached_prefix(
+    path: Path,
+    entry: FileParseCacheEntry,
+    stat: os.stat_result,
+) -> bool:
+    if (
+        not entry.append_safe
+        or stat.st_size <= entry.size
+        or int(stat.st_dev) != entry.device
+        or int(stat.st_ino) != entry.inode
+    ):
+        return False
+    try:
+        with path.open("rb") as handle:
+            prefix_length = min(PARSE_CACHE_SAMPLE_BYTES, entry.size)
+            prefix = handle.read(prefix_length)
+            tail_start = max(0, entry.size - PARSE_CACHE_SAMPLE_BYTES)
+            handle.seek(tail_start)
+            tail = handle.read(entry.size - tail_start)
+    except OSError:
+        return False
+    return (
+        hashlib.sha256(prefix).hexdigest() == entry.prefix_digest
+        and hashlib.sha256(tail).hexdigest() == entry.tail_digest
+    )
 
 
 class RemoteSnapshotStore:
@@ -1453,11 +1642,317 @@ class RemoteSnapshotStore:
         return transformed
 
 
+class FileParseCacheEntry(NamedTuple):
+    mtime_ns: int
+    size: int
+    device: int
+    inode: int
+    summary: dict[str, Any]
+    detail: dict[str, Any]
+    append_safe: bool
+    prefix_digest: str
+    tail_digest: str
+
+
+class PersistentParseCache:
+    def __init__(self, path: Path | None = None):
+        self.path = path or parse_cache_path()
+        self._lock = threading.RLock()
+        self._connection: sqlite3.Connection | None = None
+        self._disabled = os.environ.get("COUSASH_DISABLE_PARSE_CACHE") == "1"
+
+    @staticmethod
+    def encode_payload(value: dict[str, Any]) -> bytes:
+        raw = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return zlib.compress(raw, level=1)
+
+    @staticmethod
+    def decode_payload(value: bytes) -> dict[str, Any]:
+        decoded = json.loads(zlib.decompress(value).decode("utf-8"))
+        if not isinstance(decoded, dict):
+            raise ValueError("cached payload is not an object")
+        return decoded
+
+    def connection(self) -> sqlite3.Connection | None:
+        if self._disabled:
+            return None
+        with self._lock:
+            if self._connection is not None:
+                return self._connection
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                if os.name != "nt":
+                    os.chmod(self.path.parent, 0o700)
+                connection = sqlite3.connect(self.path, timeout=10.0, check_same_thread=False)
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("PRAGMA synchronous=NORMAL")
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS parsed_files (
+                        cache_key TEXT PRIMARY KEY,
+                        parser_version INTEGER NOT NULL,
+                        mtime_ns INTEGER NOT NULL,
+                        size INTEGER NOT NULL,
+                        device INTEGER NOT NULL,
+                        inode INTEGER NOT NULL,
+                        append_safe INTEGER NOT NULL,
+                        prefix_digest TEXT NOT NULL,
+                        tail_digest TEXT NOT NULL,
+                        summary_blob BLOB NOT NULL,
+                        detail_blob BLOB NOT NULL,
+                        updated_at_ns INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    "DELETE FROM parsed_files WHERE parser_version != ?",
+                    (PARSE_CACHE_VERSION,),
+                )
+                connection.commit()
+                if os.name != "nt":
+                    os.chmod(self.path, 0o600)
+            except (OSError, sqlite3.Error):
+                self._disabled = True
+                try:
+                    connection.close()
+                except (NameError, sqlite3.Error):
+                    pass
+                return None
+            self._connection = connection
+            return connection
+
+    def get(self, cache_key: str) -> FileParseCacheEntry | None:
+        connection = self.connection()
+        if connection is None:
+            return None
+        with self._lock:
+            try:
+                row = connection.execute(
+                    """
+                    SELECT mtime_ns, size, device, inode, append_safe, prefix_digest, tail_digest,
+                           summary_blob, detail_blob
+                    FROM parsed_files
+                    WHERE cache_key = ? AND parser_version = ?
+                    """,
+                    (cache_key, PARSE_CACHE_VERSION),
+                ).fetchone()
+                if row is None:
+                    return None
+                return FileParseCacheEntry(
+                    int(row[0]),
+                    int(row[1]),
+                    int(row[2]),
+                    int(row[3]),
+                    self.decode_payload(row[7]),
+                    self.decode_payload(row[8]),
+                    bool(row[4]),
+                    str(row[5]),
+                    str(row[6]),
+                )
+            except (sqlite3.Error, UnicodeDecodeError, ValueError, zlib.error, json.JSONDecodeError):
+                try:
+                    connection.execute("DELETE FROM parsed_files WHERE cache_key = ?", (cache_key,))
+                    connection.commit()
+                except sqlite3.Error:
+                    pass
+                return None
+
+    def is_empty(self) -> bool:
+        connection = self.connection()
+        if connection is None:
+            return True
+        with self._lock:
+            try:
+                return connection.execute(
+                    "SELECT 1 FROM parsed_files WHERE parser_version = ? LIMIT 1",
+                    (PARSE_CACHE_VERSION,),
+                ).fetchone() is None
+            except sqlite3.Error:
+                return True
+
+    def put(self, cache_key: str, entry: FileParseCacheEntry) -> None:
+        self.put_many([(cache_key, entry)])
+
+    def put_many(self, entries: list[tuple[str, FileParseCacheEntry]]) -> None:
+        if not entries:
+            return
+        connection = self.connection()
+        if connection is None:
+            return
+        updated_at_ns = time.time_ns()
+        try:
+            rows = [
+                (
+                    cache_key,
+                    PARSE_CACHE_VERSION,
+                    entry.mtime_ns,
+                    entry.size,
+                    entry.device,
+                    entry.inode,
+                    int(entry.append_safe),
+                    entry.prefix_digest,
+                    entry.tail_digest,
+                    self.encode_payload(entry.summary),
+                    self.encode_payload(entry.detail),
+                    updated_at_ns,
+                )
+                for cache_key, entry in entries
+            ]
+        except (OSError, TypeError, ValueError):
+            return
+        with self._lock:
+            try:
+                connection.executemany(
+                    """
+                    INSERT INTO parsed_files (
+                        cache_key, parser_version, mtime_ns, size, device, inode, append_safe,
+                        prefix_digest, tail_digest, summary_blob, detail_blob, updated_at_ns
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(cache_key) DO UPDATE SET
+                        parser_version = excluded.parser_version,
+                        mtime_ns = excluded.mtime_ns,
+                        size = excluded.size,
+                        device = excluded.device,
+                        inode = excluded.inode,
+                        append_safe = excluded.append_safe,
+                        prefix_digest = excluded.prefix_digest,
+                        tail_digest = excluded.tail_digest,
+                        summary_blob = excluded.summary_blob,
+                        detail_blob = excluded.detail_blob,
+                        updated_at_ns = excluded.updated_at_ns
+                    """,
+                    rows,
+                )
+                connection.commit()
+            except (OSError, sqlite3.Error, TypeError, ValueError):
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+                return
+
+    def prune(self, valid_keys: set[str], owned_roots: set[str]) -> None:
+        connection = self.connection()
+        if connection is None:
+            return
+        normalized_roots = {
+            os.path.normcase(os.path.abspath(root))
+            for root in owned_roots
+        }
+
+        def belongs_to_owned_root(cache_key: str) -> bool:
+            parts = cache_key.split(":", 2)
+            if len(parts) != 3:
+                return False
+            path = os.path.normcase(os.path.abspath(parts[2]))
+            for root in normalized_roots:
+                try:
+                    if os.path.commonpath((path, root)) == root:
+                        return True
+                except ValueError:
+                    continue
+            return False
+
+        with self._lock:
+            try:
+                cached_keys = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT cache_key FROM parsed_files WHERE parser_version = ?",
+                        (PARSE_CACHE_VERSION,),
+                    )
+                }
+                stale_keys = {
+                    cache_key
+                    for cache_key in cached_keys - valid_keys
+                    if belongs_to_owned_root(cache_key)
+                }
+                if not stale_keys:
+                    return
+                connection.executemany(
+                    "DELETE FROM parsed_files WHERE cache_key = ?",
+                    [(cache_key,) for cache_key in stale_keys],
+                )
+                connection.commit()
+            except sqlite3.Error:
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+
+    def close(self) -> None:
+        with self._lock:
+            if self._connection is None:
+                return
+            try:
+                self._connection.close()
+            except sqlite3.Error:
+                pass
+            self._connection = None
+
+
+class SnapshotStaleError(LookupError):
+    pass
+
+
+_PARSE_WORKER_ANALYZERS: dict[tuple[str, str, str], "CodexUsageAnalyzer"] = {}
+
+
+def initialize_parse_worker() -> None:
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
+def parse_rollout_worker(
+    job: dict[str, Any],
+) -> dict[str, Any]:
+    index = int(job["index"])
+    source_id = str(job["source_id"])
+    source_label = str(job["source_label"])
+    codex_home = str(job["codex_home"])
+    path_text = str(job["path"])
+    source = str(job["source"])
+    worker_key = (source_id, source_label, codex_home)
+    analyzer = _PARSE_WORKER_ANALYZERS.get(worker_key)
+    log_source = CodexLogSource(source_id, source_label, Path(codex_home))
+    if analyzer is None:
+        analyzer = CodexUsageAnalyzer(
+            [log_source],
+            resolve_project_info=False,
+            parallel_workers=0,
+        )
+        _PARSE_WORKER_ANALYZERS[worker_key] = analyzer
+    path = Path(path_text)
+    try:
+        before = path.stat()
+        summary, detail = analyzer.parse_file(
+            path,
+            source,
+            log_source,
+            end_offset=before.st_size,
+        )
+        after = path.stat()
+    except OSError:
+        return {"index": index, "error": "file_unavailable"}
+    return {
+        "index": index,
+        "summary": summary,
+        "detail": detail,
+        "before_state": file_stat_tuple(before),
+        "after_state": file_stat_tuple(after),
+    }
+
+
 class CodexUsageAnalyzer:
     def __init__(
         self,
         codex_home: Path | list[Path] | list[CodexLogSource],
         remote_store: RemoteSnapshotStore | None = None,
+        persistent_cache: PersistentParseCache | None = None,
+        resolve_project_info: bool = True,
+        parallel_workers: int = 0,
     ):
         if isinstance(codex_home, list):
             if codex_home and isinstance(codex_home[0], CodexLogSource):
@@ -1472,7 +1967,21 @@ class CodexUsageAnalyzer:
         self.codex_home = sources[0].codex_home
         self.codex_home_display = codex_home_display(sources)
         self.remote_store = remote_store
-        self._cache: dict[str, tuple[int, int, dict[str, Any], dict[str, Any]]] = {}
+        self.persistent_cache = persistent_cache
+        self.resolve_project_info = resolve_project_info
+        self.parallel_workers = max(0, min(int(parallel_workers), 4))
+        self._process_pool: concurrent.futures.ProcessPoolExecutor | None = None
+        self._parallel_disabled = False
+        self._cache: dict[str, FileParseCacheEntry] = {}
+        self.cache_metrics = {
+            "memory_hits": 0,
+            "persistent_hits": 0,
+            "full_parses": 0,
+            "incremental_parses": 0,
+            "incremental_bytes": 0,
+            "parallel_files": 0,
+        }
+        self._pending_persistent_entries: dict[str, FileParseCacheEntry] = {}
         self._snapshot_cache_signature: tuple[Any, ...] | None = None
         self._snapshot_cache: dict[str, Any] | None = None
         self._period_cache: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
@@ -1481,6 +1990,62 @@ class CodexUsageAnalyzer:
             tuple[tuple[Any, ...], dict[str, Any]],
         ] = {}
         self._project_info_cache: dict[str, ProjectInfo] = {}
+        self._session_meta_cache: dict[str, tuple[int, int, dict[str, Any]]] = {}
+        self._last_pruned_cache_keys: frozenset[str] | None = None
+        self._scan_lock = threading.RLock()
+        self._published_lock = threading.Lock()
+        self._published_snapshots: dict[str, dict[str, Any]] = {}
+        self._session_payload_cache: dict[str, bytes] = {}
+
+    def publish_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        replaced: list[dict[str, Any] | None] | None = None,
+    ) -> dict[str, Any]:
+        published = {**snapshot, "snapshot_token": secrets.token_urlsafe(16)}
+        with self._published_lock:
+            for old_snapshot in replaced or []:
+                if old_snapshot is None:
+                    continue
+                old_token = old_snapshot.get("snapshot_token")
+                if isinstance(old_token, str):
+                    self._published_snapshots.pop(old_token, None)
+                    self._session_payload_cache.pop(old_token, None)
+            self._published_snapshots[published["snapshot_token"]] = published
+        return published
+
+    def unpublish_snapshot(self, snapshot: dict[str, Any] | None) -> None:
+        if snapshot is None:
+            return
+        token = snapshot.get("snapshot_token")
+        if not isinstance(token, str):
+            return
+        with self._published_lock:
+            self._published_snapshots.pop(token, None)
+            self._session_payload_cache.pop(token, None)
+
+    def session_payload_bytes(
+        self,
+        snapshot: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> bytes:
+        token = str(snapshot.get("snapshot_token") or "")
+        if token:
+            with self._published_lock:
+                cached = (
+                    self._session_payload_cache.get(token)
+                    if self._published_snapshots.get(token) is snapshot
+                    else None
+                )
+            if cached is not None:
+                return cached
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if not token:
+            return body
+        with self._published_lock:
+            if self._published_snapshots.get(token) is not snapshot:
+                return body
+            return self._session_payload_cache.setdefault(token, body)
 
     def load_session_titles(self, codex_home: Path | None = None) -> dict[str, str]:
         titles: dict[str, str] = {}
@@ -1497,6 +2062,47 @@ class CodexUsageAnalyzer:
         except OSError:
             return titles
         return titles
+
+    def resolved_path_key(self, path: Path) -> str:
+        return str(path)
+
+    def file_cache_key(self, log_source: CodexLogSource, path: Path, source: str) -> str:
+        return f"{log_source.id}:{source}:{self.resolved_path_key(path)}"
+
+    def prune_parse_cache(
+        self,
+        files: list[tuple[CodexLogSource, Path, str]],
+    ) -> None:
+        valid_keys = frozenset(
+            self.file_cache_key(log_source, path, source)
+            for log_source, path, source in files
+        )
+        if valid_keys == self._last_pruned_cache_keys:
+            return
+        self._last_pruned_cache_keys = valid_keys
+        for cache_key in tuple(self._cache):
+            if cache_key not in valid_keys:
+                self._cache.pop(cache_key, None)
+        if self.persistent_cache is not None:
+            owned_roots = {
+                str(log_source.codex_home / directory)
+                for log_source in self.codex_sources
+                for directory in ("sessions", "archived_sessions")
+            }
+            self.persistent_cache.prune(set(valid_keys), owned_roots)
+
+    def cached_session_meta(self, path: Path) -> dict[str, Any]:
+        path_key = self.resolved_path_key(path)
+        try:
+            stat = path.stat()
+        except OSError:
+            return {}
+        cached = self._session_meta_cache.get(path_key)
+        if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+            return cached[2]
+        payload = first_session_meta_payload(path)
+        self._session_meta_cache[path_key] = (stat.st_mtime_ns, stat.st_size, payload)
+        return payload
 
     def iter_session_files(self) -> list[tuple[CodexLogSource, Path, str]]:
         files: list[tuple[CodexLogSource, Path, str]] = []
@@ -1533,7 +2139,18 @@ class CodexUsageAnalyzer:
         end_date: str | None = None,
         include_remotes: bool = True,
     ) -> dict[str, Any]:
+        with self._scan_lock:
+            return self._scan_locked(period, start_date, end_date, include_remotes)
+
+    def _scan_locked(
+        self,
+        period: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        include_remotes: bool = True,
+    ) -> dict[str, Any]:
         all_files = self.iter_session_files()
+        self.prune_parse_cache(all_files)
         files = all_files
         if period:
             key, start_at, _end_at, start_key, end_key = local_period_bounds(period, start_date, end_date)
@@ -1548,23 +2165,38 @@ class CodexUsageAnalyzer:
 
                 snapshot = self.build_snapshot(files, include_remotes, include_daily_usage=False)
                 snapshot = self.filter_snapshot_by_period(snapshot, key, start_key, end_key)
+                snapshot = self.publish_snapshot(snapshot, [cached[1] if cached is not None else None])
                 self._bounded_snapshot_cache[cache_key] = (signature, snapshot)
                 if len(self._bounded_snapshot_cache) > 16:
-                    self._bounded_snapshot_cache.pop(next(iter(self._bounded_snapshot_cache)))
+                    evicted = self._bounded_snapshot_cache.pop(next(iter(self._bounded_snapshot_cache)))
+                    self.unpublish_snapshot(evicted[1])
                 return snapshot
 
         signature = self.scan_signature(files, include_remotes)
         if self._snapshot_cache_signature != signature or self._snapshot_cache is None:
-            self._snapshot_cache = self.build_snapshot(files, include_remotes)
+            old_snapshots = [self._snapshot_cache, *self._period_cache.values()]
+            self._snapshot_cache = self.publish_snapshot(
+                self.build_snapshot(files, include_remotes),
+                old_snapshots,
+            )
             self._snapshot_cache_signature = signature
             self._period_cache = {}
 
         snapshot = self._snapshot_cache
         if period:
+            key, _start_at, _end_at, _start_key, _end_key = local_period_bounds(
+                period,
+                start_date,
+                end_date,
+            )
+            if key == "all":
+                return snapshot
             cache_key = (period, start_date, end_date)
             cached = self._period_cache.get(cache_key)
             if cached is None:
-                cached = self.filter_snapshot_by_period(snapshot, period, start_date, end_date)
+                cached = self.publish_snapshot(
+                    self.filter_snapshot_by_period(snapshot, period, start_date, end_date)
+                )
                 self._period_cache[cache_key] = cached
             return cached
         return snapshot
@@ -1584,8 +2216,8 @@ class CodexUsageAnalyzer:
                 continue
         return candidates
 
-    @staticmethod
     def files_with_fork_dependencies(
+        self,
         candidates: list[tuple[CodexLogSource, Path, str]],
         all_files: list[tuple[CodexLogSource, Path, str]],
     ) -> list[tuple[CodexLogSource, Path, str]]:
@@ -1593,31 +2225,31 @@ class CodexUsageAnalyzer:
         files_by_thread: dict[tuple[str, str], tuple[CodexLogSource, Path, str]] = {}
         for item in all_files:
             log_source, path, _source = item
-            path_key = str(path.resolve())
-            payload = first_session_meta_payload(path)
+            path_key = self.resolved_path_key(path)
+            payload = self.cached_session_meta(path)
             metadata_by_path[path_key] = payload
             session_id = payload.get("id") or payload.get("session_id")
             if isinstance(session_id, str) and session_id:
                 files_by_thread.setdefault((log_source.id, session_id), item)
 
-        selected = {str(item[1].resolve()): item for item in candidates}
+        selected = {self.resolved_path_key(item[1]): item for item in candidates}
         queue = list(candidates)
         while queue:
             log_source, path, _source = queue.pop()
-            payload = metadata_by_path.get(str(path.resolve()), {})
+            payload = metadata_by_path.get(self.resolved_path_key(path), {})
             forked_from_id = payload.get("forked_from_id")
             if not isinstance(forked_from_id, str) or not forked_from_id:
                 continue
             dependency = files_by_thread.get((log_source.id, forked_from_id))
             if dependency is None:
                 continue
-            dependency_key = str(dependency[1].resolve())
+            dependency_key = self.resolved_path_key(dependency[1])
             if dependency_key in selected:
                 continue
             selected[dependency_key] = dependency
             queue.append(dependency)
 
-        return [item for item in all_files if str(item[1].resolve()) in selected]
+        return [item for item in all_files if self.resolved_path_key(item[1]) in selected]
 
     @staticmethod
     def normalize_subagent_usage(
@@ -1634,7 +2266,7 @@ class CodexUsageAnalyzer:
             details_by_thread.setdefault(key, detail)
             timeline = detail.get("timeline")
             if key not in raw_timelines and isinstance(timeline, list):
-                raw_timelines[key] = clone_json(timeline)
+                raw_timelines[key] = timeline
 
         for summary, detail in local_rows:
             if not (detail.get("is_subagent") or detail.get("forked_from_id")):
@@ -1778,6 +2410,129 @@ class CodexUsageAnalyzer:
                 detail["latest_rate_limits"] = rebased[-1].get("rate_limits")
             summary.update({key: detail.get(key) for key in SUMMARY_KEYS})
 
+    def should_parallel_parse(
+        self,
+        indexed_files: list[tuple[int, tuple[CodexLogSource, Path, str]]],
+    ) -> bool:
+        if self.parallel_workers < 2 or self._parallel_disabled:
+            return False
+        min_files = max(0, environment_int("COUSASH_PARSE_MIN_FILES", DEFAULT_PARSE_MIN_FILES))
+        if len(indexed_files) < min_files:
+            return False
+        main_module = sys.modules.get("__main__")
+        main_path = Path(str(getattr(main_module, "__file__", "")))
+        if not main_path.is_file():
+            return False
+        total_bytes = 0
+        try:
+            for _index, (_log_source, path, _source) in indexed_files:
+                total_bytes += path.stat().st_size
+        except OSError:
+            return False
+        min_bytes = max(0, environment_int("COUSASH_PARSE_MIN_BYTES", DEFAULT_PARSE_MIN_BYTES))
+        return total_bytes >= min_bytes
+
+    def process_pool(self) -> concurrent.futures.ProcessPoolExecutor:
+        if self._process_pool is None:
+            self._process_pool = concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.parallel_workers,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=initialize_parse_worker,
+            )
+        return self._process_pool
+
+    def parse_files_in_parallel(
+        self,
+        indexed_files: list[tuple[int, tuple[CodexLogSource, Path, str]]],
+    ) -> dict[int, tuple[dict[str, Any], dict[str, Any]]] | None:
+        jobs = [
+            {
+                "index": index,
+                "source_id": log_source.id,
+                "source_label": log_source.label,
+                "codex_home": str(log_source.codex_home),
+                "path": str(path),
+                "source": source,
+            }
+            for index, (log_source, path, source) in indexed_files
+        ]
+        try:
+            results = list(self.process_pool().map(parse_rollout_worker, jobs, chunksize=1))
+        except Exception:
+            self._parallel_disabled = True
+            if self._process_pool is not None:
+                try:
+                    self._process_pool.shutdown(wait=True, cancel_futures=True)
+                except Exception:
+                    pass
+                self._process_pool = None
+            return None
+
+        parsed_by_index: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
+        pending_entries: list[tuple[str, FileParseCacheEntry]] = []
+        files_by_index = dict(indexed_files)
+        for result in results:
+            if result.get("error"):
+                continue
+            index = int(result["index"])
+            summary = result.get("summary")
+            detail = result.get("detail")
+            before_state = result.get("before_state")
+            after_state = result.get("after_state")
+            if (
+                not isinstance(summary, dict)
+                or not isinstance(detail, dict)
+                or not isinstance(before_state, tuple)
+                or not isinstance(after_state, tuple)
+            ):
+                continue
+            log_source, path, source = files_by_index[index]
+            try:
+                current_stat = path.stat()
+            except OSError:
+                continue
+            current_state = file_stat_tuple(current_stat)
+            parsed_size = int(detail.get("_parsed_end_offset") or 0)
+            if (
+                parsed_size > before_state[3]
+                or file_change_requires_retry(before_state, after_state, parsed_size)
+                or file_change_requires_retry(after_state, current_state, parsed_size)
+            ):
+                continue
+            append_safe, prefix_digest, tail_digest = file_parse_markers(path, parsed_size)
+            entry = FileParseCacheEntry(
+                current_stat.st_mtime_ns,
+                parsed_size,
+                int(current_stat.st_dev),
+                int(current_stat.st_ino),
+                summary,
+                detail,
+                append_safe,
+                prefix_digest,
+                tail_digest,
+            )
+            cache_key = self.file_cache_key(log_source, path, source)
+            parsed_by_index[index] = (summary, detail)
+            pending_entries.append((cache_key, entry))
+
+        for cache_key, entry in pending_entries:
+            self._cache[cache_key] = entry
+            if self.persistent_cache is not None:
+                self._pending_persistent_entries[cache_key] = entry
+        self.cache_metrics["full_parses"] += len(parsed_by_index)
+        self.cache_metrics["parallel_files"] += len(parsed_by_index)
+        return parsed_by_index
+
+    def close(self) -> None:
+        if self._process_pool is not None:
+            try:
+                self._process_pool.shutdown(wait=True, cancel_futures=True)
+            except Exception:
+                pass
+            self._process_pool = None
+        if self.persistent_cache is not None:
+            self.persistent_cache.close()
+
     def build_snapshot(
         self,
         files: list[tuple[CodexLogSource, Path, str]],
@@ -1792,15 +2547,69 @@ class CodexUsageAnalyzer:
         details_by_uid: dict[str, dict[str, Any]] = {}
         local_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
-        for log_source, path, source in files:
+        parsed_by_index: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
+        full_misses: list[tuple[int, tuple[CodexLogSource, Path, str]]] = []
+        for index, (log_source, path, source) in enumerate(files):
             try:
-                cached_summary, cached_detail = self.parse_file_cached(path, source, log_source)
+                cached = self.parse_file_cached(
+                    path,
+                    source,
+                    log_source,
+                    allow_full=False,
+                )
             except OSError:
                 continue
+            if cached is None:
+                full_misses.append((index, (log_source, path, source)))
+            else:
+                parsed_by_index[index] = cached
 
-            summary = clone_json(cached_summary)
-            detail = clone_json(cached_detail)
+        if self.should_parallel_parse(full_misses):
+            parallel = self.parse_files_in_parallel(full_misses)
+            if parallel is not None:
+                parsed_by_index.update(parallel)
+
+        for index, (log_source, path, source) in full_misses:
+            if index in parsed_by_index:
+                continue
+            try:
+                parsed = self.parse_file_cached(path, source, log_source)
+            except OSError:
+                continue
+            if parsed is not None:
+                parsed_by_index[index] = parsed
+
+        for index, (log_source, _path, source) in enumerate(files):
+            parsed = parsed_by_index.get(index)
+            if parsed is None:
+                continue
+            cached_summary, cached_detail = parsed
+            summary = dict(cached_summary)
+            detail = dict(cached_detail)
+            for key in tuple(detail):
+                if key.startswith("_"):
+                    detail.pop(key, None)
+            project_info = self.project_info_for_cwd(str(detail.get("cwd") or ""))
+            detail.update(
+                {
+                    "source": source,
+                    "environment": log_source.label,
+                    "environment_id": log_source.id,
+                    "codex_home": str(log_source.codex_home),
+                    "project": project_info.project,
+                    "project_root": project_info.project_root,
+                    "workspace_root": project_info.workspace_root,
+                    "project_branch": project_info.project_branch,
+                    "is_git_worktree": project_info.is_git_worktree,
+                }
+            )
+            summary.update({key: detail.get(key) for key in SUMMARY_KEYS})
             local_rows.append((summary, detail))
+
+        if self.persistent_cache is not None and self._pending_persistent_entries:
+            pending = list(self._pending_persistent_entries.items())
+            self._pending_persistent_entries.clear()
+            self.persistent_cache.put_many(pending)
 
         self.normalize_subagent_usage(local_rows)
 
@@ -1974,20 +2783,108 @@ class CodexUsageAnalyzer:
         path: Path,
         source: str,
         log_source: CodexLogSource | None = None,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        allow_full: bool = True,
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         log_source = log_source or self.codex_sources[0]
         stat = path.stat()
-        cache_key = f"{log_source.id}:{path.resolve()}"
+        cache_key = self.file_cache_key(log_source, path, source)
         cached = self._cache.get(cache_key)
-        if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
-            return cached[2], cached[3]
+        if (
+            cached is not None
+            and cached.mtime_ns == stat.st_mtime_ns
+            and cached.size == stat.st_size
+            and cached.device == int(stat.st_dev)
+            and cached.inode == int(stat.st_ino)
+        ):
+            self.cache_metrics["memory_hits"] += 1
+            return cached.summary, cached.detail
 
-        summary, detail = self.parse_file(path, source, log_source)
-        self._cache[cache_key] = (stat.st_mtime_ns, stat.st_size, summary, detail)
+        if cached is None and self.persistent_cache is not None:
+            cached = self.persistent_cache.get(cache_key)
+            if cached is not None:
+                self._cache[cache_key] = cached
+                if (
+                    cached.mtime_ns == stat.st_mtime_ns
+                    and cached.size == stat.st_size
+                    and cached.device == int(stat.st_dev)
+                    and cached.inode == int(stat.st_ino)
+                ):
+                    self.cache_metrics["persistent_hits"] += 1
+                    return cached.summary, cached.detail
+
+        used_incremental = cached is not None and file_matches_cached_prefix(path, cached, stat)
+        if used_incremental:
+            summary, detail = self.parse_file(
+                path,
+                source,
+                log_source,
+                base_detail=cached.detail,
+                start_offset=cached.size,
+                end_offset=stat.st_size,
+            )
+        elif not allow_full:
+            return None
+        else:
+            summary, detail = self.parse_file(
+                path,
+                source,
+                log_source,
+                end_offset=stat.st_size,
+            )
+
+        final_stat = path.stat()
+        parsed_size = int(detail.get("_parsed_end_offset") or 0)
+        if file_change_requires_retry(
+            file_stat_tuple(stat),
+            file_stat_tuple(final_stat),
+            parsed_size,
+        ):
+            stat = path.stat()
+            summary, detail = self.parse_file(
+                path,
+                source,
+                log_source,
+                end_offset=stat.st_size,
+            )
+            final_stat = path.stat()
+            parsed_size = int(detail.get("_parsed_end_offset") or 0)
+            used_incremental = False
+
+        if used_incremental and cached is not None:
+            self.cache_metrics["incremental_parses"] += 1
+            self.cache_metrics["incremental_bytes"] += max(0, parsed_size - cached.size)
+        else:
+            self.cache_metrics["full_parses"] += 1
+
+        if file_change_requires_retry(
+            file_stat_tuple(stat),
+            file_stat_tuple(final_stat),
+            parsed_size,
+        ):
+            return summary, detail
+
+        append_safe, prefix_digest, tail_digest = file_parse_markers(path, parsed_size)
+        entry = FileParseCacheEntry(
+            final_stat.st_mtime_ns,
+            parsed_size,
+            int(final_stat.st_dev),
+            int(final_stat.st_ino),
+            summary,
+            detail,
+            append_safe,
+            prefix_digest,
+            tail_digest,
+        )
+        self._cache[cache_key] = entry
+        if self.persistent_cache is not None:
+            self._pending_persistent_entries[cache_key] = entry
         return summary, detail
 
     def project_info_for_cwd(self, cwd: str) -> ProjectInfo:
         key = str(cwd or "")
+        if not self.resolve_project_info:
+            project = folder_name_from_path(key) or "unknown"
+            return ProjectInfo(project, key, key, "", False)
         cached = self._project_info_cache.get(key)
         if cached is None:
             cached = git_project_info(key)
@@ -1999,51 +2896,84 @@ class CodexUsageAnalyzer:
         path: Path,
         source: str,
         log_source: CodexLogSource | None = None,
+        base_detail: dict[str, Any] | None = None,
+        start_offset: int = 0,
+        end_offset: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         log_source = log_source or self.codex_sources[0]
-        uid = hashlib.sha1(f"{log_source.id}:{path.resolve()}".encode("utf-8", errors="replace")).hexdigest()[:16]
-        session_id = ""
-        root_session_id = ""
-        parent_thread_id = ""
-        forked_from_id = ""
-        thread_source = ""
-        is_subagent = False
-        agent_path = ""
-        agent_nickname = ""
-        agent_role = ""
-        session_meta_seen = False
+        resolved_path = self.resolved_path_key(path)
+        uid = hashlib.sha1(f"{log_source.id}:{resolved_path}".encode("utf-8", errors="replace")).hexdigest()[:16]
+        base = base_detail or {}
+        session_id = str(base.get("session_id") or "")
+        root_session_id = str(base.get("root_session_id") or "")
+        parent_thread_id = str(base.get("parent_thread_id") or "")
+        forked_from_id = str(base.get("forked_from_id") or "")
+        thread_source = str(base.get("thread_source") or "")
+        is_subagent = bool(base.get("is_subagent"))
+        agent_path = str(base.get("agent_path") or "")
+        agent_nickname = str(base.get("agent_nickname") or "")
+        agent_role = str(base.get("agent_role") or "")
+        session_meta_seen = bool(base.get("_session_meta_seen"))
         title = ""
-        cwd = ""
-        model = ""
-        effort = ""
-        originator = ""
-        cli_version = ""
-        created_at = ""
-        start_at = ""
-        end_at = ""
-        model_context_window: int | None = None
-        latest_rate_limits: dict[str, Any] | None = None
-        latest_rate_limit_reached_type: str | None = None
-        latest_plan_type: str | None = None
+        cwd = str(base.get("cwd") or "")
+        model = str(base.get("model") or "")
+        effort = str(base.get("effort") or "")
+        originator = str(base.get("originator") or "")
+        cli_version = str(base.get("cli_version") or "")
+        created_at = str(base.get("_raw_created_at") or "")
+        start_at = str(base.get("_raw_start_at") or "")
+        end_at = str(base.get("_raw_end_at") or "")
+        raw_context_window = base.get("model_context_window")
+        model_context_window = int(raw_context_window) if isinstance(raw_context_window, (int, float)) else None
+        raw_rate_limits = base.get("latest_rate_limits")
+        latest_rate_limits = raw_rate_limits if isinstance(raw_rate_limits, dict) else None
+        raw_reached_type = base.get("latest_rate_limit_reached_type")
+        latest_rate_limit_reached_type = raw_reached_type if isinstance(raw_reached_type, str) else None
+        raw_plan_type = base.get("latest_plan_type")
+        latest_plan_type = raw_plan_type if isinstance(raw_plan_type, str) else None
 
-        total_usage = zero_usage()
-        last_usage = zero_usage()
-        timeline: list[dict[str, Any]] = []
-        tasks: list[dict[str, Any]] = []
-        tool_counts: dict[str, int] = {}
-        turn_ids: set[str] = set()
-        parse_errors = 0
-        line_count = 0
-        token_event_count = 0
-        user_message_count = 0
-        assistant_message_count = 0
-        first_user_prompt = ""
-        last_agent_preview = ""
-        durations_ms: list[int] = []
-        ttf_ms: list[int] = []
+        total_usage = normalize_usage(base.get("total_token_usage"))
+        last_usage = normalize_usage(base.get("last_token_usage"))
+        timeline = list(base.get("timeline", [])) if isinstance(base.get("timeline"), list) else []
+        tasks = list(base.get("tasks", [])) if isinstance(base.get("tasks"), list) else []
+        raw_tool_counts = base.get("tool_counts")
+        tool_counts = {
+            str(name): int(count)
+            for name, count in raw_tool_counts.items()
+            if isinstance(count, (int, float))
+        } if isinstance(raw_tool_counts, dict) else {}
+        turn_ids = {
+            str(turn_id)
+            for turn_id in base.get("_turn_ids", [])
+            if isinstance(turn_id, str)
+        }
+        parse_errors = int(base.get("parse_errors") or 0)
+        line_count = int(base.get("line_count") or 0)
+        token_event_count = int(base.get("token_event_count") or 0)
+        user_message_count = int(base.get("user_message_count") or 0)
+        assistant_message_count = int(base.get("assistant_message_count") or 0)
+        first_user_prompt = str(base.get("first_user_prompt") or "")
+        last_agent_preview = str(base.get("last_agent_preview") or "")
+        durations_ms = [
+            int(task["duration_ms"])
+            for task in tasks
+            if isinstance(task, dict) and isinstance(task.get("duration_ms"), (int, float))
+        ]
+        ttf_ms = [
+            int(task["time_to_first_token_ms"])
+            for task in tasks
+            if isinstance(task, dict) and isinstance(task.get("time_to_first_token_ms"), (int, float))
+        ]
+        fast_skipped_line_count = int(base.get("fast_skipped_line_count") or 0)
+        fast_skipped_bytes = int(base.get("fast_skipped_bytes") or 0)
 
-        rows = read_jsonl(path)
-        for item in rows:
+        rollout_stats = RolloutReadStats()
+        for item in read_rollout_jsonl(
+            path,
+            start_offset,
+            rollout_stats,
+            end_offset=end_offset,
+        ):
             line_count += 1
             if item.get("__parse_error__"):
                 parse_errors += 1
@@ -2209,11 +3139,18 @@ class CodexUsageAnalyzer:
                     if isinstance(message, str) and not first_user_prompt and not is_synthetic_user_context(message):
                         first_user_prompt = clean_text(message, 260)
 
+        fast_skipped_line_count += rollout_stats.fast_skipped_line_count
+        fast_skipped_bytes += rollout_stats.fast_skipped_bytes
+
         if not session_id:
             match = re.search(r"rollout-[^-]+-[^-]+-(.+?)\.jsonl$", path.name)
             session_id = match.group(1) if match else uid
         if not root_session_id:
             root_session_id = session_id
+
+        raw_created_at = created_at
+        raw_start_at = start_at
+        raw_end_at = end_at
 
         if not title:
             agent_leaf = agent_path.rstrip("/").rsplit("/", 1)[-1] if agent_path else ""
@@ -2258,10 +3195,12 @@ class CodexUsageAnalyzer:
             "remote_imported_at": "",
             "remote_exported_at": "",
             "codex_home": str(log_source.codex_home),
-            "path": str(path.resolve()),
-            "file_size": path.stat().st_size,
+            "path": resolved_path,
+            "file_size": start_offset + rollout_stats.bytes_read,
             "line_count": line_count,
             "parse_errors": parse_errors,
+            "fast_skipped_line_count": fast_skipped_line_count,
+            "fast_skipped_bytes": fast_skipped_bytes,
             "created_at": created_at or start_at,
             "start_at": start_at,
             "end_at": end_at,
@@ -2304,6 +3243,12 @@ class CodexUsageAnalyzer:
             "time_to_first_token_ms_avg": int(sum(ttf_ms) / len(ttf_ms)) if ttf_ms else None,
             "timeline": timeline,
             "tasks": tasks,
+            "_turn_ids": sorted(turn_ids),
+            "_session_meta_seen": session_meta_seen,
+            "_raw_created_at": raw_created_at,
+            "_raw_start_at": raw_start_at,
+            "_raw_end_at": raw_end_at,
+            "_parsed_end_offset": start_offset + rollout_stats.bytes_read,
         }
 
         summary = {key: detail[key] for key in SUMMARY_KEYS}
@@ -2384,7 +3329,14 @@ class CodexUsageAnalyzer:
         period: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        snapshot_token: str | None = None,
     ) -> dict[str, Any] | None:
+        if snapshot_token:
+            with self._published_lock:
+                snapshot = self._published_snapshots.get(snapshot_token)
+            if snapshot is None:
+                raise SnapshotStaleError(snapshot_token)
+            return snapshot["details_by_uid"].get(uid)
         snapshot = self.scan(period, start_date, end_date)
         return snapshot["details_by_uid"].get(uid)
 
@@ -3409,6 +4361,8 @@ HTML = r"""<!doctype html>
       codexHome: '',
       codexSources: [],
       generatedAt: '',
+      snapshotToken: '',
+      staleReloadToken: '',
       selectedUid: null,
       viewMode: 'project',
       sortKey: 'end_at',
@@ -4043,6 +4997,9 @@ HTML = r"""<!doctype html>
     }
 
     async function applySessionData(data, requestedPeriod, requestedStart, requestedEnd, selectTop = true) {
+      const nextSnapshotToken = data.snapshot_token || '';
+      if (state.snapshotToken !== nextSnapshotToken) state.staleReloadToken = '';
+      state.snapshotToken = nextSnapshotToken;
       state.sessions = data.sessions || [];
       state.summary = data.summary || null;
       const incomingDailyUsage = data.daily_usage || [];
@@ -4073,9 +5030,9 @@ HTML = r"""<!doctype html>
       const visibleRows = currentSelectableRows();
       if ((selectTop || !state.selectedUid) && visibleRows.length) {
         const first = visibleRows[0];
-        if (first) await showDetails(first.uid);
+        if (first) void showDetails(first.uid);
       } else if (state.selectedUid) {
-        await showDetails(state.selectedUid, false);
+        void showDetails(state.selectedUid, false);
       } else {
         clearDetails();
       }
@@ -4658,16 +5615,29 @@ HTML = r"""<!doctype html>
 
     async function showDetails(uid, renderRows = true) {
       state.selectedUid = uid;
+      const requestedToken = state.snapshotToken;
       if (renderRows) renderTable();
       document.getElementById('detailStatus').textContent = t('detailsLoading');
       try {
         const params = periodParams();
         params.set('id', uid);
+        if (requestedToken) params.set('snapshot_token', requestedToken);
         const res = await fetch('/api/session?' + params.toString(), { cache: 'no-store' });
+        if (res.status === 409) {
+          if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
+          const stale = await res.json().catch(() => ({}));
+          if (stale.code === 'snapshot_stale' && state.staleReloadToken !== requestedToken) {
+            state.staleReloadToken = requestedToken;
+            void loadData(false);
+            return;
+          }
+        }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const detail = await res.json();
+        if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
         renderDetails(detail);
       } catch (err) {
+        if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
         document.getElementById('detailsBody').innerHTML = `<div class="error">${escapeHtml(t('detailFailed', { message: err.message }))}</div>`;
         document.getElementById('detailStatus').textContent = t('failed');
       }
@@ -5142,6 +6112,7 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 end_date = query.get("end", [""])[0] or None
                 snapshot = analyzer.scan(period, start_date, end_date)
                 payload = {
+                    "snapshot_token": snapshot["snapshot_token"],
                     "generated_at": snapshot["generated_at"],
                     "codex_home": snapshot["codex_home"],
                     "codex_sources": snapshot.get("codex_sources", []),
@@ -5153,7 +6124,10 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                     "current_device_short_code": analyzer.remote_store.current_device_code if analyzer.remote_store else current_device_short_code(),
                     "remotes": analyzer.remote_store.list_remotes() if analyzer.remote_store else [],
                 }
-                self.send_json(payload)
+                self.send_bytes(
+                    analyzer.session_payload_bytes(snapshot, payload),
+                    "application/json; charset=utf-8",
+                )
                 return
 
             if path == "/api/daily-usage":
@@ -5172,7 +6146,21 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 period = query.get("period", ["today"])[0]
                 start_date = query.get("start", [""])[0] or None
                 end_date = query.get("end", [""])[0] or None
-                detail = analyzer.get_detail(uid, period, start_date, end_date)
+                snapshot_token = query.get("snapshot_token", [""])[0] or None
+                try:
+                    detail = analyzer.get_detail(
+                        uid,
+                        period,
+                        start_date,
+                        end_date,
+                        snapshot_token=snapshot_token,
+                    )
+                except SnapshotStaleError:
+                    self.send_json(
+                        {"error": "snapshot stale", "code": "snapshot_stale"},
+                        status=409,
+                    )
+                    return
                 if detail is None:
                     self.send_json({"error": "session not found"}, status=404)
                     return
@@ -5407,6 +6395,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--host", default="127.0.0.1", help="Bind host. Defaults to 127.0.0.1.")
     parser.add_argument("--port", type=int, default=8765, help="Port to bind. Defaults to the fixed dashboard port 8765.")
+    parser.add_argument(
+        "--parse-workers",
+        type=int,
+        default=environment_int("COUSASH_PARSE_WORKERS", DEFAULT_PARSE_WORKERS),
+        help=f"Worker processes for large cold parses. Defaults to {DEFAULT_PARSE_WORKERS}; use 0 to disable.",
+    )
     parser.add_argument("--open", action="store_true", help="Open the dashboard in the default browser.")
     parser.add_argument("--once", action="store_true", help="Scan once and print a short summary instead of serving the UI.")
     parser.add_argument("--json", action="store_true", help="With --once, print JSON.")
@@ -5428,13 +6422,20 @@ def main() -> int:
         else default_codex_sources(include_windows=not args.no_auto_windows)
     )
     remote_store = RemoteSnapshotStore()
-    analyzer = CodexUsageAnalyzer(sources, remote_store=remote_store)
+    persistent_cache = PersistentParseCache()
+    analyzer = CodexUsageAnalyzer(
+        sources,
+        remote_store=remote_store,
+        persistent_cache=persistent_cache,
+        parallel_workers=args.parse_workers,
+    )
     if args.export_snapshot is not None:
         body = analyzer.export_snapshot_json()
         output = Path(args.export_snapshot).expanduser() if args.export_snapshot else Path.cwd() / f"cousash-{remote_store.current_device_code}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(body + "\n", encoding="utf-8")
         safe_print(str(output.resolve()))
+        analyzer.close()
         return 0
 
     if args.once:
@@ -5446,6 +6447,7 @@ def main() -> int:
                 "codex_sources": snapshot.get("codex_sources", []),
                 "summary": snapshot["summary"],
                 "sessions": snapshot["sessions"],
+                "cache_metrics": analyzer.cache_metrics,
             }
             safe_print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
@@ -5456,6 +6458,7 @@ def main() -> int:
             if snapshot["sessions"]:
                 top = snapshot["sessions"][0]
                 safe_print(f"Top session: {top.get('title', top.get('session_id'))} ({top['total_token_usage']['total_tokens']:,})")
+        analyzer.close()
         return 0
 
     port = args.port
@@ -5476,6 +6479,7 @@ def main() -> int:
         safe_print("\nStopping.")
     finally:
         server.server_close()
+        analyzer.close()
     return 0
 
 

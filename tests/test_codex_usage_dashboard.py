@@ -1,12 +1,17 @@
 import datetime as dt
+import http.client
 import importlib.util
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from urllib.parse import urlencode
 
 
 MODULE_PATH = (
@@ -297,6 +302,107 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(summary["title"], expected)
         self.assertEqual(detail["first_user_prompt"], expected)
 
+    def test_scan_skips_unused_large_payloads_without_changing_session_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = codex_home / "sessions" / "rollout-2026-07-10T10-00-00-fast-skip.jsonl"
+            path.parent.mkdir(parents=True)
+            rows = [
+                {
+                    "timestamp": "2026-07-10T09:00:00Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call_output",
+                        "output": "x" * 20_000 + '\\"type\\":\\"event_msg\\"',
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "fast-skip",
+                        "cwd": "/work/fast-skip",
+                        "model": "gpt-5",
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:01:00Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": "Optimize parser",
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:02:00Z",
+                    "type": "response_item",
+                    "payload": {"type": "function_call", "name": "shell"},
+                },
+                self.total_only_token_event("2026-07-10T10:03:00Z", 100, 100),
+                {
+                    "timestamp": "2026-07-10T10:30:00Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "image_generation_call",
+                        "result": "a" * 20_000,
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T11:00:00Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "image_generation_end",
+                        "result": "b" * 20_000,
+                    },
+                },
+            ]
+            malformed = (
+                '{"timestamp":"2026-07-10T12:00:00Z","type":"response_item",'
+                '"payload":{"type":"function_call_output","output":"truncated"}'
+            )
+            path.write_text(
+                "\n".join(
+                    [
+                        *(json.dumps(row, separators=(",", ":")) for row in rows),
+                        malformed,
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = dashboard.CodexUsageAnalyzer(codex_home).scan()
+
+        self.assertEqual(snapshot["summary"]["session_count"], 1)
+        session = snapshot["sessions"][0]
+        detail = snapshot["details_by_uid"][session["uid"]]
+        self.assertEqual(session["title"], "Optimize parser")
+        self.assertEqual(session["total_token_usage"]["total_tokens"], 100)
+        self.assertEqual(detail["tool_counts"], {"shell": 1})
+        self.assertEqual(detail["start_at"], "2026-07-10T09:00:00Z")
+        self.assertEqual(detail["end_at"], "2026-07-10T11:00:00Z")
+        self.assertEqual(detail["line_count"], 7)
+        self.assertEqual(detail["parse_errors"], 0)
+        self.assertEqual(detail["fast_skipped_line_count"], 3)
+        self.assertGreater(detail["fast_skipped_bytes"], 60_000)
+
+    def test_rollout_reader_streams_rows_and_tracks_consumed_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout.jsonl"
+            first = {"timestamp": "2026-07-10T10:00:00Z", "type": "world_state", "payload": {}}
+            second = {"timestamp": "2026-07-10T10:01:00Z", "type": "world_state", "payload": {}}
+            first_line = json.dumps(first, separators=(",", ":")) + "\n"
+            second_line = json.dumps(second, separators=(",", ":")) + "\n"
+            path.write_text(first_line + second_line, encoding="utf-8")
+            stats = dashboard.RolloutReadStats()
+
+            rows = dashboard.read_rollout_jsonl(path, stats=stats)
+            self.assertEqual(stats.bytes_read, 0)
+            self.assertEqual(next(rows), first)
+            self.assertEqual(stats.bytes_read, len(first_line.encode("utf-8")))
+            self.assertEqual(list(rows), [second])
+            self.assertEqual(stats.bytes_read, path.stat().st_size)
+
     def test_subagent_identity_uses_first_session_meta(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir) / ".codex"
@@ -558,9 +664,10 @@ class CodexUsageDashboardTests(unittest.TestCase):
                 path: Path,
                 source: str,
                 log_source: dashboard.CodexLogSource | None = None,
+                **kwargs,
             ) -> tuple[dict, dict]:
                 parsed_paths.append(path.resolve())
-                return original_parse_file(path, source, log_source)
+                return original_parse_file(path, source, log_source, **kwargs)
 
             analyzer.parse_file = recording_parse_file
             snapshot = analyzer.scan("custom", "2026-07-09", "2026-07-09")
@@ -952,6 +1059,657 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(environments["wsl-session"], "WSL")
         self.assertEqual(environments["windows-session"], "Windows")
 
+    def test_snapshot_token_keeps_list_and_detail_consistent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = self.write_usage_file(
+                codex_home,
+                "snapshot-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+
+            first = analyzer.scan("all")
+            first_token = first["snapshot_token"]
+            first_uid = first["sessions"][0]["uid"]
+            self.assertEqual(analyzer.scan("all")["snapshot_token"], first_token)
+
+            self.write_usage_file(
+                codex_home,
+                "snapshot-session",
+                250,
+                "2026-07-10T10:00:00Z",
+            )
+            old_detail = analyzer.get_detail(
+                first_uid,
+                "all",
+                snapshot_token=first_token,
+            )
+            self.assertIsNotNone(old_detail)
+            assert old_detail is not None
+            self.assertEqual(old_detail["total_token_usage"]["total_tokens"], 100)
+
+            second = analyzer.scan("all")
+            second_token = second["snapshot_token"]
+            self.assertNotEqual(second_token, first_token)
+            second_detail = analyzer.get_detail(
+                first_uid,
+                "all",
+                snapshot_token=second_token,
+            )
+            self.assertIsNotNone(second_detail)
+            assert second_detail is not None
+            self.assertEqual(second_detail["total_token_usage"]["total_tokens"], 250)
+            with self.assertRaises(dashboard.SnapshotStaleError):
+                analyzer.get_detail(first_uid, "all", snapshot_token=first_token)
+
+            self.assertEqual(path.stat().st_size, second["sessions"][0]["file_size"])
+
+    def test_session_payload_cache_does_not_restore_an_unpublished_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            self.write_usage_file(
+                codex_home,
+                "payload-race",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            snapshot = analyzer.scan("all")
+            token = snapshot["snapshot_token"]
+            original_dumps = dashboard.json.dumps
+
+            def unpublishing_dumps(*args, **kwargs):
+                analyzer.unpublish_snapshot(snapshot)
+                return original_dumps(*args, **kwargs)
+
+            dashboard.json.dumps = unpublishing_dumps
+            try:
+                analyzer.session_payload_bytes(snapshot, {"snapshot_token": token})
+            finally:
+                dashboard.json.dumps = original_dumps
+
+        self.assertNotIn(token, analyzer._published_snapshots)
+        self.assertNotIn(token, analyzer._session_payload_cache)
+
+    def test_persistent_parse_cache_reuses_unchanged_files_across_analyzers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            cache_path = root / "cache" / "parsed-files.sqlite3"
+            self.write_usage_file(
+                codex_home,
+                "persistent-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+
+            first_cache = dashboard.PersistentParseCache(cache_path)
+            first_analyzer = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=first_cache,
+            )
+            first = first_analyzer.scan("all")
+            first_cache.close()
+
+            second_cache = dashboard.PersistentParseCache(cache_path)
+            second_analyzer = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=second_cache,
+            )
+            second = second_analyzer.scan("all")
+            second_cache.close()
+
+        self.assertEqual(first["summary"], second["summary"])
+        self.assertEqual(first_analyzer.cache_metrics["full_parses"], 1)
+        self.assertEqual(second_analyzer.cache_metrics["full_parses"], 0)
+        self.assertEqual(second_analyzer.cache_metrics["persistent_hits"], 1)
+
+    def test_append_only_scan_parses_only_the_new_file_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = codex_home / "sessions" / "rollout-2026-07-10T10-00-00-append.jsonl"
+            path.parent.mkdir(parents=True)
+            initial_rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "append-session",
+                        "cwd": "/work/append-session",
+                        "model": "gpt-5",
+                    },
+                },
+                self.total_only_token_event("2026-07-10T10:01:00Z", 100, 100),
+            ]
+            path.write_text(
+                "".join(
+                    json.dumps(row, separators=(",", ":")) + "\n"
+                    for row in initial_rows
+                ),
+                encoding="utf-8",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            first = analyzer.scan("all")
+            original_size = path.stat().st_size
+
+            appended_rows = [
+                {
+                    "timestamp": "2026-07-10T10:01:30Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call_output",
+                        "output": "x" * 20_000,
+                    },
+                },
+                self.total_only_token_event("2026-07-10T10:02:00Z", 250, 150),
+            ]
+            with path.open("a", encoding="utf-8") as handle:
+                for row in appended_rows:
+                    handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+            second = analyzer.scan("all")
+            appended_bytes = path.stat().st_size - original_size
+            second_detail = second["details_by_uid"][second["sessions"][0]["uid"]]
+
+        self.assertEqual(first["summary"]["usage"]["total_tokens"], 100)
+        self.assertEqual(second["summary"]["usage"]["total_tokens"], 250)
+        self.assertEqual(analyzer.cache_metrics["full_parses"], 1)
+        self.assertEqual(analyzer.cache_metrics["incremental_parses"], 1)
+        self.assertEqual(
+            analyzer.cache_metrics["incremental_bytes"],
+            appended_bytes,
+        )
+        self.assertFalse(any(key.startswith("_") for key in second_detail))
+
+    def test_append_resume_preserves_whether_session_metadata_was_seen(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = codex_home / "sessions" / "rollout-2026-07-10T10-00-00-late-meta.jsonl"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(
+                    self.total_only_token_event("2026-07-10T10:00:00Z", 100, 100),
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            first = analyzer.scan("all")
+
+            appended_rows = [
+                {
+                    "timestamp": "2026-07-10T10:01:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "real-session-id",
+                        "cwd": "/work/late-meta",
+                        "model": "gpt-5",
+                    },
+                },
+                self.total_only_token_event("2026-07-10T10:02:00Z", 200, 100),
+            ]
+            with path.open("a", encoding="utf-8") as handle:
+                for row in appended_rows:
+                    handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+            second = analyzer.scan("all")
+
+        self.assertNotEqual(first["sessions"][0]["session_id"], "real-session-id")
+        self.assertEqual(second["sessions"][0]["session_id"], "real-session-id")
+        self.assertEqual(analyzer.cache_metrics["incremental_parses"], 1)
+
+    def test_incomplete_appended_line_resumes_from_last_complete_newline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = codex_home / "sessions" / "rollout-2026-07-10T10-00-00-partial.jsonl"
+            path.parent.mkdir(parents=True)
+            initial_rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {"id": "partial-session", "model": "gpt-5"},
+                },
+                self.total_only_token_event("2026-07-10T10:01:00Z", 100, 100),
+            ]
+            path.write_text(
+                "".join(
+                    json.dumps(row, separators=(",", ":")) + "\n"
+                    for row in initial_rows
+                ),
+                encoding="utf-8",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            analyzer.scan("all")
+
+            completed_line = json.dumps(
+                self.total_only_token_event("2026-07-10T10:02:00Z", 250, 150),
+                separators=(",", ":"),
+            )
+            split_at = len(completed_line) // 2
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(completed_line[:split_at])
+            partial = analyzer.scan("all")
+            partial_detail = partial["details_by_uid"][partial["sessions"][0]["uid"]]
+
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(completed_line[split_at:] + "\n")
+            completed = analyzer.scan("all")
+            completed_detail = completed["details_by_uid"][completed["sessions"][0]["uid"]]
+
+        self.assertEqual(partial_detail["parse_errors"], 0)
+        self.assertEqual(completed_detail["parse_errors"], 0)
+        self.assertEqual(completed["summary"]["usage"]["total_tokens"], 250)
+        self.assertEqual(analyzer.cache_metrics["incremental_parses"], 2)
+        self.assertEqual(analyzer.cache_metrics["full_parses"], 1)
+
+    def test_same_size_rewrite_during_serial_parse_is_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = self.write_usage_file(
+                codex_home,
+                "serial-rewrite",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+
+            class RewritingAnalyzer(dashboard.CodexUsageAnalyzer):
+                rewrote = False
+
+                def parse_file(self, *args, **kwargs):
+                    parsed = super().parse_file(*args, **kwargs)
+                    if not self.rewrote:
+                        before = path.stat()
+                        path.write_text(
+                            path.read_text(encoding="utf-8").replace("100", "200"),
+                            encoding="utf-8",
+                        )
+                        os.utime(
+                            path,
+                            ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000),
+                        )
+                        self.rewrote = True
+                    return parsed
+
+            analyzer = RewritingAnalyzer(codex_home)
+            snapshot = analyzer.scan("all")
+
+        self.assertEqual(snapshot["summary"]["usage"]["total_tokens"], 200)
+        self.assertEqual(analyzer.cache_metrics["full_parses"], 1)
+
+    def test_append_during_parse_is_deferred_to_next_incremental_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = self.write_usage_file(
+                codex_home,
+                "append-during-parse",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write("\n")
+
+            class AppendingAnalyzer(dashboard.CodexUsageAnalyzer):
+                parse_calls = 0
+
+                def parse_file(self, *args, **kwargs):
+                    self.parse_calls += 1
+                    parsed = super().parse_file(*args, **kwargs)
+                    if self.parse_calls == 1:
+                        with path.open("a", encoding="utf-8") as handle:
+                            handle.write(
+                                json.dumps(
+                                    self_test.total_only_token_event(
+                                        "2026-07-10T10:01:00Z",
+                                        250,
+                                        150,
+                                    ),
+                                    separators=(",", ":"),
+                                )
+                                + "\n"
+                            )
+                    return parsed
+
+            self_test = self
+            analyzer = AppendingAnalyzer(codex_home)
+            first = analyzer.scan("all")
+            second = analyzer.scan("all")
+
+        self.assertEqual(first["summary"]["usage"]["total_tokens"], 100)
+        self.assertEqual(second["summary"]["usage"]["total_tokens"], 250)
+        self.assertEqual(analyzer.parse_calls, 2)
+        self.assertEqual(analyzer.cache_metrics["full_parses"], 1)
+        self.assertEqual(analyzer.cache_metrics["incremental_parses"], 1)
+
+    def test_parallel_parse_discards_result_when_file_changes_after_worker_stat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = self.write_usage_file(
+                codex_home,
+                "parallel-rewrite",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            source = dashboard.make_log_source(codex_home)
+            analyzer = dashboard.CodexUsageAnalyzer(
+                [source],
+                parallel_workers=2,
+            )
+
+            class MutatingPool:
+                def map(self, function, jobs, chunksize=1):
+                    results = [function(job) for job in jobs]
+                    before = path.stat()
+                    path.write_text(
+                        path.read_text(encoding="utf-8").replace("100", "200"),
+                        encoding="utf-8",
+                    )
+                    os.utime(
+                        path,
+                        ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000),
+                    )
+                    return results
+
+            analyzer.process_pool = lambda: MutatingPool()
+            parsed = analyzer.parse_files_in_parallel(
+                [(0, (source, path, "active"))]
+            )
+
+        self.assertEqual(parsed, {})
+
+    def test_parallel_parse_falls_back_only_for_a_missing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            valid_path = self.write_usage_file(
+                codex_home,
+                "parallel-valid",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            missing_path = valid_path.with_name("rollout-missing.jsonl")
+            source = dashboard.make_log_source(codex_home)
+            analyzer = dashboard.CodexUsageAnalyzer([source], parallel_workers=2)
+
+            class InlinePool:
+                def map(self, function, jobs, chunksize=1):
+                    return [function(job) for job in jobs]
+
+            analyzer.process_pool = lambda: InlinePool()
+            parsed = analyzer.parse_files_in_parallel(
+                [
+                    (0, (source, valid_path, "active")),
+                    (1, (source, missing_path, "active")),
+                ]
+            )
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertIn(0, parsed)
+        self.assertNotIn(1, parsed)
+        self.assertFalse(analyzer._parallel_disabled)
+
+    def test_replaced_file_identity_does_not_use_append_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = self.write_usage_file(
+                codex_home,
+                "replaced-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write("\n")
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            analyzer.scan("all")
+
+            replacement = path.with_suffix(".replacement")
+            replacement_rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {"id": "replaced-session", "model": "gpt-5"},
+                },
+                self.total_only_token_event("2026-07-10T10:01:00Z", 250, 250),
+            ]
+            replacement.write_text(
+                "".join(
+                    json.dumps(row, separators=(",", ":")) + "\n"
+                    for row in replacement_rows
+                ),
+                encoding="utf-8",
+            )
+            os.replace(replacement, path)
+            second = analyzer.scan("all")
+
+        self.assertEqual(second["summary"]["usage"]["total_tokens"], 250)
+        self.assertEqual(analyzer.cache_metrics["incremental_parses"], 0)
+        self.assertEqual(analyzer.cache_metrics["full_parses"], 2)
+
+    def test_truncated_file_does_not_use_append_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = self.write_usage_file(
+                codex_home,
+                "truncated-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            analyzer.scan("all")
+
+            rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {"id": "truncated-session", "model": "gpt-5"},
+                },
+                self.total_only_token_event("2026-07-10T10:01:00Z", 50, 50),
+            ]
+            path.write_text(
+                "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            snapshot = analyzer.scan("all")
+
+        self.assertEqual(snapshot["summary"]["usage"]["total_tokens"], 50)
+        self.assertEqual(analyzer.cache_metrics["incremental_parses"], 0)
+        self.assertEqual(analyzer.cache_metrics["full_parses"], 2)
+
+    def test_old_parser_version_invalidates_persistent_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            cache_path = root / "cache" / "parsed-files.sqlite3"
+            self.write_usage_file(
+                codex_home,
+                "versioned-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            first = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            first.scan("all")
+            first.close()
+            with sqlite3.connect(cache_path) as connection:
+                connection.execute(
+                    "UPDATE parsed_files SET parser_version = ?",
+                    (dashboard.PARSE_CACHE_VERSION - 1,),
+                )
+                connection.commit()
+
+            second = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            snapshot = second.scan("all")
+            second.close()
+
+        self.assertEqual(snapshot["summary"]["session_count"], 1)
+        self.assertEqual(second.cache_metrics["persistent_hits"], 0)
+        self.assertEqual(second.cache_metrics["full_parses"], 1)
+
+    def test_persistent_cache_prunes_files_missing_from_full_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            cache_path = root / "cache" / "parsed-files.sqlite3"
+            path = self.write_usage_file(
+                codex_home,
+                "deleted-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            first = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            first.scan("all")
+            first.close()
+            path.unlink()
+
+            second = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            second.scan("all")
+            second.close()
+            with sqlite3.connect(cache_path) as connection:
+                row_count = connection.execute("SELECT COUNT(*) FROM parsed_files").fetchone()[0]
+
+        self.assertEqual(row_count, 0)
+
+    def test_persistent_cache_prune_preserves_other_codex_home_scopes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home_a = root / "a" / ".codex"
+            home_b = root / "b" / ".codex"
+            cache_path = root / "cache" / "parsed-files.sqlite3"
+            self.write_usage_file(home_a, "home-a", 100, "2026-07-10T10:00:00Z")
+            self.write_usage_file(home_b, "home-b", 200, "2026-07-10T10:00:00Z")
+
+            first_a = dashboard.CodexUsageAnalyzer(
+                home_a,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            first_a.scan("all")
+            first_a.close()
+            first_b = dashboard.CodexUsageAnalyzer(
+                home_b,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            first_b.scan("all")
+            first_b.close()
+            second_a = dashboard.CodexUsageAnalyzer(
+                home_a,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            second_a.scan("all")
+            second_a.close()
+
+        self.assertEqual(second_a.cache_metrics["persistent_hits"], 1)
+        self.assertEqual(second_a.cache_metrics["full_parses"], 0)
+
+    def test_persistent_cache_rolls_back_failed_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = dashboard.PersistentParseCache(Path(temp_dir) / "parsed-files.sqlite3")
+            connection = cache.connection()
+            assert connection is not None
+            connection.execute(
+                """
+                CREATE TRIGGER reject_parsed_file
+                BEFORE INSERT ON parsed_files
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected failure');
+                END
+                """
+            )
+            connection.commit()
+            entry = dashboard.FileParseCacheEntry(
+                1,
+                1,
+                1,
+                1,
+                {"uid": "summary"},
+                {"uid": "detail"},
+                True,
+                "prefix",
+                "tail",
+            )
+
+            cache.put_many([("cache-key", entry)])
+
+            self.assertFalse(connection.in_transaction)
+            cache.close()
+
+    def test_scan_lock_serializes_concurrent_snapshot_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            self.write_usage_file(
+                codex_home,
+                "concurrent-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+
+            class CountingAnalyzer(dashboard.CodexUsageAnalyzer):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.build_count = 0
+                    self.count_lock = threading.Lock()
+
+                def build_snapshot(self, *args, **kwargs):
+                    with self.count_lock:
+                        self.build_count += 1
+                    time.sleep(0.03)
+                    return super().build_snapshot(*args, **kwargs)
+
+            analyzer = CountingAnalyzer(codex_home)
+            ready = threading.Barrier(5)
+            snapshots = []
+
+            def scan() -> None:
+                ready.wait()
+                snapshots.append(analyzer.scan("all"))
+
+            threads = [threading.Thread(target=scan) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            ready.wait()
+            for thread in threads:
+                thread.join(timeout=2)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(analyzer.build_count, 1)
+        self.assertEqual(len({snapshot["snapshot_token"] for snapshot in snapshots}), 1)
+
+    def test_append_resume_does_not_treat_mtime_fallback_as_event_time(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = codex_home / "sessions" / "rollout-2026-07-10T10-00-00-time-fallback.jsonl"
+            path.parent.mkdir(parents=True)
+            path.write_text('{"type":"world_state","payload":{}}\n', encoding="utf-8")
+            fallback_time = dt.datetime(2026, 7, 10, 12, 0, tzinfo=dt.UTC).timestamp()
+            os.utime(path, (fallback_time, fallback_time))
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            first = analyzer.scan("all")
+
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        self.total_only_token_event("2026-07-10T09:00:00Z", 100, 100),
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+            second = analyzer.scan("all")
+
+        self.assertNotEqual(first["sessions"][0]["start_at"], "2026-07-10T09:00:00Z")
+        self.assertEqual(second["sessions"][0]["start_at"], "2026-07-10T09:00:00Z")
+        self.assertEqual(second["sessions"][0]["end_at"], "2026-07-10T09:00:00Z")
+
     def test_bounded_period_skips_logs_not_modified_since_period_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir) / ".codex"
@@ -972,9 +1730,10 @@ class CodexUsageDashboardTests(unittest.TestCase):
                 path: Path,
                 source: str,
                 log_source: dashboard.CodexLogSource | None = None,
+                **kwargs,
             ) -> tuple[dict, dict]:
                 parsed_paths.append(path)
-                return original_parse_file(path, source, log_source)
+                return original_parse_file(path, source, log_source, **kwargs)
 
             analyzer.parse_file = recording_parse_file
             today = analyzer.scan("today")
@@ -1211,6 +1970,96 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("cache_write_tokens", html)
         self.assertIn("function loadDailyUsage()", html)
         self.assertIn("/api/daily-usage", html)
+        self.assertIn("snapshotToken: ''", html)
+        self.assertIn("const nextSnapshotToken = data.snapshot_token || ''", html)
+        self.assertIn("state.snapshotToken = nextSnapshotToken", html)
+        self.assertIn("const requestedToken = state.snapshotToken", html)
+        self.assertIn("params.set('snapshot_token', requestedToken)", html)
+        self.assertIn("res.status === 409", html)
+        self.assertIn("state.snapshotToken !== requestedToken", html)
+        self.assertIn("void showDetails(first.uid)", html)
+
+    def test_http_snapshot_token_serves_consistent_detail_and_rejects_stale_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            self.write_usage_file(
+                codex_home,
+                "http-snapshot-session",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            server = dashboard.FixedPortHTTPServer(
+                ("127.0.0.1", 0),
+                dashboard.make_handler(analyzer),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            connection = http.client.HTTPConnection(
+                "127.0.0.1",
+                server.server_address[1],
+                timeout=5,
+            )
+            try:
+                connection.request("GET", "/api/sessions?period=all")
+                response = connection.getresponse()
+                sessions_payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                token = sessions_payload["snapshot_token"]
+                uid = sessions_payload["sessions"][0]["uid"]
+
+                connection.request("GET", "/api/sessions?period=all")
+                response = connection.getresponse()
+                repeated_payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(repeated_payload, sessions_payload)
+                self.assertEqual(len(analyzer._session_payload_cache), 1)
+
+                connection.request(
+                    "GET",
+                    "/api/session?"
+                    + urlencode(
+                        {
+                            "id": uid,
+                            "period": "all",
+                            "snapshot_token": token,
+                        }
+                    ),
+                )
+                response = connection.getresponse()
+                detail = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(detail["total_token_usage"]["total_tokens"], 100)
+
+                connection.request(
+                    "GET",
+                    "/api/session?"
+                    + urlencode(
+                        {
+                            "id": uid,
+                            "period": "all",
+                            "snapshot_token": "not-a-real-snapshot",
+                        }
+                    ),
+                )
+                response = connection.getresponse()
+                stale = json.loads(response.read())
+                self.assertEqual(response.status, 409)
+                self.assertEqual(stale["code"], "snapshot_stale")
+
+                connection.request(
+                    "GET",
+                    "/api/session?" + urlencode({"id": uid, "period": "all"}),
+                )
+                response = connection.getresponse()
+                legacy_detail = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(legacy_detail["uid"], uid)
+            finally:
+                connection.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
     def test_opener_health_check_reads_full_payload(self) -> None:
         class Response:
@@ -1244,6 +2093,50 @@ class CodexUsageDashboardTests(unittest.TestCase):
             self.assertIsNone(opener.health_dashboard_url(8765))
         finally:
             opener.urlopen = original_urlopen
+
+    def test_once_cli_can_build_cold_cache_with_spawn_workers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            for index in range(4):
+                self.write_usage_file(
+                    codex_home,
+                    f"parallel-{index}",
+                    100 + index,
+                    f"2026-07-10T10:0{index}:00Z",
+                )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "COUSASH_CONFIG_DIR": str(root / "config"),
+                    "COUSASH_PARSE_MIN_FILES": "2",
+                    "COUSASH_PARSE_MIN_BYTES": "1",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                }
+            )
+            completed = subprocess.run(
+                [
+                    os.sys.executable,
+                    str(MODULE_PATH),
+                    "--codex-home",
+                    str(codex_home),
+                    "--no-auto-windows",
+                    "--parse-workers",
+                    "2",
+                    "--once",
+                    "--json",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["summary"]["session_count"], 4)
+        self.assertEqual(payload["cache_metrics"]["parallel_files"], 4)
 
 
 if __name__ == "__main__":
