@@ -1948,6 +1948,24 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("const projectPreviewLimit = 5", html)
         self.assertIn("function renderProjectTable()", html)
         self.assertIn("function projectGroups()", html)
+        self.assertIn("function taskGroupsForRows(rows)", html)
+        self.assertIn("row.root_session_id", html)
+        self.assertIn("row.parent_thread_id", html)
+        self.assertIn("usage = addClientUsage(usage, usageOf(row));", html)
+        self.assertIn('data-task-toggle="${escapeHtml(task.key)}"', html)
+        self.assertIn("taskExpanded: {}", html)
+        self.assertIn("task-detail-summary", html)
+        self.assertIn("selectable: group.subagentCount === 0", html)
+        self.assertIn("sessionRowHtml(group.root, childClasses, options)", html)
+        self.assertIn("data-task-toggle-row", html)
+        self.assertIn("function toggleTaskGroup(key)", html)
+        self.assertIn(".project-session-row .title-cell {\n      padding-left: 34px;", html)
+        self.assertIn(".project-session-row.task-expandable-row .title-cell {\n      padding-left: 34px;", html)
+        self.assertIn(".project-session-row.task-child-row .title-cell {\n      padding-left: 74px;", html)
+        self.assertNotIn("mainAgent: '主 agent'", html)
+        self.assertIn(".project-session-row.task-child-row .title-cell", html)
+        self.assertNotIn("task-indent", html)
+        self.assertNotIn("taskAgentCount", html)
         self.assertIn("function folderIcon()", html)
         self.assertIn("function branchIcon()", html)
         self.assertIn("function branchBadge(row)", html)
@@ -1961,6 +1979,15 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertLess(html.index("${environmentBadge(group)}"), html.index('<div class="project-meta">'))
         self.assertIn("git-worktree-project-grouping", dashboard.DASHBOARD_FEATURES)
         self.assertIn("effective-dated-pricing-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("expandable-agent-task-rollups-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("compact-agent-task-tree-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("aligned-agent-task-tree-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("main-agent-child-usage-row-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("aligned-task-title-gutter-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("project-session-indent-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("clickable-task-rows-and-gutter-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("main-agent-title-alignment-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("compact-subagent-indent-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("function unitPriceTooltip(segments, usageKey, baseTitle = '')", html)
         self.assertIn("function fmtUsdRate(value)", html)
         self.assertIn("String.fromCharCode(10)", html)
@@ -2107,6 +2134,42 @@ class CodexUsageDashboardTests(unittest.TestCase):
             self.assertEqual(opener.health_dashboard_url(8765), "http://127.0.0.1:8765/")
             opener.urlopen = lambda *_args, **_kwargs: Response(
                 [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "effective-dated-pricing-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "expandable-agent-task-rollups-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "compact-agent-task-tree-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "aligned-agent-task-tree-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "main-agent-child-usage-row-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "aligned-task-title-gutter-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "project-session-indent-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "clickable-task-rows-and-gutter-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "main-agent-title-alignment-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "compact-subagent-indent-v1"]
             )
             self.assertIsNone(opener.health_dashboard_url(8765))
         finally:

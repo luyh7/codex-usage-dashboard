@@ -121,6 +121,15 @@ DASHBOARD_FEATURES = [
     "effective-dated-pricing-v1",
     "bounded-period-scan-v1",
     "fork-aware-subagent-usage-v1",
+    "expandable-agent-task-rollups-v1",
+    "compact-agent-task-tree-v1",
+    "aligned-agent-task-tree-v1",
+    "main-agent-child-usage-row-v1",
+    "aligned-task-title-gutter-v1",
+    "project-session-indent-v1",
+    "clickable-task-rows-and-gutter-v1",
+    "main-agent-title-alignment-v1",
+    "compact-subagent-indent-v1",
     "fast-rollout-projection-v1",
     "snapshot-detail-token-v1",
     "persistent-parse-cache-v1",
@@ -3999,11 +4008,14 @@ HTML = r"""<!doctype html>
       white-space: nowrap;
     }
     .project-session-row .title-cell {
-      padding-left: 42px;
+      padding-left: 34px;
     }
     .project-session-row .title-line {
       gap: 8px;
       margin-bottom: 0;
+    }
+    .task-root-row .title-line {
+      gap: 6px;
     }
     .project-session-row .title-main {
       margin-bottom: 0;
@@ -4011,9 +4023,58 @@ HTML = r"""<!doctype html>
     .project-session-row .title-sub {
       display: none;
     }
+    .task-expandable-row .title-cell {
+      padding-left: 8px;
+    }
+    .task-static-row .title-cell {
+      padding-left: 32px;
+    }
+    .project-session-row.task-expandable-row .title-cell {
+      padding-left: 34px;
+    }
+    .project-session-row.task-static-row .title-cell {
+      padding-left: 58px;
+    }
+    .task-child-row .title-cell {
+      padding-left: 48px;
+    }
+    .project-session-row.task-child-row .title-cell {
+      padding-left: 74px;
+    }
+    .task-toggle {
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      min-width: 18px;
+      height: 22px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+    }
+    .task-toggle:hover {
+      background: #e8f1ee;
+      color: var(--accent);
+    }
+    .task-toggle::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(-45deg);
+      transition: transform 120ms ease;
+    }
+    .task-toggle[aria-expanded="true"]::before {
+      transform: rotate(45deg) translate(-1px, -1px);
+    }
+    .task-expandable-row td {
+      cursor: pointer;
+    }
     .project-more-row td {
       background: #fff;
-      padding: 8px 8px 10px 42px;
+      padding: 8px 8px 10px 34px;
     }
     .project-more-row:hover td {
       background: #fff;
@@ -4243,6 +4304,34 @@ HTML = r"""<!doctype html>
       font-size: 12px;
       line-height: 1.5;
     }
+    .task-detail-summary {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 14px;
+      align-items: center;
+      margin: 14px 0;
+      padding: 10px 12px;
+      border: 1px solid #99c9bb;
+      border-radius: 6px;
+      background: #eef8f4;
+    }
+    .task-detail-summary-label {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .task-detail-summary-value {
+      color: var(--text);
+      font-size: 15px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .task-detail-summary-meta {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .error {
       color: var(--danger);
       padding: 14px;
@@ -4269,7 +4358,7 @@ HTML = r"""<!doctype html>
       .controls { grid-template-columns: 1fr; }
       .project-title-cell { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
       .project-meta { justify-content: flex-start; flex-wrap: wrap; }
-      .project-session-row .title-cell { padding-left: 42px; }
+      .project-session-row .title-cell { padding-left: 34px; }
       .bar-row { grid-template-columns: 1fr; gap: 4px; }
       .breakdown-row { grid-template-columns: 64px minmax(0, 1fr) minmax(112px, auto); gap: 6px; }
       .breakdown-value { gap: 5px; }
@@ -4420,6 +4509,7 @@ HTML = r"""<!doctype html>
       sortDir: 'desc',
       projectExpanded: {},
       projectShowAll: {},
+      taskExpanded: {},
       search: '',
       environment: 'all',
       source: 'all',
@@ -4535,8 +4625,14 @@ HTML = r"""<!doctype html>
         projectLatest: '最近 {time}',
         showMoreConversations: '展开剩余 {count} 条',
         showFewerConversations: '收起到 5 条',
+        showMoreTasks: '展开剩余 {count} 个任务',
+        showFewerTasks: '收起到 5 个任务',
         collapseProject: '收起工作区',
         expandProject: '展开工作区',
+        expandTask: '展开子 agent',
+        collapseTask: '收起子 agent',
+        taskRowCount: '{tasks} 个任务 · {agents} 个 agent',
+        taskTotal: '任务合计',
         priceKnown: '按公开 API 标准价格估算花费',
         priceUnknown: '没有匹配到公开模型价格',
         archived: '归档',
@@ -4695,8 +4791,14 @@ HTML = r"""<!doctype html>
         projectLatest: 'Latest {time}',
         showMoreConversations: 'Show {count} more',
         showFewerConversations: 'Show first 5',
+        showMoreTasks: 'Show {count} more tasks',
+        showFewerTasks: 'Show first 5 tasks',
         collapseProject: 'Collapse workspace',
         expandProject: 'Expand workspace',
+        expandTask: 'Expand subagents',
+        collapseTask: 'Collapse subagents',
+        taskRowCount: '{tasks} tasks · {agents} agents',
+        taskTotal: 'Task total',
         priceKnown: 'Estimated from public API prices',
         priceUnknown: 'No matching public model price',
         archived: 'Archived',
@@ -5201,11 +5303,146 @@ HTML = r"""<!doctype html>
       return rows;
     }
 
-    function filteredSessions() {
-      let rows = sortSessions([...baseFilteredSessions()]);
+    function agentTaskKey(row) {
+      const environment = row.environment_id || row.environment || 'local';
+      const rootSessionId = row.root_session_id || row.session_id || row.uid || 'unknown';
+      return `${encodeURIComponent(environment)}::${encodeURIComponent(rootSessionId)}`;
+    }
 
-      if (state.limit !== 'all') rows = rows.slice(0, Number(state.limit));
+    function aggregateTaskRow(root, rows, key) {
+      let usage = zeroClientUsage();
+      let cost = 0;
+      let pricesKnown = rows.length > 0;
+      let turnCount = 0;
+      let completedTurnCount = 0;
+      let latestRow = root;
+      let earliestRow = root;
+
+      rows.forEach(row => {
+        usage = addClientUsage(usage, usageOf(row));
+        turnCount += Number(row.turn_count || 0);
+        completedTurnCount += Number(row.completed_turn_count || 0);
+        const rowCost = Number(row.estimated_cost_usd);
+        if (row.price_model_known && Number.isFinite(rowCost)) cost += rowCost;
+        else pricesKnown = false;
+        if (rowTime(row) > rowTime(latestRow)) latestRow = row;
+        if (rowTime(row) < rowTime(earliestRow)) earliestRow = row;
+      });
+
+      const inputTokens = Number(usage.input_tokens || 0);
+      return {
+        ...root,
+        total_token_usage: usage,
+        estimated_cost_usd: pricesKnown ? cost : null,
+        price_model_known: pricesKnown,
+        cached_input_percent: inputTokens
+          ? Math.round(Number(usage.cached_input_tokens || 0) / inputTokens * 1000) / 10
+          : null,
+        turn_count: turnCount,
+        completed_turn_count: completedTurnCount,
+        start_at: earliestRow.start_at || earliestRow.created_at || root.start_at,
+        end_at: latestRow.end_at || latestRow.updated_at || latestRow.start_at || root.end_at,
+        task_group_key: key,
+      };
+    }
+
+    function taskGroupsForRows(rows) {
+      const groupsByKey = new Map();
+      rows.forEach(row => {
+        const key = agentTaskKey(row);
+        if (!groupsByKey.has(key)) {
+          groupsByKey.set(key, { key, rootSessionId: String(row.root_session_id || row.session_id || ''), rows: [] });
+        }
+        groupsByKey.get(key).rows.push(row);
+      });
+
+      const groups = Array.from(groupsByKey.values()).map(group => {
+        const bySessionId = new Map();
+        group.rows.forEach(row => {
+          const sessionId = String(row.session_id || '');
+          if (sessionId && !bySessionId.has(sessionId)) bySessionId.set(sessionId, row);
+        });
+        const root = group.rows.find(row => String(row.session_id || '') === group.rootSessionId && !row.is_subagent)
+          || group.rows.find(row => String(row.session_id || '') === group.rootSessionId)
+          || group.rows.find(row => !row.is_subagent)
+          || group.rows[0];
+        const childrenByUid = new Map();
+        const topLevelRows = [];
+        group.rows.forEach(row => {
+          if (row.uid === root.uid) return;
+          const parent = bySessionId.get(String(row.parent_thread_id || ''));
+          if (parent && parent.uid !== row.uid) {
+            if (!childrenByUid.has(parent.uid)) childrenByUid.set(parent.uid, []);
+            childrenByUid.get(parent.uid).push(row);
+          } else {
+            topLevelRows.push(row);
+          }
+        });
+        childrenByUid.forEach(children => sortSessions(children));
+        sortSessions(topLevelRows);
+        group.root = root;
+        group.childrenByUid = childrenByUid;
+        group.topLevelRows = topLevelRows;
+        group.subagentCount = Math.max(0, group.rows.length - 1);
+        group.displayRow = aggregateTaskRow(root, group.rows, group.key);
+        return group;
+      });
+
+      const byKey = new Map(groups.map(group => [group.key, group]));
+      return sortSessions(groups.map(group => group.displayRow))
+        .map(row => byKey.get(row.task_group_key));
+    }
+
+    function taskGroups() {
+      let groups = taskGroupsForRows(baseFilteredSessions());
+      if (state.limit !== 'all') groups = groups.slice(0, Number(state.limit));
+      return groups;
+    }
+
+    function isTaskExpanded(group) {
+      return state.taskExpanded[group.key] === true;
+    }
+
+    function taskChildRows(group) {
+      const rows = [];
+      const visited = new Set([group.root.uid]);
+      const visit = (row, depth) => {
+        if (visited.has(row.uid)) return;
+        visited.add(row.uid);
+        rows.push({ row, depth });
+        (group.childrenByUid.get(row.uid) || []).forEach(child => visit(child, depth + 1));
+      };
+      (group.childrenByUid.get(group.root.uid) || []).forEach(row => visit(row, 1));
+      group.topLevelRows.forEach(row => visit(row, 1));
+      group.rows.forEach(row => visit(row, 1));
       return rows;
+    }
+
+    function taskGroupRowsHtml(group, extraClass = '', options = {}) {
+      const expanded = isTaskExpanded(group);
+      const rootClasses = [
+        'task-root-row',
+        group.subagentCount ? 'task-expandable-row' : 'task-static-row',
+        extraClass,
+      ].filter(Boolean).join(' ');
+      const childClasses = ['task-child-row', extraClass].filter(Boolean).join(' ');
+      const root = sessionRowHtml(group.displayRow, rootClasses, {
+        ...options,
+        selectable: group.subagentCount === 0,
+        task: { key: group.key, expanded, subagentCount: group.subagentCount },
+      });
+      if (!expanded || !group.subagentCount) return root;
+      return [
+        root,
+        sessionRowHtml(group.root, childClasses, options),
+        ...taskChildRows(group).map(({ row }) => sessionRowHtml(row, childClasses, options)),
+      ].join('');
+    }
+
+    function taskGroupForUid(uid) {
+      return taskGroupsForRows(baseFilteredSessions()).find(group =>
+        group.rows.some(row => row.uid === uid)
+      ) || null;
     }
 
     function projectGroups() {
@@ -5257,12 +5494,23 @@ HTML = r"""<!doctype html>
     function visibleProjectRows() {
       return projectGroups().flatMap(group => {
         if (!isProjectExpanded(group)) return [];
-        return isProjectShowingAll(group) ? group.rows : group.rows.slice(0, projectPreviewLimit);
+        const groups = taskGroupsForRows(group.rows);
+        const visibleGroups = isProjectShowingAll(group) ? groups : groups.slice(0, projectPreviewLimit);
+        return visibleGroups.flatMap(taskGroup => {
+          const rows = [taskGroup.displayRow];
+          if (isTaskExpanded(taskGroup)) rows.push(taskGroup.root, ...taskChildRows(taskGroup).map(item => item.row));
+          return rows;
+        });
       });
     }
 
     function currentSelectableRows() {
-      return state.viewMode === 'project' ? visibleProjectRows() : filteredSessions();
+      if (state.viewMode === 'project') return visibleProjectRows();
+      return taskGroups().flatMap(group => {
+        const rows = [group.displayRow];
+        if (isTaskExpanded(group)) rows.push(group.root, ...taskChildRows(group).map(item => item.row));
+        return rows;
+      });
     }
 
     function renderAll() {
@@ -5280,6 +5528,7 @@ HTML = r"""<!doctype html>
       state.selectedUid = null;
       state.projectExpanded = {};
       state.projectShowAll = {};
+      state.taskExpanded = {};
       updatePeriodButtons();
       const cached = state.periodCache.get(periodCacheKey());
       if (cached) {
@@ -5298,6 +5547,7 @@ HTML = r"""<!doctype html>
       state.selectedUid = null;
       state.projectExpanded = {};
       state.projectShowAll = {};
+      state.taskExpanded = {};
       state.calendarOpen = false;
       updateCalendarVisibility();
       updatePeriodButtons();
@@ -5554,26 +5804,46 @@ HTML = r"""<!doctype html>
         return;
       }
 
-      const rows = filteredSessions();
-      document.getElementById('resultCount').textContent = t('rowCount', { count: fmt(rows.length) });
-      if (!rows.length) {
+      const groups = taskGroups();
+      const agentCount = groups.reduce((count, group) => count + group.rows.length, 0);
+      document.getElementById('resultCount').textContent = t('taskRowCount', {
+        tasks: fmt(groups.length),
+        agents: fmt(agentCount),
+      });
+      if (!groups.length) {
         document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(t('noMatches'))}</td></tr>`;
         return;
       }
-      document.getElementById('sessionRows').innerHTML = rows.map(row => sessionRowHtml(row)).join('');
+      document.getElementById('sessionRows').innerHTML = groups.map(group => taskGroupRowsHtml(group)).join('');
       bindTableInteractions();
     }
 
     function sessionRowHtml(row, extraClass = '', options = {}) {
       const usage = usageOf(row);
-      const selected = row.uid === state.selectedUid ? 'selected' : '';
+      const selectable = options.selectable !== false;
+      const selected = selectable && row.uid === state.selectedUid ? 'selected' : '';
       const classes = [selected, extraClass].filter(Boolean).join(' ');
       const timeValue = row.end_at || row.updated_at || row.start_at;
       const compactProject = options.compactProject === true;
+      const task = options.task || null;
+      const taskToggle = task && task.subagentCount
+        ? `<button class="task-toggle" type="button" data-task-toggle="${escapeHtml(task.key)}" aria-expanded="${task.expanded ? 'true' : 'false'}" aria-label="${escapeHtml(t(task.expanded ? 'collapseTask' : 'expandTask'))}" title="${escapeHtml(t(task.expanded ? 'collapseTask' : 'expandTask'))}"></button>`
+        : '';
+      const taskRowToggle = Boolean(task && task.subagentCount && !selectable);
+      const rowAttributes = [
+        selectable ? `data-uid="${escapeHtml(row.uid)}"` : '',
+        taskRowToggle
+          ? `data-task-toggle-row="${escapeHtml(task.key)}" role="button" tabindex="0" aria-expanded="${task.expanded ? 'true' : 'false'}"`
+          : '',
+      ].filter(Boolean).join(' ');
+      const totalTitle = task
+        ? `${t('taskTotal')}: ${fmt(usage.total_tokens)} tokens`
+        : `${fmt(usage.total_tokens)} tokens`;
       return `
-        <tr class="${escapeHtml(classes)}" data-uid="${escapeHtml(row.uid)}">
+        <tr class="${escapeHtml(classes)}"${rowAttributes ? ` ${rowAttributes}` : ''}>
           <td class="title-cell" title="${escapeHtml((row.title || row.session_id) + (timeValue ? ' · ' + fmtDate(timeValue) : ''))}">
             <div class="title-line">
+              ${taskToggle}
               ${compactProject ? sourceBadge(row.source) : ''}
               ${compactProject ? branchBadge(row) : ''}
               <div class="title-main">${escapeHtml(row.title || row.session_id)}</div>
@@ -5581,7 +5851,7 @@ HTML = r"""<!doctype html>
             </div>
             ${compactProject ? '' : `<div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source)} ${branchBadge(row)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>`}
           </td>
-          <td class="number" title="${fmt(usage.total_tokens)} tokens"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
+          <td class="number" title="${escapeHtml(totalTitle)}"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
           <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
           <td class="number" title="${escapeHtml(row.price_model_known ? t('priceKnown') : t('priceUnknown'))}">${fmtUsd(row.estimated_cost_usd)}</td>
           <td class="number">${fmtPercent(row.cached_input_percent)}</td>
@@ -5619,7 +5889,7 @@ HTML = r"""<!doctype html>
 
     function projectMoreRowHtml(group, hiddenCount) {
       const showingAll = isProjectShowingAll(group);
-      const label = showingAll ? t('showFewerConversations') : t('showMoreConversations', { count: fmt(hiddenCount) });
+      const label = showingAll ? t('showFewerTasks') : t('showMoreTasks', { count: fmt(hiddenCount) });
       return `
         <tr class="project-more-row">
           <td colspan="8">
@@ -5641,22 +5911,39 @@ HTML = r"""<!doctype html>
       document.getElementById('sessionRows').innerHTML = groups.map(group => {
         const expanded = isProjectExpanded(group);
         const showingAll = isProjectShowingAll(group);
-        const visibleRows = expanded
-          ? (showingAll ? group.rows : group.rows.slice(0, projectPreviewLimit))
+        const taskGroups = taskGroupsForRows(group.rows);
+        const visibleGroups = expanded
+          ? (showingAll ? taskGroups : taskGroups.slice(0, projectPreviewLimit))
           : [];
-        const hiddenCount = Math.max(0, group.rows.length - projectPreviewLimit);
+        const hiddenCount = Math.max(0, taskGroups.length - projectPreviewLimit);
         return [
           projectHeaderHtml(group),
-          ...visibleRows.map(row => sessionRowHtml(row, 'project-session-row', { compactProject: true })),
+          ...visibleGroups.map(taskGroup => taskGroupRowsHtml(taskGroup, 'project-session-row', { compactProject: true })),
           expanded && hiddenCount > 0 ? projectMoreRowHtml(group, hiddenCount) : '',
         ].join('');
       }).join('');
       bindTableInteractions();
     }
 
+    function toggleTaskGroup(key) {
+      state.taskExpanded[key] = state.taskExpanded[key] !== true;
+      renderAll();
+    }
+
     function bindTableInteractions() {
       document.querySelectorAll('#sessionRows tr[data-uid]').forEach(row => {
         row.addEventListener('click', () => showDetails(row.dataset.uid));
+      });
+      document.querySelectorAll('[data-task-toggle-row]').forEach(row => {
+        row.addEventListener('click', event => {
+          if (event.target.closest('[data-task-toggle]')) return;
+          toggleTaskGroup(row.dataset.taskToggleRow);
+        });
+        row.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          toggleTaskGroup(row.dataset.taskToggleRow);
+        });
       });
       document.querySelectorAll('[data-project-toggle]').forEach(button => {
         button.addEventListener('click', event => {
@@ -5672,6 +5959,12 @@ HTML = r"""<!doctype html>
           const key = button.dataset.projectMore;
           state.projectShowAll[key] = button.dataset.projectMoreState === 'more';
           renderAll();
+        });
+      });
+      document.querySelectorAll('[data-task-toggle]').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          toggleTaskGroup(button.dataset.taskToggle);
         });
       });
     }
@@ -5713,6 +6006,10 @@ HTML = r"""<!doctype html>
 
     function renderDetails(detail) {
       const usage = usageOf(detail);
+      const taskGroup = taskGroupForUid(detail.uid);
+      const taskSummary = taskGroup && taskGroup.root.uid === detail.uid && taskGroup.subagentCount
+        ? taskGroup.displayRow
+        : null;
       const cacheWriteTokens = Math.max(0, Number(usage.cache_write_tokens || 0));
       const uncachedInputTokens = Math.max(
         0,
@@ -5746,6 +6043,17 @@ HTML = r"""<!doctype html>
         <div class="detail-title">${escapeHtml(detail.title || detail.session_id)}</div>
         <div>${environmentBadge(detail)} ${sourceBadge(detail.source)} ${detail.is_subagent ? `<span class="badge">${escapeHtml(t('subagent'))}</span>` : ''} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
 
+        ${taskSummary ? `
+          <div class="task-detail-summary">
+            <div class="task-detail-summary-label">${escapeHtml(t('taskTotal'))}</div>
+            <div class="task-detail-summary-value">${escapeHtml(fmtCompact(taskSummary.total_token_usage?.total_tokens || 0))}</div>
+            <div class="task-detail-summary-meta">${escapeHtml([
+              `${fmt(taskSummary.total_token_usage?.total_tokens || 0)} ${t('totalTokens')}`,
+              t('turnSuffix', { count: fmt(taskSummary.turn_count || 0) }),
+              `${t('cost')} ${fmtUsd(taskSummary.estimated_cost_usd)}`,
+            ].join(' · '))}</div>
+          </div>
+        ` : ''}
         <div class="breakdown">
           ${breakdownRow(t('input'), 'input', uncachedInputTokens, max, costs.input_tokens, unitPriceTooltip(priceSegments, 'input_tokens'))}
           ${breakdownRow(t('cached'), 'cached', usage.cached_input_tokens, max, costs.cached_input_tokens, unitPriceTooltip(priceSegments, 'cached_input_tokens'))}
@@ -6361,7 +6669,15 @@ def is_dashboard_command(command: str) -> bool:
 
 def run_text(command: list[str]) -> str:
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=1.5, check=False)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=1.5,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError):
         return ""
     return result.stdout.strip()

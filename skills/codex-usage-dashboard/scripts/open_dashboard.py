@@ -63,6 +63,15 @@ def health_dashboard_url(port: int) -> str | None:
         and "effective-dated-pricing-v1" in features
         and "bounded-period-scan-v1" in features
         and "fork-aware-subagent-usage-v1" in features
+        and "expandable-agent-task-rollups-v1" in features
+        and "compact-agent-task-tree-v1" in features
+        and "aligned-agent-task-tree-v1" in features
+        and "main-agent-child-usage-row-v1" in features
+        and "aligned-task-title-gutter-v1" in features
+        and "project-session-indent-v1" in features
+        and "clickable-task-rows-and-gutter-v1" in features
+        and "main-agent-title-alignment-v1" in features
+        and "compact-subagent-indent-v1" in features
         and "fast-rollout-projection-v1" in features
         and "snapshot-detail-token-v1" in features
         and "persistent-parse-cache-v1" in features

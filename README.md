@@ -51,6 +51,7 @@ npx github:luyh7/codex-usage-dashboard -- --open
 
 - Per-conversation Codex usage from local session logs.
 - Default project view, grouped by environment and workspace, with switches for recent and total-token list views.
+- Expandable main-agent task rows that show the combined usage of the main agent and its subagents, with nested subagent detail on demand.
 - Compact list columns for total tokens, output tokens, cost, cache hit rate, turns, model, and reasoning effort.
 - Detail view with token breakdown, estimated dollar cost, and hoverable unit prices for input, cached input, cache writes, output, and reasoning.
 - Effective-dated pricing with per-request GPT-5.6 short/long context tiers, so earlier usage is not repriced when a new model launches.
