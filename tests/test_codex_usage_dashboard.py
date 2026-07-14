@@ -2434,6 +2434,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
                     "--codex-home",
                     str(codex_home),
                     "--no-auto-windows",
+                    "--no-grok",
                     "--parse-workers",
                     "2",
                     "--once",
@@ -2450,6 +2451,315 @@ class CodexUsageDashboardTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["summary"]["session_count"], 4)
         self.assertEqual(payload["cache_metrics"]["parallel_files"], 4)
+
+    def _write_grok_fixture(
+        self,
+        grok_home: Path,
+        session_id: str,
+        *,
+        cwd: str = "/work/demo",
+        model: str = "grok-4.5",
+        effort: str = "high",
+        title: str = "Fixture Grok Session",
+        turns: list[dict] | None = None,
+        parent_session_id: str = "",
+        session_kind: str = "",
+    ) -> Path:
+        session_dir = grok_home / "sessions" / "%2Fwork%2Fdemo" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "info": {"id": session_id, "cwd": cwd},
+            "created_at": "2026-07-14T10:00:00Z",
+            "updated_at": "2026-07-14T10:30:00Z",
+            "last_active_at": "2026-07-14T10:30:00Z",
+            "current_model_id": model,
+            "reasoning_effort": effort,
+            "generated_title": title,
+            "session_summary": title,
+            "git_root_dir": cwd,
+            "head_branch": "main",
+            "agent_name": "grok-build-plan",
+            "grok_home": str(grok_home),
+        }
+        if parent_session_id:
+            summary["parent_session_id"] = parent_session_id
+            summary["session_kind"] = session_kind or "subagent_fork"
+        (session_dir / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+        if turns is None:
+            turns = [
+                {
+                    "timestamp": 1784000000,
+                    "usage": {
+                        "inputTokens": 1000,
+                        "outputTokens": 100,
+                        "totalTokens": 1100,
+                        "cachedReadTokens": 400,
+                        "reasoningTokens": 50,
+                        "modelCalls": 1,
+                        "apiDurationMs": 1200,
+                        "modelUsage": {
+                            model: {
+                                "inputTokens": 1000,
+                                "outputTokens": 100,
+                                "totalTokens": 1100,
+                                "cachedReadTokens": 400,
+                                "reasoningTokens": 50,
+                                "modelCalls": 1,
+                            }
+                        },
+                        "numTurns": 1,
+                    },
+                },
+                {
+                    "timestamp": 1784000100,
+                    "usage": {
+                        "inputTokens": 2500,
+                        "outputTokens": 300,
+                        "totalTokens": 2800,
+                        "cachedReadTokens": 1800,
+                        "reasoningTokens": 120,
+                        "modelCalls": 2,
+                        "apiDurationMs": 3400,
+                        "modelUsage": {
+                            "grok-4.5-fast": {
+                                "inputTokens": 2500,
+                                "outputTokens": 300,
+                                "totalTokens": 2800,
+                                "cachedReadTokens": 1800,
+                                "reasoningTokens": 120,
+                                "modelCalls": 2,
+                            }
+                        },
+                        "numTurns": 2,
+                    },
+                },
+            ]
+
+        lines = [
+            json.dumps(
+                {
+                    "timestamp": 1783999990,
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "user_message_chunk",
+                            "content": {"type": "text", "text": "hello grok"},
+                            "_meta": {"modelId": model},
+                        },
+                        "_meta": {"agentTimestampMs": 1783999990000},
+                    },
+                }
+            )
+        ]
+        for index, turn in enumerate(turns, start=1):
+            lines.append(
+                json.dumps(
+                    {
+                        "timestamp": turn["timestamp"],
+                        "method": "_x.ai/session/update",
+                        "params": {
+                            "sessionId": session_id,
+                            "update": {
+                                "sessionUpdate": "turn_completed",
+                                "prompt_id": f"prompt-{index}",
+                                "stop_reason": "end_turn",
+                                "usage": turn["usage"],
+                            },
+                            "_meta": {
+                                "eventId": f"{session_id}-{index}",
+                                "agentTimestampMs": int(turn["timestamp"]) * 1000,
+                            },
+                        },
+                    }
+                )
+            )
+        (session_dir / "updates.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return session_dir
+
+    def test_parse_grok_session_maps_usage_models_and_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            grok_home = Path(temp_dir) / ".grok"
+            session_dir = self._write_grok_fixture(grok_home, "grok-session-1")
+            source = dashboard.grok_log_source(grok_home)
+            self.assertIsNotNone(source)
+            parsed = dashboard.parse_grok_session(session_dir, source)
+            self.assertIsNotNone(parsed)
+            summary, detail = parsed
+
+        self.assertEqual(summary["provider"], "grok")
+        self.assertEqual(detail["provider"], "grok")
+        self.assertEqual(detail["environment_id"], "grok")
+        self.assertEqual(detail["environment"], "Grok")
+        self.assertEqual(detail["source"], "active")
+        self.assertEqual(detail["title"], "Fixture Grok Session")
+        self.assertEqual(detail["effort"], "high")
+        self.assertEqual(detail["model"], "grok-4.5-fast")
+        self.assertEqual(detail["models"], ["grok-4.5", "grok-4.5-fast"])
+        self.assertEqual(detail["turn_count"], 2)
+        self.assertEqual(detail["token_event_count"], 2)
+        self.assertEqual(
+            detail["total_token_usage"],
+            {
+                "input_tokens": 3500,
+                "cached_input_tokens": 2200,
+                "cache_write_tokens": 0,
+                "output_tokens": 400,
+                "reasoning_output_tokens": 170,
+                "total_tokens": 3900,
+            },
+        )
+        self.assertEqual(
+            [row["last_token_usage"]["total_tokens"] for row in detail["timeline"]],
+            [1100, 2800],
+        )
+        self.assertEqual(
+            [row["total_token_usage"]["total_tokens"] for row in detail["timeline"]],
+            [1100, 3900],
+        )
+        self.assertEqual(
+            [row["model"] for row in detail["timeline"]],
+            ["grok-4.5", "grok-4.5-fast"],
+        )
+        self.assertTrue(detail["start_at"])
+        self.assertTrue(detail["end_at"])
+        self.assertIn("grok-session-usage-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("provider-grok", dashboard.HTML)
+        self.assertIn("function sourceBadge(source, row = null)", dashboard.HTML)
+
+    def test_scan_includes_grok_sessions_in_summary_and_period_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            grok_home = root / ".grok"
+            self.write_rollout_rows(
+                codex_home,
+                "codex-session",
+                [
+                    {
+                        "timestamp": "2026-07-14T12:00:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": "codex-session",
+                            "cwd": "/work/codex",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-14T12:00:01Z", 500, 500),
+                ],
+            )
+            self._write_grok_fixture(grok_home, "grok-session-period")
+
+            analyzer = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                grok_home=grok_home,
+                include_grok=True,
+            )
+            all_snapshot = analyzer.scan("all")
+            providers = {
+                row.get("provider") or ("grok" if row.get("environment_id") == "grok" else "codex")
+                for row in all_snapshot["sessions"]
+            }
+            self.assertIn("grok", providers)
+            self.assertIn("codex", providers)
+            grok_rows = [row for row in all_snapshot["sessions"] if row.get("provider") == "grok"]
+            self.assertEqual(len(grok_rows), 1)
+            self.assertEqual(grok_rows[0]["total_token_usage"]["total_tokens"], 3900)
+            self.assertEqual(all_snapshot["summary"]["session_count"], 2)
+            self.assertEqual(all_snapshot["summary"]["usage"]["total_tokens"], 4400)
+
+            detail = all_snapshot["details_by_uid"][grok_rows[0]["uid"]]
+            self.assertEqual(detail["provider"], "grok")
+            self.assertEqual(len(detail["timeline"]), 2)
+
+            # Period with no Grok turn timestamps in range should exclude Grok usage.
+            empty = analyzer.scan("custom", "2026-01-01", "2026-01-02")
+            self.assertEqual(
+                sum(1 for row in empty["sessions"] if row.get("provider") == "grok"),
+                0,
+            )
+
+            # Full day covering fixture timestamps keeps Grok.
+            ranged = analyzer.scan("custom", "2026-07-14", "2026-07-14")
+            grok_ranged = [row for row in ranged["sessions"] if row.get("provider") == "grok"]
+            self.assertEqual(len(grok_ranged), 1)
+            self.assertEqual(grok_ranged[0]["total_token_usage"]["total_tokens"], 3900)
+
+            # Entry-point once scan with env GROK_HOME.
+            env = os.environ.copy()
+            env.update(
+                {
+                    "CODEX_HOME": str(codex_home),
+                    "GROK_HOME": str(grok_home),
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                }
+            )
+            completed = subprocess.run(
+                [
+                    os.sys.executable,
+                    str(MODULE_PATH),
+                    "--codex-home",
+                    str(codex_home),
+                    "--grok-home",
+                    str(grok_home),
+                    "--no-auto-windows",
+                    "--once",
+                    "--json",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertGreaterEqual(payload["summary"]["session_count"], 2)
+            self.assertEqual(payload["cache_metrics"]["grok_sessions"], 1)
+            self.assertTrue(any(row.get("provider") == "grok" for row in payload["sessions"]))
+
+    def test_parse_grok_session_handles_empty_and_malformed_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            grok_home = Path(temp_dir) / ".grok"
+            session_dir = grok_home / "sessions" / "workspace" / "empty-session"
+            session_dir.mkdir(parents=True, exist_ok=True)
+            (session_dir / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "info": {"id": "empty-session", "cwd": "/work/empty"},
+                        "created_at": "2026-07-14T09:00:00Z",
+                        "updated_at": "2026-07-14T09:00:01Z",
+                        "current_model_id": "grok-4.5",
+                        "generated_title": "Empty",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (session_dir / "updates.jsonl").write_text(
+                "{not-json\n"
+                + json.dumps(
+                    {
+                        "timestamp": 1784000000,
+                        "method": "session/update",
+                        "params": {
+                            "update": {"sessionUpdate": "tool_call", "title": "run_terminal_command"}
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            source = dashboard.grok_log_source(grok_home)
+            summary, detail = dashboard.parse_grok_session(session_dir, source)
+
+        self.assertEqual(detail["total_token_usage"]["total_tokens"], 0)
+        self.assertEqual(detail["token_event_count"], 0)
+        self.assertEqual(detail["model"], "grok-4.5")
+        self.assertEqual(detail["title"], "Empty")
+        self.assertGreaterEqual(detail["parse_errors"], 1)
+        self.assertEqual(detail["tool_counts"].get("run_terminal_command"), 1)
+        self.assertEqual(summary["provider"], "grok")
 
 
 if __name__ == "__main__":

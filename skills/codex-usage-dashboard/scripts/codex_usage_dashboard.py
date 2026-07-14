@@ -135,6 +135,7 @@ DASHBOARD_FEATURES = [
     "persistent-parse-cache-v1",
     "append-resume-v1",
     "parallel-cold-parse-v1",
+    "grok-session-usage-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -150,6 +151,7 @@ SUMMARY_KEYS = (
     "agent_role",
     "title",
     "source",
+    "provider",
     "environment",
     "environment_id",
     "is_remote",
@@ -1294,6 +1296,371 @@ def codex_home_display(sources: list[CodexLogSource]) -> str:
     return " · ".join(f"{source.label}: {source.codex_home}" for source in sources)
 
 
+def default_grok_home() -> Path:
+    return Path(os.environ.get("GROK_HOME", Path.home() / ".grok")).expanduser()
+
+
+def path_has_grok_sessions(path: Path) -> bool:
+    return (path.expanduser() / "sessions").is_dir()
+
+
+def grok_log_source(grok_home: Path | None = None) -> CodexLogSource | None:
+    home = (grok_home or default_grok_home()).expanduser()
+    if not path_has_grok_sessions(home):
+        return None
+    try:
+        resolved = home.resolve()
+    except OSError:
+        resolved = home
+    return CodexLogSource("grok", "Grok", resolved)
+
+
+def iter_grok_session_dirs(grok_home: Path) -> list[Path]:
+    sessions_dir = grok_home.expanduser() / "sessions"
+    if not sessions_dir.is_dir():
+        return []
+    dirs: list[Path] = []
+    try:
+        for summary_path in sessions_dir.rglob("summary.json"):
+            if summary_path.name != "summary.json":
+                continue
+            # Skip lock sidecars and nested non-session copies.
+            if summary_path.parent.name.endswith(".lock"):
+                continue
+            dirs.append(summary_path.parent)
+    except OSError:
+        return []
+    dirs.sort(key=lambda path: path.stat().st_mtime if path.exists() else 0, reverse=True)
+    return dirs
+
+
+def grok_timestamp_iso(value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        # Heuristic: ms timestamps are far larger than current unix seconds.
+        if seconds > 1_000_000_000_000:
+            seconds /= 1000.0
+        try:
+            return dt.datetime.fromtimestamp(seconds, tz=dt.UTC).isoformat().replace("+00:00", "Z")
+        except (OverflowError, OSError, ValueError):
+            return ""
+    return ""
+
+
+def normalize_grok_usage(value: Any) -> dict[str, int]:
+    usage = zero_usage()
+    if not isinstance(value, dict):
+        return usage
+    mapping = {
+        "input_tokens": ("inputTokens", "input_tokens"),
+        "cached_input_tokens": ("cachedReadTokens", "cached_input_tokens", "cached_read_tokens"),
+        "cache_write_tokens": ("cachedWriteTokens", "cache_write_tokens", "cacheWriteTokens"),
+        "output_tokens": ("outputTokens", "output_tokens"),
+        "reasoning_output_tokens": ("reasoningTokens", "reasoning_output_tokens", "reasoning_tokens"),
+        "total_tokens": ("totalTokens", "total_tokens"),
+    }
+    for target, keys in mapping.items():
+        for key in keys:
+            raw = value.get(key)
+            if isinstance(raw, (int, float)):
+                usage[target] = int(raw)
+                break
+    if usage["total_tokens"] <= 0:
+        usage["total_tokens"] = (
+            usage["input_tokens"] + usage["output_tokens"]
+        )
+    return usage
+
+
+def models_from_grok_usage(usage: Any, fallback: str = "") -> list[str]:
+    models: list[str] = []
+    if isinstance(usage, dict):
+        model_usage = usage.get("modelUsage")
+        if isinstance(model_usage, dict):
+            for name in model_usage:
+                if isinstance(name, str) and name.strip() and name not in models:
+                    models.append(name.strip())
+    return unique_models(models, fallback)
+
+
+def parse_grok_session(
+    session_dir: Path,
+    log_source: CodexLogSource | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Parse one local Grok Build session directory into dashboard summary/detail."""
+    summary_path = session_dir / "summary.json"
+    updates_path = session_dir / "updates.jsonl"
+    if not summary_path.is_file():
+        return None
+
+    try:
+        raw_summary = json.loads(summary_path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw_summary, dict):
+        return None
+
+    log_source = log_source or CodexLogSource("grok", "Grok", session_dir.parent.parent)
+    info = raw_summary.get("info") if isinstance(raw_summary.get("info"), dict) else {}
+    session_id = str(info.get("id") or session_dir.name or "")
+    if not session_id:
+        return None
+
+    cwd = str(info.get("cwd") or raw_summary.get("git_root_dir") or "")
+    parent_session_id = str(raw_summary.get("parent_session_id") or "")
+    session_kind = str(raw_summary.get("session_kind") or "")
+    is_subagent = bool(parent_session_id) or session_kind.lower() in {
+        "subagent",
+        "subagent_fork",
+        "fork",
+    }
+    root_session_id = parent_session_id if is_subagent and parent_session_id else session_id
+    agent_name = str(raw_summary.get("agent_name") or "")
+    model = str(raw_summary.get("current_model_id") or raw_summary.get("model") or "")
+    effort = str(raw_summary.get("reasoning_effort") or raw_summary.get("effort") or "")
+    title = str(
+        raw_summary.get("generated_title")
+        or raw_summary.get("session_summary")
+        or ""
+    ).strip()
+    created_at = grok_timestamp_iso(raw_summary.get("created_at"))
+    updated_at = grok_timestamp_iso(
+        raw_summary.get("last_active_at") or raw_summary.get("updated_at")
+    )
+    start_at = created_at
+    end_at = updated_at or created_at
+
+    timeline: list[dict[str, Any]] = []
+    total_usage = zero_usage()
+    last_usage = zero_usage()
+    models = unique_models(model)
+    tool_counts: dict[str, int] = {}
+    turn_ids: set[str] = set()
+    parse_errors = 0
+    line_count = 0
+    user_message_count = 0
+    assistant_message_count = 0
+    first_user_prompt = ""
+    last_agent_preview = ""
+    duration_ms_total = 0
+
+    if updates_path.is_file():
+        try:
+            with updates_path.open("r", encoding="utf-8", errors="replace") as handle:
+                for raw_line in handle:
+                    line_count += 1
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        parse_errors += 1
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+
+                    params = item.get("params") if isinstance(item.get("params"), dict) else {}
+                    update = params.get("update") if isinstance(params.get("update"), dict) else {}
+                    session_update = str(update.get("sessionUpdate") or "")
+                    meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+                    event_ts = (
+                        grok_timestamp_iso(meta.get("agentTimestampMs"))
+                        or grok_timestamp_iso(item.get("timestamp"))
+                        or end_at
+                        or start_at
+                    )
+                    if event_ts:
+                        if not start_at or event_ts < start_at:
+                            start_at = event_ts
+                        if not end_at or event_ts > end_at:
+                            end_at = event_ts
+
+                    if session_update == "user_message_chunk":
+                        user_message_count += 1
+                        content = update.get("content") if isinstance(update.get("content"), dict) else {}
+                        text = clean_text(content.get("text"), 260) if isinstance(content.get("text"), str) else ""
+                        if text and not first_user_prompt and not is_synthetic_user_context(text):
+                            first_user_prompt = text
+                        model_id = None
+                        update_meta = update.get("_meta") if isinstance(update.get("_meta"), dict) else {}
+                        if isinstance(update_meta.get("modelId"), str):
+                            model_id = update_meta.get("modelId")
+                        if model_id:
+                            models = unique_models(models, model_id)
+                            model = str(model_id)
+
+                    elif session_update in {"agent_message_chunk", "agent_thought_chunk"}:
+                        if session_update == "agent_message_chunk":
+                            assistant_message_count += 1
+                        content = update.get("content") if isinstance(update.get("content"), dict) else {}
+                        text = clean_text(content.get("text"), 320) if isinstance(content.get("text"), str) else ""
+                        if text and session_update == "agent_message_chunk":
+                            last_agent_preview = text
+
+                    elif session_update == "tool_call":
+                        title_tool = str(update.get("title") or "tool_call")
+                        tool_counts[title_tool] = tool_counts.get(title_tool, 0) + 1
+
+                    elif session_update == "turn_completed":
+                        usage_raw = update.get("usage") if isinstance(update.get("usage"), dict) else {}
+                        turn_usage = normalize_grok_usage(usage_raw)
+                        if not usage_has_tokens(turn_usage) and not usage_raw:
+                            continue
+                        prompt_id = update.get("prompt_id")
+                        if isinstance(prompt_id, str) and prompt_id:
+                            turn_ids.add(prompt_id)
+                        else:
+                            turn_ids.add(f"turn-{len(turn_ids) + 1}")
+                        models = unique_models(models, models_from_grok_usage(usage_raw, model))
+                        if models:
+                            model = models[-1]
+                        total_usage = add_usage(total_usage, turn_usage)
+                        last_usage = turn_usage
+                        api_duration = usage_raw.get("apiDurationMs")
+                        if isinstance(api_duration, (int, float)):
+                            duration_ms_total += int(api_duration)
+                        timeline.append(
+                            {
+                                "timestamp": event_ts,
+                                "model": model,
+                                "total_token_usage": dict(total_usage),
+                                "last_token_usage": dict(turn_usage),
+                                "model_context_window": None,
+                                "rate_limits": None,
+                                "prompt_id": prompt_id if isinstance(prompt_id, str) else None,
+                                "stop_reason": update.get("stop_reason"),
+                            }
+                        )
+        except OSError:
+            parse_errors += 1
+
+    if not title:
+        title = first_user_prompt or agent_name or folder_name_from_path(cwd) or session_id
+    if not start_at:
+        start_at = created_at or updated_at or ""
+    if not end_at:
+        end_at = updated_at or start_at
+    if not models and model:
+        models = [model]
+    if not model and models:
+        model = models[-1]
+
+    project_info = git_project_info(cwd) if cwd else ProjectInfo(
+        folder_name_from_path(cwd) or "unknown",
+        cwd or "unknown",
+        cwd or "unknown",
+        "",
+        False,
+    )
+    # Prefer git_root_dir from summary when available.
+    git_root = str(raw_summary.get("git_root_dir") or "").rstrip("/")
+    if git_root:
+        project_info = ProjectInfo(
+            folder_name_from_path(git_root) or project_info.project,
+            git_root,
+            git_root,
+            str(raw_summary.get("head_branch") or project_info.project_branch),
+            project_info.is_git_worktree,
+        )
+
+    cached_percent = None
+    input_tokens = total_usage.get("input_tokens", 0)
+    if input_tokens:
+        cached_percent = round(total_usage.get("cached_input_tokens", 0) / input_tokens * 100, 1)
+
+    pricing = pricing_for_timeline(timeline, model, total_usage, end_at)
+    resolved_path = str(session_dir)
+    try:
+        resolved_path = str(session_dir.resolve())
+    except OSError:
+        pass
+    uid = hashlib.sha1(f"grok:{resolved_path}".encode("utf-8", errors="replace")).hexdigest()[:16]
+    file_size = 0
+    try:
+        file_size = summary_path.stat().st_size + (updates_path.stat().st_size if updates_path.is_file() else 0)
+    except OSError:
+        pass
+
+    turn_count = len(turn_ids) or len(timeline)
+    detail: dict[str, Any] = {
+        "uid": uid,
+        "session_id": session_id,
+        "root_session_id": root_session_id,
+        "parent_thread_id": parent_session_id if is_subagent else "",
+        "forked_from_id": "",
+        "thread_source": session_kind or "grok",
+        "is_subagent": is_subagent,
+        "agent_path": agent_name,
+        "agent_nickname": agent_name,
+        "agent_role": agent_name,
+        "title": title,
+        "source": "active",
+        "provider": "grok",
+        "environment": log_source.label,
+        "environment_id": log_source.id,
+        "is_remote": False,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": str(log_source.codex_home),
+        "path": resolved_path,
+        "file_size": file_size,
+        "line_count": line_count,
+        "parse_errors": parse_errors,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": created_at or start_at,
+        "start_at": start_at,
+        "end_at": end_at,
+        "updated_at": updated_at or end_at,
+        "cwd": cwd,
+        "project": project_info.project,
+        "project_root": project_info.project_root,
+        "workspace_root": project_info.workspace_root,
+        "project_branch": project_info.project_branch or str(raw_summary.get("head_branch") or ""),
+        "is_git_worktree": project_info.is_git_worktree,
+        "model": model or "unknown",
+        "models": models or unique_models(model or "unknown"),
+        "effort": effort,
+        "originator": "grok-build",
+        "cli_version": "",
+        "total_token_usage": total_usage,
+        "last_token_usage": last_usage,
+        "branch_total_token_usage": total_usage,
+        "inherited_token_usage": zero_usage(),
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": True,
+        "estimated_cost_usd": pricing["estimated_cost_usd"],
+        "estimated_cost_breakdown_usd": pricing["estimated_cost_breakdown_usd"],
+        "price_model_known": pricing["price_model_known"],
+        "applied_price_segments": pricing["applied_price_segments"],
+        "cached_input_percent": cached_percent,
+        "model_context_window": None,
+        "token_event_count": len(timeline),
+        "turn_count": turn_count,
+        "completed_turn_count": len(timeline),
+        "user_message_count": user_message_count,
+        "assistant_message_count": assistant_message_count,
+        "first_user_prompt": first_user_prompt,
+        "last_agent_preview": last_agent_preview,
+        "latest_rate_limits": None,
+        "latest_plan_type": None,
+        "latest_rate_limit_reached_type": None,
+        "tool_counts": dict(sorted(tool_counts.items(), key=lambda item: item[1], reverse=True)),
+        "duration_ms_total": duration_ms_total,
+        "duration_ms_avg": int(duration_ms_total / len(timeline)) if timeline and duration_ms_total else None,
+        "time_to_first_token_ms_avg": None,
+        "timeline": timeline,
+        "tasks": [],
+    }
+    summary = {key: detail.get(key) for key in SUMMARY_KEYS}
+    summary["provider"] = "grok"
+    return summary, detail
+
+
 def safe_device_code(value: Any) -> str:
     code = str(value or "").strip().lower()
     code = re.sub(r"[^a-z0-9_-]+", "-", code).strip("-")
@@ -2026,6 +2393,8 @@ class CodexUsageAnalyzer:
         persistent_cache: PersistentParseCache | None = None,
         resolve_project_info: bool = True,
         parallel_workers: int = 0,
+        grok_home: Path | None = None,
+        include_grok: bool = False,
     ):
         if isinstance(codex_home, list):
             if codex_home and isinstance(codex_home[0], CodexLogSource):
@@ -2043,6 +2412,14 @@ class CodexUsageAnalyzer:
         self.persistent_cache = persistent_cache
         self.resolve_project_info = resolve_project_info
         self.parallel_workers = max(0, min(int(parallel_workers), 4))
+        if include_grok:
+            if grok_home is not None:
+                self.grok_source = grok_log_source(grok_home)
+            else:
+                self.grok_source = grok_log_source()
+        else:
+            self.grok_source = None
+        self.grok_home = self.grok_source.codex_home if self.grok_source else None
         self._process_pool: concurrent.futures.ProcessPoolExecutor | None = None
         self._parallel_disabled = False
         self._cache: dict[str, FileParseCacheEntry] = {}
@@ -2053,6 +2430,7 @@ class CodexUsageAnalyzer:
             "incremental_parses": 0,
             "incremental_bytes": 0,
             "parallel_files": 0,
+            "grok_sessions": 0,
         }
         self._pending_persistent_entries: dict[str, FileParseCacheEntry] = {}
         self._snapshot_cache_signature: tuple[Any, ...] | None = None
@@ -2203,7 +2581,45 @@ class CodexUsageAnalyzer:
             for log_source in self.codex_sources
         )
         remote_signature = self.remote_store.state_signature() if include_remotes and self.remote_store is not None else ()
-        return (file_signature, title_signature, remote_signature)
+        grok_signature: tuple[Any, ...] = ()
+        if self.grok_source is not None and self.grok_home is not None:
+            session_dirs = iter_grok_session_dirs(self.grok_home)
+            grok_signature = tuple(
+                (
+                    "grok",
+                    *path_state_signature(session_dir / "summary.json"),
+                    *path_state_signature(session_dir / "updates.jsonl"),
+                )
+                for session_dir in session_dirs
+            )
+        return (file_signature, title_signature, remote_signature, grok_signature)
+
+    def parse_grok_sessions(self) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        if self.grok_source is None or self.grok_home is None:
+            return []
+        rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for session_dir in iter_grok_session_dirs(self.grok_home):
+            try:
+                parsed = parse_grok_session(session_dir, self.grok_source)
+            except OSError:
+                continue
+            if parsed is None:
+                continue
+            summary, detail = parsed
+            if self.resolve_project_info:
+                project_info = self.project_info_for_cwd(str(detail.get("cwd") or ""))
+                # Keep summary git branch/root when already set from Grok metadata.
+                if not detail.get("project_root") or detail.get("project_root") == detail.get("cwd"):
+                    detail["project"] = project_info.project
+                    detail["project_root"] = project_info.project_root
+                    detail["workspace_root"] = project_info.workspace_root
+                    detail["is_git_worktree"] = project_info.is_git_worktree
+                if not detail.get("project_branch") and project_info.project_branch:
+                    detail["project_branch"] = project_info.project_branch
+                summary.update({key: detail.get(key) for key in SUMMARY_KEYS if key.startswith("project") or key in {"cwd", "is_git_worktree"}})
+            rows.append((summary, detail))
+        self.cache_metrics["grok_sessions"] = len(rows)
+        return rows
 
     def scan(
         self,
@@ -2698,11 +3114,27 @@ class CodexUsageAnalyzer:
             if isinstance(session_id, str) and session_id in titles:
                 summary["title"] = titles[session_id]
                 detail["title"] = titles[session_id]
+            detail.setdefault("provider", "codex")
+            summary.setdefault("provider", "codex")
 
             sessions.append(summary)
             details_by_uid[summary["uid"]] = detail
 
+        for summary, detail in self.parse_grok_sessions():
+            sessions.append(summary)
+            details_by_uid[summary["uid"]] = detail
+
         codex_sources: list[dict[str, Any]] = codex_source_payloads(self.codex_sources)
+        if self.grok_source is not None:
+            codex_sources.append(
+                {
+                    "id": self.grok_source.id,
+                    "label": self.grok_source.label,
+                    "codex_home": str(self.grok_source.codex_home),
+                    "is_remote": False,
+                    "provider": "grok",
+                }
+            )
         if include_remotes and self.remote_store is not None:
             remote_sessions, remote_details, remote_sources = self.remote_store.transformed_sessions()
             sessions.extend(remote_sessions)
@@ -2711,9 +3143,12 @@ class CodexUsageAnalyzer:
 
         sessions.sort(key=lambda row: row["total_token_usage"].get("total_tokens", 0), reverse=True)
         generated_at = dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+        homes_display = self.codex_home_display
+        if self.grok_source is not None:
+            homes_display = f"{homes_display} · Grok: {self.grok_source.codex_home}"
         snapshot = {
             "generated_at": generated_at,
-            "codex_home": self.codex_home_display,
+            "codex_home": homes_display,
             "codex_sources": codex_sources,
             "sessions": sessions,
             "details_by_uid": details_by_uid,
@@ -3312,6 +3747,7 @@ class CodexUsageAnalyzer:
             "agent_role": agent_role,
             "title": title,
             "source": source,
+            "provider": "codex",
             "environment": log_source.label,
             "environment_id": log_source.id,
             "is_remote": False,
@@ -4283,6 +4719,8 @@ HTML = r"""<!doctype html>
     .badge.env.wsl { color: var(--accent); border-color: #99c9bb; background: #eef8f4; }
     .badge.env.windows { color: var(--accent-3); border-color: #a9c0df; background: #eef4fb; }
     .badge.env.remote { color: #7a4c12; border-color: #e3c27a; background: #fff8e5; }
+    .badge.env.grok { color: #6b3fa0; border-color: #c9b3ea; background: #f6f0ff; }
+    .badge.provider-grok { color: #6b3fa0; border-color: #c9b3ea; background: #f6f0ff; }
     .badge.branch {
       width: 24px;
       min-width: 24px;
@@ -5246,10 +5684,17 @@ HTML = r"""<!doctype html>
       return `<span class="badge branch" title="${escapeHtml(title)}" aria-label="${escapeHtml(label)}">${branchIcon()}</span>`;
     }
 
-    function sourceBadge(source) {
-      if (source !== 'archived') return '';
-      const text = t('archived');
-      return `<span class="badge ${escapeHtml(source)}">${text}</span>`;
+    function sourceBadge(source, row = null) {
+      if (row && (row.provider === 'grok' || row.environment_id === 'grok')) {
+        return `<span class="badge provider-grok">Grok</span>`;
+      }
+      if (source === 'archived') {
+        return `<span class="badge archived">${escapeHtml(t('archived'))}</span>`;
+      }
+      if (source === 'active' && row && row.provider === 'codex') {
+        return '';
+      }
+      return '';
     }
 
     function periodParams(period = state.period) {
@@ -5989,12 +6434,12 @@ HTML = r"""<!doctype html>
           <td class="title-cell" title="${escapeHtml((row.title || row.session_id) + (timeValue ? ' · ' + fmtDate(timeValue) : ''))}">
             <div class="title-line">
               ${taskToggle}
-              ${compactProject ? sourceBadge(row.source) : ''}
+              ${compactProject ? sourceBadge(row.source, row) : ''}
               ${compactProject ? branchBadge(row) : ''}
               <div class="title-main">${escapeHtml(row.title || row.session_id)}</div>
               <div class="title-time">${escapeHtml(fmtRelativeTime(timeValue))}</div>
             </div>
-            ${compactProject ? '' : `<div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source)} ${branchBadge(row)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>`}
+            ${compactProject ? '' : `<div class="title-sub">${environmentBadge(row)} ${sourceBadge(row.source, row)} ${branchBadge(row)} <span class="title-sub-text">${escapeHtml(row.project || shortPath(row.cwd))}</span></div>`}
           </td>
           <td class="number" title="${escapeHtml(totalTitle)}"><strong>${fmtCompact(usage.total_tokens)}</strong></td>
           <td class="number" title="${fmt(usage.output_tokens)} output tokens">${fmtCompact(usage.output_tokens)}</td>
@@ -6186,7 +6631,7 @@ HTML = r"""<!doctype html>
       document.getElementById('detailStatus').textContent = t('countEvents', { count: fmt(detail.token_event_count) });
       document.getElementById('detailsBody').innerHTML = `
         <div class="detail-title">${escapeHtml(detail.title || detail.session_id)}</div>
-        <div class="detail-badges">${environmentBadge(detail)} ${sourceBadge(detail.source)} ${detail.is_subagent ? `<span class="badge">${escapeHtml(t('subagent'))}</span>` : ''} ${modelBadges(detail)} <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
+        <div class="detail-badges">${environmentBadge(detail)} ${sourceBadge(detail.source, detail)} ${detail.is_subagent ? `<span class="badge">${escapeHtml(t('subagent'))}</span>` : ''} ${modelBadges(detail)} <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
 
         ${taskSummary ? `
           <div class="task-detail-summary">
@@ -6918,6 +7363,17 @@ def parse_args() -> argparse.Namespace:
         help="Path to a Codex home directory. Can be provided multiple times.",
     )
     parser.add_argument(
+        "--grok-home",
+        type=Path,
+        default=None,
+        help="Path to a Grok home directory (contains sessions/). Defaults to $GROK_HOME or ~/.grok.",
+    )
+    parser.add_argument(
+        "--no-grok",
+        action="store_true",
+        help="Do not include local Grok Build sessions from ~/.grok.",
+    )
+    parser.add_argument(
         "--no-auto-windows",
         action="store_true",
         help="Do not auto-add the Windows ~/.codex directory when running under WSL.",
@@ -6957,6 +7413,8 @@ def main() -> int:
         remote_store=remote_store,
         persistent_cache=persistent_cache,
         parallel_workers=args.parse_workers,
+        grok_home=args.grok_home,
+        include_grok=not args.no_grok,
     )
     if args.export_snapshot is not None:
         body = analyzer.export_snapshot_json()
