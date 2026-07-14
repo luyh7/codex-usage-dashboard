@@ -90,7 +90,7 @@ PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
 APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
-PARSE_CACHE_VERSION = 2
+PARSE_CACHE_VERSION = 3
 PARSE_CACHE_SAMPLE_BYTES = 4096
 DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
 DEFAULT_PARSE_MIN_FILES = 8
@@ -195,6 +195,44 @@ def zero_usage() -> dict[str, int]:
     return {key: 0 for key in TOKEN_KEYS}
 
 
+def model_from_payload(payload: Any) -> str:
+    """Extract the active model name from common Codex log payload shapes."""
+    if not isinstance(payload, dict):
+        return ""
+
+    candidates: list[Any] = [
+        payload.get("model"),
+        payload.get("model_slug"),
+    ]
+
+    thread_settings = payload.get("thread_settings")
+    if isinstance(thread_settings, dict):
+        candidates.extend(
+            [
+                thread_settings.get("model"),
+                thread_settings.get("model_slug"),
+            ]
+        )
+        collab = thread_settings.get("collaboration_mode")
+        if isinstance(collab, dict):
+            settings = collab.get("settings")
+            if isinstance(settings, dict):
+                candidates.append(settings.get("model"))
+
+    collab = payload.get("collaboration_mode")
+    if isinstance(collab, dict):
+        settings = collab.get("settings")
+        if isinstance(settings, dict):
+            candidates.append(settings.get("model"))
+
+    for value in candidates:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+    return ""
+
+
 def unique_models(*sources: Any) -> list[str]:
     """Collect model names in first-appearance order, de-duplicated."""
     models: list[str] = []
@@ -214,9 +252,9 @@ def unique_models(*sources: Any) -> list[str]:
                 if isinstance(item, str):
                     add(item)
                 elif isinstance(item, dict):
-                    add(item.get("model"))
+                    add(item.get("model") or model_from_payload(item))
         elif isinstance(source, dict):
-            add(source.get("model"))
+            add(source.get("model") or model_from_payload(source))
     return models
 
 
@@ -2430,6 +2468,12 @@ class CodexUsageAnalyzer:
             detail["time_to_first_token_ms_avg"] = (
                 int(sum(ttf_ms) / len(ttf_ms)) if ttf_ms else None
             )
+            period_models = unique_models(rebased, detail.get("model") if not rebased else None)
+            if rebased:
+                detail["model"] = str(rebased[-1].get("model") or detail.get("model") or "")
+                detail["models"] = period_models or unique_models(detail["model"])
+            else:
+                detail["models"] = period_models or unique_models(detail.get("models"), detail.get("model"))
             detail.update(
                 pricing_for_timeline(
                     rebased,
@@ -3051,7 +3095,7 @@ class CodexUsageAnalyzer:
                     created_at = str(payload.get("timestamp") or created_at)
                     originator = str(payload.get("originator") or originator)
                     cli_version = str(payload.get("cli_version") or cli_version)
-                    note_model(payload.get("model") or payload.get("model_slug") or model)
+                    note_model(model_from_payload(payload) or model)
 
                     raw_thread_source = payload.get("thread_source")
                     if isinstance(raw_thread_source, str):
@@ -3111,8 +3155,12 @@ class CodexUsageAnalyzer:
                 if isinstance(turn_id, str):
                     turn_ids.add(turn_id)
                 cwd = str(payload.get("cwd") or cwd)
-                note_model(payload.get("model") or model)
-                effort = str(payload.get("effort") or effort)
+                note_model(model_from_payload(payload) or model)
+                effort = str(
+                    payload.get("effort")
+                    or payload.get("reasoning_effort")
+                    or effort
+                )
 
             elif item_type == "response_item":
                 response_type = payload.get("type")
@@ -3133,7 +3181,24 @@ class CodexUsageAnalyzer:
 
             elif item_type == "event_msg":
                 event_type = payload.get("type")
-                if event_type == "token_count":
+                if event_type == "thread_settings_applied":
+                    # Desktop/WSL model switches often arrive here before the next
+                    # turn_context, so apply them immediately for timeline pricing.
+                    note_model(model_from_payload(payload))
+                    thread_settings = (
+                        payload.get("thread_settings")
+                        if isinstance(payload.get("thread_settings"), dict)
+                        else {}
+                    )
+                    effort = str(
+                        thread_settings.get("reasoning_effort")
+                        or thread_settings.get("effort")
+                        or payload.get("effort")
+                        or effort
+                    )
+                    cwd = str(thread_settings.get("cwd") or payload.get("cwd") or cwd)
+
+                elif event_type == "token_count":
                     latest_rate_limits = payload.get("rate_limits") if isinstance(payload.get("rate_limits"), dict) else None
                     latest_plan_type = payload.get("plan_type") if isinstance(payload.get("plan_type"), str) else latest_plan_type
                     reached = payload.get("rate_limit_reached_type")
@@ -3142,6 +3207,8 @@ class CodexUsageAnalyzer:
                     info = payload.get("info")
                     if isinstance(info, dict):
                         token_event_count += 1
+                        # Prefer explicit model on the token event when present.
+                        note_model(model_from_payload(info) or model_from_payload(payload) or model)
                         total_usage = normalize_usage(info.get("total_token_usage"))
                         last_usage = normalize_usage(info.get("last_token_usage"))
                         window = info.get("model_context_window")

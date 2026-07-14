@@ -929,6 +929,118 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(after["estimated_cost_usd"], 68.5)
         self.assertEqual(detail["estimated_cost_usd"], before["estimated_cost_usd"] + after["estimated_cost_usd"])
 
+    def test_thread_settings_applied_updates_model_without_turn_context(self) -> None:
+        """Desktop/WSL often emits model switches via thread_settings_applied."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout-2026-07-10T10-00-00-settings-model.jsonl"
+            rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "settings-model-session",
+                        "cwd": "/work/settings",
+                        "model_provider": "custom",
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:00:01Z",
+                    "type": "turn_context",
+                    "payload": {
+                        "turn_id": "t1",
+                        "model": "gpt-5.6-sol",
+                        "collaboration_mode": {
+                            "mode": "default",
+                            "settings": {"model": "gpt-5.6-sol"},
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:00:02Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 120,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 120,
+                            },
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:01:00Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "thread_settings_applied",
+                        "thread_settings": {
+                            "model": "gpt-5.6-terra",
+                            "reasoning_effort": "high",
+                            "collaboration_mode": {
+                                "mode": "default",
+                                "settings": {"model": "gpt-5.6-terra"},
+                            },
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:01:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 300,
+                                "cached_input_tokens": 50,
+                                "output_tokens": 80,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 380,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 200,
+                                "cached_input_tokens": 50,
+                                "output_tokens": 60,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 260,
+                            },
+                        },
+                    },
+                },
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+            analyzer = dashboard.CodexUsageAnalyzer(Path(temp_dir))
+            summary, detail = analyzer.parse_file(path, "active")
+
+        self.assertEqual(detail["model"], "gpt-5.6-terra")
+        self.assertEqual(detail["models"], ["gpt-5.6-sol", "gpt-5.6-terra"])
+        self.assertEqual(summary["models"], ["gpt-5.6-sol", "gpt-5.6-terra"])
+        self.assertEqual(
+            [row["model"] for row in detail["timeline"]],
+            ["gpt-5.6-sol", "gpt-5.6-terra"],
+        )
+        self.assertEqual(detail["effort"], "high")
+        self.assertEqual(
+            dashboard.model_from_payload(
+                {
+                    "thread_settings": {
+                        "collaboration_mode": {"settings": {"model": "gpt-5.6-terra"}}
+                    }
+                }
+            ),
+            "gpt-5.6-terra",
+        )
+
     def test_session_models_tracks_all_switched_models(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "rollout-2026-07-10T10-00-00-multi-model.jsonl"
