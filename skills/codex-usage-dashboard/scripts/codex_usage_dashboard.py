@@ -171,6 +171,7 @@ SUMMARY_KEYS = (
     "project_branch",
     "is_git_worktree",
     "model",
+    "models",
     "effort",
     "total_token_usage",
     "last_token_usage",
@@ -192,6 +193,31 @@ SUMMARY_KEYS = (
 
 def zero_usage() -> dict[str, int]:
     return {key: 0 for key in TOKEN_KEYS}
+
+
+def unique_models(*sources: Any) -> list[str]:
+    """Collect model names in first-appearance order, de-duplicated."""
+    models: list[str] = []
+
+    def add(name: Any) -> None:
+        if not isinstance(name, str):
+            return
+        cleaned = name.strip()
+        if cleaned and cleaned not in models:
+            models.append(cleaned)
+
+    for source in sources:
+        if isinstance(source, str):
+            add(source)
+        elif isinstance(source, list):
+            for item in source:
+                if isinstance(item, str):
+                    add(item)
+                elif isinstance(item, dict):
+                    add(item.get("model"))
+        elif isinstance(source, dict):
+            add(source.get("model"))
+    return models
 
 
 def normalize_usage(value: Any) -> dict[str, int]:
@@ -2765,10 +2791,16 @@ class CodexUsageAnalyzer:
         ranged["tasks"] = tasks
         ranged["total_token_usage"] = total_usage
         ranged["last_token_usage"] = last_usage
+        period_models = unique_models(timeline, detail.get("model") if not timeline else None)
+        if timeline:
+            ranged["model"] = str(timeline[-1].get("model") or detail.get("model") or "")
+            ranged["models"] = period_models or unique_models(ranged["model"])
+        else:
+            ranged["models"] = period_models or unique_models(detail.get("models"), detail.get("model"))
         ranged.update(
             pricing_for_timeline(
                 timeline,
-                str(detail.get("model") or ""),
+                str(ranged.get("model") or detail.get("model") or ""),
                 total_usage,
                 timeline[-1].get("timestamp") if timeline else end_at,
             )
@@ -2926,6 +2958,7 @@ class CodexUsageAnalyzer:
         title = ""
         cwd = str(base.get("cwd") or "")
         model = str(base.get("model") or "")
+        models = unique_models(base.get("models"), model)
         effort = str(base.get("effort") or "")
         originator = str(base.get("originator") or "")
         cli_version = str(base.get("cli_version") or "")
@@ -2976,6 +3009,17 @@ class CodexUsageAnalyzer:
         fast_skipped_line_count = int(base.get("fast_skipped_line_count") or 0)
         fast_skipped_bytes = int(base.get("fast_skipped_bytes") or 0)
 
+        def note_model(value: Any) -> None:
+            nonlocal model
+            if not isinstance(value, str):
+                return
+            cleaned = value.strip()
+            if not cleaned:
+                return
+            model = cleaned
+            if cleaned not in models:
+                models.append(cleaned)
+
         rollout_stats = RolloutReadStats()
         for item in read_rollout_jsonl(
             path,
@@ -3007,7 +3051,7 @@ class CodexUsageAnalyzer:
                     created_at = str(payload.get("timestamp") or created_at)
                     originator = str(payload.get("originator") or originator)
                     cli_version = str(payload.get("cli_version") or cli_version)
-                    model = str(payload.get("model") or payload.get("model_slug") or model)
+                    note_model(payload.get("model") or payload.get("model_slug") or model)
 
                     raw_thread_source = payload.get("thread_source")
                     if isinstance(raw_thread_source, str):
@@ -3067,7 +3111,7 @@ class CodexUsageAnalyzer:
                 if isinstance(turn_id, str):
                     turn_ids.add(turn_id)
                 cwd = str(payload.get("cwd") or cwd)
-                model = str(payload.get("model") or model)
+                note_model(payload.get("model") or model)
                 effort = str(payload.get("effort") or effort)
 
             elif item_type == "response_item":
@@ -3177,6 +3221,10 @@ class CodexUsageAnalyzer:
         if not end_at:
             end_at = utc_from_mtime(path) or start_at
 
+        # Rebuild from timeline so incremental cache bases without `models`
+        # still surface every model that actually generated token events.
+        models = unique_models(models, timeline, model)
+
         cached_percent = None
         input_tokens = total_usage.get("input_tokens", 0)
         if input_tokens:
@@ -3221,6 +3269,7 @@ class CodexUsageAnalyzer:
             "project_branch": project_info.project_branch,
             "is_git_worktree": project_info.is_git_worktree,
             "model": model,
+            "models": models,
             "effort": effort,
             "originator": originator,
             "cli_version": cli_version,
@@ -4207,6 +4256,12 @@ HTML = r"""<!doctype html>
       line-height: 1.35;
       margin-bottom: 8px;
       overflow-wrap: anywhere;
+    }
+    .detail-badges {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
     }
     .detail-meta {
       display: grid;
@@ -5249,10 +5304,27 @@ HTML = r"""<!doctype html>
       }
     }
 
+    function modelsOf(row) {
+      if (Array.isArray(row?.models) && row.models.length) {
+        return row.models.map(model => String(model || 'unknown'));
+      }
+      return [row?.model || 'unknown'];
+    }
+
+    function modelLabel(row) {
+      return modelsOf(row).join(', ');
+    }
+
+    function modelBadges(row) {
+      return modelsOf(row)
+        .map(model => `<span class="badge">${escapeHtml(model)}</span>`)
+        .join('');
+    }
+
     function populateModelFilter() {
       const select = document.getElementById('modelFilter');
       const oldValue = select.value;
-      const models = Array.from(new Set(state.sessions.map(row => row.model || 'unknown'))).sort();
+      const models = Array.from(new Set(state.sessions.flatMap(row => modelsOf(row)))).sort();
       select.innerHTML = `<option value="all">${escapeHtml(t('allModels'))}</option>` + models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
       select.value = models.includes(oldValue) ? oldValue : 'all';
       state.model = select.value;
@@ -5263,10 +5335,10 @@ HTML = r"""<!doctype html>
       return state.sessions.filter(row => {
         if (state.environment !== 'all' && (row.environment_id || row.environment || 'local') !== state.environment) return false;
         if (state.source !== 'all' && row.source !== state.source) return false;
-        if (state.model !== 'all' && (row.model || 'unknown') !== state.model) return false;
+        if (state.model !== 'all' && !modelsOf(row).includes(state.model)) return false;
         if (!needle) return true;
         const haystack = [
-          row.title, row.session_id, row.model, row.project, row.project_root,
+          row.title, row.session_id, modelLabel(row), row.project, row.project_root,
           row.workspace_root, row.project_branch, row.cwd, row.path, row.source, row.environment
         ].join(' ').toLowerCase();
         return haystack.includes(needle);
@@ -5317,6 +5389,7 @@ HTML = r"""<!doctype html>
       let completedTurnCount = 0;
       let latestRow = root;
       let earliestRow = root;
+      const models = [];
 
       rows.forEach(row => {
         usage = addClientUsage(usage, usageOf(row));
@@ -5327,11 +5400,16 @@ HTML = r"""<!doctype html>
         else pricesKnown = false;
         if (rowTime(row) > rowTime(latestRow)) latestRow = row;
         if (rowTime(row) < rowTime(earliestRow)) earliestRow = row;
+        modelsOf(row).forEach(model => {
+          if (!models.includes(model)) models.push(model);
+        });
       });
 
       const inputTokens = Number(usage.input_tokens || 0);
       return {
         ...root,
+        model: latestRow.model || root.model,
+        models: models.length ? models : modelsOf(root),
         total_token_usage: usage,
         estimated_cost_usd: pricesKnown ? cost : null,
         price_model_known: pricesKnown,
@@ -5856,7 +5934,7 @@ HTML = r"""<!doctype html>
           <td class="number" title="${escapeHtml(row.price_model_known ? t('priceKnown') : t('priceUnknown'))}">${fmtUsd(row.estimated_cost_usd)}</td>
           <td class="number">${fmtPercent(row.cached_input_percent)}</td>
           <td class="number">${fmt(row.turn_count)}</td>
-          <td class="model-cell" title="${escapeHtml(row.model || 'unknown')}">${escapeHtml(row.model || 'unknown')}</td>
+          <td class="model-cell" title="${escapeHtml(modelLabel(row))}">${escapeHtml(modelLabel(row))}</td>
           <td class="effort-cell" title="${escapeHtml(row.effort || 'N/A')}">${escapeHtml(row.effort || 'N/A')}</td>
         </tr>
       `;
@@ -6041,7 +6119,7 @@ HTML = r"""<!doctype html>
       document.getElementById('detailStatus').textContent = t('countEvents', { count: fmt(detail.token_event_count) });
       document.getElementById('detailsBody').innerHTML = `
         <div class="detail-title">${escapeHtml(detail.title || detail.session_id)}</div>
-        <div>${environmentBadge(detail)} ${sourceBadge(detail.source)} ${detail.is_subagent ? `<span class="badge">${escapeHtml(t('subagent'))}</span>` : ''} <span class="badge">${escapeHtml(detail.model || 'unknown')}</span> <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
+        <div class="detail-badges">${environmentBadge(detail)} ${sourceBadge(detail.source)} ${detail.is_subagent ? `<span class="badge">${escapeHtml(t('subagent'))}</span>` : ''} ${modelBadges(detail)} <span class="badge">${escapeHtml(t('turnSuffix', { count: fmt(detail.turn_count) }))}</span></div>
 
         ${taskSummary ? `
           <div class="task-detail-summary">

@@ -914,6 +914,10 @@ class CodexUsageDashboardTests(unittest.TestCase):
             )
 
         self.assertEqual([row["model"] for row in detail["timeline"]], ["gpt-5.4", "gpt-5.6-sol"])
+        self.assertEqual(detail["model"], "gpt-5.6-sol")
+        self.assertEqual(detail["models"], ["gpt-5.4", "gpt-5.6-sol"])
+        self.assertEqual(before["models"], ["gpt-5.4"])
+        self.assertEqual(after["models"], ["gpt-5.6-sol"])
         self.assertEqual(detail["estimated_cost_usd"], 86.0)
         self.assertEqual(detail["estimated_cost_breakdown_usd"]["input_tokens"], 12.5)
         self.assertEqual(detail["estimated_cost_breakdown_usd"]["cached_input_tokens"], 1.0)
@@ -924,6 +928,122 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(before["estimated_cost_usd"], 17.5)
         self.assertEqual(after["estimated_cost_usd"], 68.5)
         self.assertEqual(detail["estimated_cost_usd"], before["estimated_cost_usd"] + after["estimated_cost_usd"])
+
+    def test_session_models_tracks_all_switched_models(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout-2026-07-10T10-00-00-multi-model.jsonl"
+            rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "multi-model-session",
+                        "cwd": "/work/multi",
+                        "model": "gpt-5.4",
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:00:01Z",
+                    "type": "turn_context",
+                    "payload": {"turn_id": "t1", "model": "gpt-5.4"},
+                },
+                {
+                    "timestamp": "2026-07-10T10:00:02Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 120,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 0,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 120,
+                            },
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:01:00Z",
+                    "type": "turn_context",
+                    "payload": {"turn_id": "t2", "model": "gpt-5.6-terra"},
+                },
+                {
+                    "timestamp": "2026-07-10T10:01:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 300,
+                                "cached_input_tokens": 50,
+                                "output_tokens": 80,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 380,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 200,
+                                "cached_input_tokens": 50,
+                                "output_tokens": 60,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 260,
+                            },
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-10T10:02:00Z",
+                    "type": "turn_context",
+                    "payload": {"turn_id": "t3", "model": "gpt-5.4"},
+                },
+                {
+                    "timestamp": "2026-07-10T10:02:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 400,
+                                "cached_input_tokens": 80,
+                                "output_tokens": 100,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 500,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 100,
+                                "cached_input_tokens": 30,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 0,
+                                "total_tokens": 120,
+                            },
+                        },
+                    },
+                },
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+            analyzer = dashboard.CodexUsageAnalyzer(Path(temp_dir))
+            summary, detail = analyzer.parse_file(path, "active")
+
+        self.assertEqual(detail["model"], "gpt-5.4")
+        self.assertEqual(detail["models"], ["gpt-5.4", "gpt-5.6-terra"])
+        self.assertEqual(summary["models"], ["gpt-5.4", "gpt-5.6-terra"])
+        self.assertEqual(
+            [row["model"] for row in detail["timeline"]],
+            ["gpt-5.4", "gpt-5.6-terra", "gpt-5.4"],
+        )
+        self.assertIn("models", dashboard.SUMMARY_KEYS)
+        self.assertEqual(
+            dashboard.unique_models(["gpt-5.4", "gpt-5.6-terra"], "gpt-5.4"),
+            ["gpt-5.4", "gpt-5.6-terra"],
+        )
 
     def test_period_usage_handles_cumulative_counter_resets(self) -> None:
         detail = {
