@@ -823,6 +823,42 @@ class CodexUsageDashboardTests(unittest.TestCase):
         )
         self.assertIsNone(dashboard.price_for_model("gpt-5.99"))
 
+    def test_auto_review_is_explicitly_zero_cost(self) -> None:
+        usage = {
+            "input_tokens": 1_000,
+            "cached_input_tokens": 500,
+            "cache_write_tokens": 200,
+            "output_tokens": 100,
+            "reasoning_output_tokens": 80,
+            "total_tokens": 1_100,
+        }
+
+        for timestamp in ("2026-07-09T16:59:59Z", "2026-07-09T17:00:00Z"):
+            self.assertEqual(
+                dashboard.price_for_model("codex-auto-review", timestamp),
+                {"input": 0.0, "cached_input": 0.0, "output": 0.0},
+            )
+            self.assertEqual(
+                dashboard.estimate_cost_usd(usage, "codex-auto-review", timestamp),
+                0.0,
+            )
+
+        pricing = dashboard.pricing_for_timeline(
+            [
+                {
+                    "timestamp": "2026-07-22T00:00:00Z",
+                    "model": "codex-auto-review",
+                    "total_token_usage": usage,
+                }
+            ],
+            "codex-auto-review",
+        )
+
+        self.assertTrue(pricing["price_model_known"])
+        self.assertEqual(pricing["estimated_cost_usd"], 0.0)
+        self.assertEqual(pricing["applied_price_segments"][0]["model"], "codex-auto-review")
+        self.assertEqual(pricing["applied_price_segments"][0]["estimated_cost_usd"], 0.0)
+
     def test_cross_launch_session_is_priced_by_event_model_and_time(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "rollout-2026-07-10T00-59-00-pricing.jsonl"

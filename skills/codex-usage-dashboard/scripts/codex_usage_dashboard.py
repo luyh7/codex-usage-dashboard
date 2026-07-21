@@ -46,6 +46,11 @@ TOKEN_KEYS = (
     "total_tokens",
 )
 
+ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS = {
+    # Auto-review has no public API list price; show it as zero by dashboard convention.
+    "codex-auto-review": {"input": 0.0, "cached_input": 0.0, "output": 0.0},
+}
+
 LEGACY_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.5": {"input": 5.00, "cached_input": 0.50, "output": 30.00},
     "gpt-5.4": {"input": 2.50, "cached_input": 0.25, "output": 15.00},
@@ -78,11 +83,12 @@ GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6-luna": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 9.00},
 }
 MODEL_PRICES_USD_PER_M_TOKENS = {
+    **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
     **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
     **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
 }
 MODEL_PRICE_SCHEDULES = (
-    (None, LEGACY_MODEL_PRICES_USD_PER_M_TOKENS),
+    (None, {**ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS, **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS}),
     (GPT_5_6_PRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
 )
 
@@ -90,7 +96,7 @@ PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
 APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
-PARSE_CACHE_VERSION = 3
+PARSE_CACHE_VERSION = 4
 PARSE_CACHE_SAMPLE_BYTES = 4096
 DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
 DEFAULT_PARSE_MIN_FILES = 8

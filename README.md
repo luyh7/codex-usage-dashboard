@@ -166,6 +166,7 @@ This is a local dashboard. It does not upload your Codex logs. It starts a local
 
 - Codex-only: designed for OpenAI Codex Desktop/CLI local session logs.
 - Cost is an estimate from public standard API prices and may not match ChatGPT/Codex subscription billing.
+- `codex-auto-review` is shown as $0.00 by dashboard convention; this is not a public API unit price.
 - Automatic remote syncing across machines is not included. Multi-device support is manual export/import. WSL + Windows works on the same machine when the Windows profile is mounted under `/mnt/c`.
 
 ## Keywords
