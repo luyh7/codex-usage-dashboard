@@ -130,6 +130,7 @@ DASHBOARD_FEATURES = [
     "clickable-task-rows-and-gutter-v1",
     "main-agent-title-alignment-v1",
     "compact-subagent-indent-v1",
+    "project-folder-aggregate-columns-v1",
     "fast-rollout-projection-v1",
     "snapshot-detail-token-v1",
     "persistent-parse-cache-v1",
@@ -3511,6 +3512,7 @@ HTML = r"""<!doctype html>
       --accent: #0f7b63;
       --accent-2: #b85f18;
       --accent-3: #2d5fa8;
+      --project-summary: #2d5fa8;
       --danger: #b42318;
       --soft: #edf4f1;
       --shadow: 0 10px 30px rgba(26, 36, 32, 0.08);
@@ -4076,6 +4078,14 @@ HTML = r"""<!doctype html>
     tr.project-group-row:hover td {
       background: #f4f8f6;
     }
+    tr.project-group-row .project-aggregate-cell {
+      color: var(--project-summary);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    tr.project-group-row .project-total-cell {
+      font-weight: 800;
+    }
     .project-title-cell {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -4111,16 +4121,10 @@ HTML = r"""<!doctype html>
     .project-meta {
       display: flex;
       align-items: center;
-      justify-content: flex-end;
       gap: 8px;
+      margin: 2px 0 0 30px;
       color: var(--muted);
       font-size: 12px;
-      white-space: nowrap;
-    }
-    .project-summary-cell {
-      color: var(--muted);
-      font-size: 12px;
-      text-align: right;
       white-space: nowrap;
     }
     .project-session-row .title-cell {
@@ -4479,7 +4483,7 @@ HTML = r"""<!doctype html>
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .controls { grid-template-columns: 1fr; }
       .project-title-cell { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-      .project-meta { justify-content: flex-start; flex-wrap: wrap; }
+      .project-meta { flex-wrap: wrap; }
       .project-session-row .title-cell { padding-left: 34px; }
       .bar-row { grid-template-columns: 1fr; gap: 4px; }
       .breakdown-row { grid-template-columns: 64px minmax(0, 1fr) minmax(112px, auto); gap: 6px; }
@@ -4755,6 +4759,7 @@ HTML = r"""<!doctype html>
         collapseTask: '收起子 agent',
         taskRowCount: '{tasks} 个任务 · {agents} 个 agent',
         taskTotal: '任务合计',
+        mixed: '混合',
         priceKnown: '按公开 API 标准价格估算花费',
         priceUnknown: '没有匹配到公开模型价格',
         archived: '归档',
@@ -4921,6 +4926,7 @@ HTML = r"""<!doctype html>
         collapseTask: 'Collapse subagents',
         taskRowCount: '{tasks} tasks · {agents} agents',
         taskTotal: 'Task total',
+        mixed: 'Mixed',
         priceKnown: 'Estimated from public API prices',
         priceUnknown: 'No matching public model price',
         archived: 'Archived',
@@ -5590,6 +5596,46 @@ HTML = r"""<!doctype html>
       ) || null;
     }
 
+    function summarizeProjectRows(rows) {
+      let usage = zeroClientUsage();
+      let cost = 0;
+      let pricesKnown = rows.length > 0;
+      let turnCount = 0;
+      const models = [];
+      const efforts = [];
+
+      rows.forEach(row => {
+        usage = addClientUsage(usage, usageOf(row));
+        turnCount += Number(row.turn_count || 0);
+        const rowCost = Number(row.estimated_cost_usd);
+        if (row.price_model_known && Number.isFinite(rowCost)) cost += rowCost;
+        else pricesKnown = false;
+        modelsOf(row).forEach(model => {
+          if (!models.includes(model)) models.push(model);
+        });
+        const effort = String(row.effort || '').trim();
+        if (effort && !efforts.includes(effort)) efforts.push(effort);
+      });
+
+      const inputTokens = Number(usage.input_tokens || 0);
+      return {
+        usage,
+        estimated_cost_usd: pricesKnown ? cost : null,
+        price_model_known: pricesKnown,
+        cached_input_percent: inputTokens
+          ? Math.round(Number(usage.cached_input_tokens || 0) / inputTokens * 1000) / 10
+          : null,
+        turn_count: turnCount,
+        models,
+        efforts,
+      };
+    }
+
+    function projectEffortLabel(group) {
+      if (!group.efforts.length) return 'N/A';
+      return group.efforts.length === 1 ? group.efforts[0] : t('mixed');
+    }
+
     function projectGroups() {
       const groups = new Map();
       baseFilteredSessions().forEach(row => {
@@ -5603,13 +5649,11 @@ HTML = r"""<!doctype html>
             environment_id: row.environment_id || '',
             is_remote: Boolean(row.is_remote),
             rows: [],
-            usage: zeroClientUsage(),
             latestTime: 0,
           });
         }
         const group = groups.get(key);
         group.rows.push(row);
-        group.usage = addClientUsage(group.usage, usageOf(row));
         group.latestTime = Math.max(group.latestTime, rowTime(row));
         if (!group.environment && row.environment) group.environment = row.environment;
         if (!group.environment_id && row.environment_id) group.environment_id = row.environment_id;
@@ -5623,6 +5667,7 @@ HTML = r"""<!doctype html>
             if (archivedDelta) return archivedDelta;
             return rowTime(b) - rowTime(a) || String(a.title || '').localeCompare(String(b.title || ''), locale());
           });
+          Object.assign(group, summarizeProjectRows(group.rows));
           return group;
         })
         .sort((a, b) => b.latestTime - a.latestTime || a.label.localeCompare(b.label, locale()));
@@ -6010,6 +6055,8 @@ HTML = r"""<!doctype html>
     function projectHeaderHtml(group) {
       const expanded = isProjectExpanded(group);
       const latest = group.rows[0]?.end_at || group.rows[0]?.updated_at || group.rows[0]?.start_at || '';
+      const effortLabel = projectEffortLabel(group);
+      const modelLabelText = modelLabel(group);
       return `
         <tr class="project-group-row">
           <td class="title-cell">
@@ -6020,14 +6067,18 @@ HTML = r"""<!doctype html>
               </button>
               ${environmentBadge(group)}
             </div>
-          </td>
-          <td class="number" title="${fmt(group.usage.total_tokens)} tokens"><strong>${escapeHtml(fmtCompact(group.usage.total_tokens))}</strong></td>
-          <td class="project-summary-cell" colspan="6">
             <div class="project-meta">
               <span>${escapeHtml(t('projectConversationCount', { count: fmt(group.rows.length) }))}</span>
               <span>${escapeHtml(t('projectLatest', { time: fmtRelativeTime(latest) }))}</span>
             </div>
           </td>
+          <td class="number project-aggregate-cell project-total-cell" title="${fmt(group.usage.total_tokens)} tokens"><strong>${escapeHtml(fmtCompact(group.usage.total_tokens))}</strong></td>
+          <td class="number project-aggregate-cell" title="${fmt(group.usage.output_tokens)} output tokens">${escapeHtml(fmtCompact(group.usage.output_tokens))}</td>
+          <td class="number project-aggregate-cell" title="${escapeHtml(group.price_model_known ? t('priceKnown') : t('priceUnknown'))}">${escapeHtml(fmtUsd(group.estimated_cost_usd))}</td>
+          <td class="number project-aggregate-cell" title="${escapeHtml(fmtPercent(group.cached_input_percent))}">${escapeHtml(fmtPercent(group.cached_input_percent))}</td>
+          <td class="number project-aggregate-cell" title="${fmt(group.turn_count)} ${escapeHtml(t('turns'))}">${escapeHtml(fmt(group.turn_count))}</td>
+          <td class="model-cell project-aggregate-cell" title="${escapeHtml(modelLabelText)}">${escapeHtml(modelLabelText)}</td>
+          <td class="effort-cell project-aggregate-cell" title="${escapeHtml(group.efforts.join(', ') || 'N/A')}">${escapeHtml(effortLabel)}</td>
         </tr>
       `;
     }

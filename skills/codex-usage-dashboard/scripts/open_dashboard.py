@@ -72,6 +72,7 @@ def health_dashboard_url(port: int) -> str | None:
         and "clickable-task-rows-and-gutter-v1" in features
         and "main-agent-title-alignment-v1" in features
         and "compact-subagent-indent-v1" in features
+        and "project-folder-aggregate-columns-v1" in features
         and "fast-rollout-projection-v1" in features
         and "snapshot-detail-token-v1" in features
         and "persistent-parse-cache-v1" in features

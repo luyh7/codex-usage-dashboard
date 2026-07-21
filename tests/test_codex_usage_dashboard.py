@@ -2206,6 +2206,11 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertNotIn("${branchIcon()}${escapeHtml(label)}</span>", html)
         self.assertIn("compactProject", html)
         self.assertIn("archivedDelta", html)
+        self.assertIn("function summarizeProjectRows(rows)", html)
+        self.assertIn('class="number project-aggregate-cell project-total-cell"', html)
+        self.assertIn('class="model-cell project-aggregate-cell"', html)
+        self.assertNotIn('<td class="project-summary-cell" colspan="6">', html)
+        self.assertIn("--project-summary: #2d5fa8;", html)
         self.assertLess(html.index("${folderIcon()}"), html.index('<span class="project-name"'))
         self.assertLess(html.index('<div class="project-title-cell">'), html.index("${environmentBadge(group)}"))
         self.assertLess(html.index("${environmentBadge(group)}"), html.index('<div class="project-meta">'))
@@ -2220,6 +2225,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("clickable-task-rows-and-gutter-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("main-agent-title-alignment-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("compact-subagent-indent-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("project-folder-aggregate-columns-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("function unitPriceTooltip(segments, usageKey, baseTitle = '')", html)
         self.assertIn("function fmtUsdRate(value)", html)
         self.assertIn("String.fromCharCode(10)", html)
@@ -2402,6 +2408,10 @@ class CodexUsageDashboardTests(unittest.TestCase):
             self.assertIsNone(opener.health_dashboard_url(8765))
             opener.urlopen = lambda *_args, **_kwargs: Response(
                 [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "compact-subagent-indent-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "project-folder-aggregate-columns-v1"]
             )
             self.assertIsNone(opener.health_dashboard_url(8765))
         finally:
