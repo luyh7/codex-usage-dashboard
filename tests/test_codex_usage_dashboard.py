@@ -823,7 +823,53 @@ class CodexUsageDashboardTests(unittest.TestCase):
         )
         self.assertIsNone(dashboard.price_for_model("gpt-5.99"))
 
+    def test_grok_4_5_prices_and_long_context_tier(self) -> None:
+        usage = {
+            "input_tokens": 100_000,
+            "cached_input_tokens": 50_000,
+            "output_tokens": 25_000,
+            "total_tokens": 125_000,
+        }
+
+        # Short tier: 50k uncached * $2 + 50k cached * $0.30 + 25k output * $6 = $0.265
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "grok-4.5", "2026-07-24T00:00:00Z"),
+            0.265,
+        )
+        self.assertEqual(
+            dashboard.price_for_model("grok-4.5-latest", "2026-07-24T00:00:00Z"),
+            dashboard.GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS["grok-4.5"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "grok-4.5",
+                "2026-07-24T00:00:00Z",
+                input_tokens=200_000,
+            ),
+            dashboard.GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS["grok-4.5"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "grok-4.5",
+                "2026-07-24T00:00:00Z",
+                input_tokens=200_001,
+            ),
+            dashboard.GROK_4_5_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["grok-4.5"],
+        )
+        long_usage = {
+            "input_tokens": 250_000,
+            "cached_input_tokens": 0,
+            "output_tokens": 10_000,
+            "total_tokens": 260_000,
+        }
+        # Long tier (>200K): 250k * $4 / 1M + 10k * $12 / 1M = $1.12
+        self.assertEqual(
+            dashboard.estimate_cost_usd(long_usage, "grok-4.5", "2026-07-24T00:00:00Z"),
+            1.12,
+        )
+
     def test_auto_review_is_explicitly_zero_cost(self) -> None:
+
         usage = {
             "input_tokens": 1_000,
             "cached_input_tokens": 500,

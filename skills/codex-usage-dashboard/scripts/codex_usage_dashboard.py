@@ -82,13 +82,30 @@ GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6-terra": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 22.50},
     "gpt-5.6-luna": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 9.00},
 }
+# Public xAI API list prices for Grok 4.5 (docs.x.ai).
+# Long-context tier applies to requests that exceed 200K input tokens.
+GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "grok-4.5": {"input": 2.00, "cached_input": 0.30, "output": 6.00},
+}
+GROK_4_5_LONG_CONTEXT_INPUT_THRESHOLD = 200_000
+GROK_4_5_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "grok-4.5": {"input": 4.00, "cached_input": 0.60, "output": 12.00},
+}
 MODEL_PRICES_USD_PER_M_TOKENS = {
     **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
     **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
     **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
 }
 MODEL_PRICE_SCHEDULES = (
-    (None, {**ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS, **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS}),
+    (
+        None,
+        {
+            **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
+            **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
+        },
+    ),
     (GPT_5_6_PRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
 )
 
@@ -336,6 +353,16 @@ def price_entry_for_model(
             long_entry = rate_entry_for_model(
                 model,
                 GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+            )
+            if long_entry is not None:
+                canonical_model, prices = long_entry
+                context_tier = "long"
+    elif canonical_model in GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS:
+        context_tier = "short"
+        if input_tokens is not None and input_tokens > GROK_4_5_LONG_CONTEXT_INPUT_THRESHOLD:
+            long_entry = rate_entry_for_model(
+                model,
+                GROK_4_5_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
             )
             if long_entry is not None:
                 canonical_model, prices = long_entry
