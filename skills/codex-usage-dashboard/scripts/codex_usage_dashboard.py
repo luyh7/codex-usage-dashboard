@@ -302,11 +302,26 @@ def subtract_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int
     return {key: max(int(left.get(key, 0)) - int(right.get(key, 0)), 0) for key in TOKEN_KEYS}
 
 
+def pricing_model_key(model: str) -> str:
+    """Normalize provider-prefixed model ids for price lookup.
+
+    Third-party routers often emit names like ``jws/gpt-5.6-sol`` or
+    ``grok-xyz/grok-4.5``. Price tables key on the bare model name after the
+    final ``/``.
+    """
+    model_key = (model or "").strip().lower()
+    if "/" in model_key:
+        model_key = model_key.rsplit("/", 1)[-1].strip()
+    return model_key
+
+
 def rate_entry_for_model(
     model: str,
     rates: dict[str, dict[str, float]],
 ) -> tuple[str, dict[str, float]] | None:
-    model_key = (model or "").lower()
+    model_key = pricing_model_key(model)
+    if not model_key:
+        return None
     if model_key in rates:
         return model_key, rates[model_key]
     for key in sorted(rates, key=len, reverse=True):

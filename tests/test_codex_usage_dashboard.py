@@ -868,6 +868,56 @@ class CodexUsageDashboardTests(unittest.TestCase):
             1.12,
         )
 
+    def test_provider_prefixed_model_names_match_prices(self) -> None:
+        usage = {
+            "input_tokens": 1_000_000,
+            "cached_input_tokens": 0,
+            "output_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+        }
+        timestamp = "2026-07-24T00:00:00Z"
+
+        self.assertEqual(
+            dashboard.pricing_model_key("jws/gpt-5.6-sol"),
+            "gpt-5.6-sol",
+        )
+        self.assertEqual(
+            dashboard.pricing_model_key("grok-xyz/grok-4.5"),
+            "grok-4.5",
+        )
+        self.assertEqual(
+            dashboard.pricing_model_key("grok-xyz/grok-4.5-latest"),
+            "grok-4.5-latest",
+        )
+        self.assertEqual(
+            dashboard.price_for_model("jws/gpt-5.6-sol", "2026-07-09T17:00:00Z"),
+            dashboard.GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model("grok-xyz/grok-4.5", timestamp),
+            dashboard.GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS["grok-4.5"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model("grok-xyz/grok-4.5-latest", timestamp),
+            dashboard.GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS["grok-4.5"],
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "jws/gpt-5.6-sol", "2026-07-09T17:00:00Z"),
+            dashboard.estimate_cost_usd(usage, "gpt-5.6-sol", "2026-07-09T17:00:00Z"),
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "grok-xyz/grok-4.5", timestamp),
+            dashboard.estimate_cost_usd(usage, "grok-4.5", timestamp),
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "jws/gpt-5.6-sol",
+                "2026-07-09T17:00:00Z",
+                input_tokens=272_001,
+            ),
+            dashboard.GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+        )
+
     def test_auto_review_is_explicitly_zero_cost(self) -> None:
 
         usage = {
