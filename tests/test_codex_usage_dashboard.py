@@ -2358,6 +2358,11 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("main-agent-title-alignment-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("compact-subagent-indent-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("project-folder-aggregate-columns-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("filtered-summary-metrics-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("function summarizeFilteredSessions()", html)
+        self.assertIn("const summary = summarizeFilteredSessions();", html)
+        self.assertIn("const rows = baseFilteredSessions();", html)
+        self.assertNotIn("const usage = state.summary && state.summary.usage", html)
         self.assertIn("function unitPriceTooltip(segments, usageKey, baseTitle = '')", html)
         self.assertIn("function fmtUsdRate(value)", html)
         self.assertIn("String.fromCharCode(10)", html)
@@ -2544,6 +2549,10 @@ class CodexUsageDashboardTests(unittest.TestCase):
             self.assertIsNone(opener.health_dashboard_url(8765))
             opener.urlopen = lambda *_args, **_kwargs: Response(
                 [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "project-folder-aggregate-columns-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "filtered-summary-metrics-v1"]
             )
             self.assertIsNone(opener.health_dashboard_url(8765))
         finally:

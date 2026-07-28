@@ -154,6 +154,7 @@ DASHBOARD_FEATURES = [
     "main-agent-title-alignment-v1",
     "compact-subagent-indent-v1",
     "project-folder-aggregate-columns-v1",
+    "filtered-summary-metrics-v1",
     "fast-rollout-projection-v1",
     "snapshot-detail-token-v1",
     "persistent-parse-cache-v1",
@@ -5466,6 +5467,51 @@ HTML = r"""<!doctype html>
       });
     }
 
+    function summarizeFilteredSessions() {
+      const rows = baseFilteredSessions();
+      let usage = zeroClientUsage();
+      let activeCount = 0;
+      let archivedCount = 0;
+      let estimatedCost = 0;
+      let estimatedCostKnownCount = 0;
+      const environments = new Map();
+
+      rows.forEach(row => {
+        const rowUsage = usageOf(row);
+        usage = addClientUsage(usage, rowUsage);
+        if (row.source === 'active') activeCount += 1;
+        if (row.source === 'archived') archivedCount += 1;
+        if (typeof row.estimated_cost_usd === 'number' && Number.isFinite(row.estimated_cost_usd)) {
+          estimatedCost += row.estimated_cost_usd;
+          estimatedCostKnownCount += 1;
+        }
+
+        const environmentId = row.environment_id || row.environment || 'local';
+        if (!environments.has(environmentId)) {
+          environments.set(environmentId, {
+            id: environmentId,
+            label: row.environment || environmentId,
+            sessions: 0,
+            usage: zeroClientUsage(),
+          });
+        }
+        const environment = environments.get(environmentId);
+        environment.sessions += 1;
+        environment.usage = addClientUsage(environment.usage, rowUsage);
+      });
+
+      return {
+        session_count: rows.length,
+        active_count: activeCount,
+        archived_count: archivedCount,
+        usage,
+        estimated_cost_usd: estimatedCost,
+        estimated_cost_known_count: estimatedCostKnownCount,
+        by_environment: Array.from(environments.values())
+          .sort((left, right) => right.usage.total_tokens - left.usage.total_tokens),
+      };
+    }
+
     function sortSessions(rows) {
       rows.sort((a, b) => {
         let av;
@@ -6011,18 +6057,19 @@ HTML = r"""<!doctype html>
     }
 
     function renderMetrics() {
-      const usage = state.summary && state.summary.usage ? state.summary.usage : {};
-      const environmentRows = state.summary?.by_environment || [];
+      const summary = summarizeFilteredSessions();
+      const usage = summary.usage;
+      const environmentRows = summary.by_environment;
       const environmentHint = environmentRows.length > 1
         ? environmentRows.map(row => `${row.label} ${fmt(row.sessions)}`).join(' · ')
         : '';
       const sessionHint = environmentHint
-        ? t('metricSessionsHintWithEnvs', { active: fmt(state.summary?.active_count || 0), archived: fmt(state.summary?.archived_count || 0), envs: environmentHint })
-        : t('metricSessionsHint', { active: fmt(state.summary?.active_count || 0), archived: fmt(state.summary?.archived_count || 0) });
+        ? t('metricSessionsHintWithEnvs', { active: fmt(summary.active_count), archived: fmt(summary.archived_count), envs: environmentHint })
+        : t('metricSessionsHint', { active: fmt(summary.active_count), archived: fmt(summary.archived_count) });
       const metrics = [
-        [t('metricSessions'), fmt(state.summary?.session_count || 0), sessionHint],
+        [t('metricSessions'), fmt(summary.session_count), sessionHint],
         [t('metricPeriodTotalTokens', { period: periodLabel() }), fmtCompact(usage.total_tokens), fmt(usage.total_tokens)],
-        [t('metricCost'), fmtUsd(state.summary?.estimated_cost_usd), t('metricCostHint', { count: fmt(state.summary?.estimated_cost_known_count || 0) })],
+        [t('metricCost'), fmtUsd(summary.estimated_cost_usd), t('metricCostHint', { count: fmt(summary.estimated_cost_known_count) })],
         [t('metricInput'), fmtCompact(usage.input_tokens), fmt(usage.input_tokens)],
         [t('metricCached'), fmtCompact(usage.cached_input_tokens), fmt(usage.cached_input_tokens)],
         [t('metricOutput'), fmtCompact(usage.output_tokens), fmt(usage.output_tokens)],
