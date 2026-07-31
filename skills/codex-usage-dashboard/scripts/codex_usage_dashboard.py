@@ -68,20 +68,40 @@ LEGACY_MODEL_PRICES_USD_PER_M_TOKENS = {
 
 # 2026-07-10 01:00 in Asia/Shanghai.
 GPT_5_6_PRICING_EFFECTIVE_AT = dt.datetime(2026, 7, 9, 17, 0, 0, tzinfo=dt.UTC)
-GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS = {
+GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
     "gpt-5.6-sol": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
     "gpt-5.6-terra": {"input": 2.50, "cached_input": 0.25, "cache_write_input": 3.125, "output": 15.00},
     "gpt-5.6-luna": {"input": 1.00, "cached_input": 0.10, "cache_write_input": 1.25, "output": 6.00},
 }
+# OpenAI's changelog dates the Terra/Luna reduction to July 30. Use the
+# pricing Markdown's Last-Modified time as the exact boundary: 2026-07-31
+# 00:38:10 UTC (2026-07-31 08:38:10 in Asia/Shanghai).
+GPT_5_6_REPRICING_EFFECTIVE_AT = dt.datetime(2026, 7, 31, 0, 38, 10, tzinfo=dt.UTC)
+GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
+    "gpt-5.6-sol": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
+    "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 12.00},
+    "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "cache_write_input": 0.25, "output": 1.20},
+}
 # The long-context tier applies to the full request above 272K input tokens.
 GPT_5_6_LONG_CONTEXT_INPUT_THRESHOLD = 272_000
-GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
     "gpt-5.6-sol": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
     "gpt-5.6-terra": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 22.50},
     "gpt-5.6-luna": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 9.00},
 }
+GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
+    "gpt-5.6-sol": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
+    "gpt-5.6-terra": {"input": 4.00, "cached_input": 0.40, "cache_write_input": 5.00, "output": 18.00},
+    "gpt-5.6-luna": {"input": 0.40, "cached_input": 0.04, "cache_write_input": 0.50, "output": 1.80},
+}
+GPT_5_6_LONG_CONTEXT_PRICE_SCHEDULES = (
+    (GPT_5_6_PRICING_EFFECTIVE_AT, GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS),
+    (GPT_5_6_REPRICING_EFFECTIVE_AT, GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS),
+)
 # Public xAI API list prices for Grok 4.5 (docs.x.ai).
 # Long-context tier applies to requests that exceed 200K input tokens.
 GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS = {
@@ -97,6 +117,12 @@ MODEL_PRICES_USD_PER_M_TOKENS = {
     **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
     **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
 }
+GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS = {
+    **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
+    **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
+}
 MODEL_PRICE_SCHEDULES = (
     (
         None,
@@ -106,7 +132,8 @@ MODEL_PRICE_SCHEDULES = (
             **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
         },
     ),
-    (GPT_5_6_PRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
+    (GPT_5_6_PRICING_EFFECTIVE_AT, GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS),
+    (GPT_5_6_REPRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
 )
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
@@ -352,6 +379,38 @@ def price_schedule_at(timestamp: Any = None) -> tuple[dt.datetime | None, dict[s
     return MODEL_PRICE_SCHEDULES[0]
 
 
+def gpt_5_6_long_context_rates_at(
+    effective_at: dt.datetime | None,
+) -> dict[str, dict[str, float]]:
+    for starts_at, rates in reversed(GPT_5_6_LONG_CONTEXT_PRICE_SCHEDULES):
+        if effective_at is None or effective_at >= starts_at:
+            return rates
+    return GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS
+
+
+def model_rate_effective_at(
+    model: str,
+    selected_effective_at: dt.datetime | None,
+    selected_prices: dict[str, float],
+    schedules: tuple[tuple[dt.datetime | None, dict[str, dict[str, float]]], ...],
+) -> dt.datetime | None:
+    selected_index = next(
+        (
+            index
+            for index, (effective_at, _rates) in enumerate(schedules)
+            if effective_at == selected_effective_at
+        ),
+        len(schedules) - 1,
+    )
+    rate_effective_at = selected_effective_at
+    for earlier_effective_at, earlier_rates in reversed(schedules[:selected_index]):
+        earlier_entry = rate_entry_for_model(model, earlier_rates)
+        if earlier_entry is None or earlier_entry[1] != selected_prices:
+            break
+        rate_effective_at = earlier_effective_at
+    return rate_effective_at
+
+
 def price_entry_for_model(
     model: str,
     timestamp: Any = None,
@@ -362,16 +421,28 @@ def price_entry_for_model(
     if not entry:
         return None
     canonical_model, prices = entry
+    rate_effective_at = model_rate_effective_at(
+        model,
+        effective_at,
+        prices,
+        MODEL_PRICE_SCHEDULES,
+    )
     context_tier = None
     if canonical_model in GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS:
         context_tier = "short"
         if input_tokens is not None and input_tokens > GPT_5_6_LONG_CONTEXT_INPUT_THRESHOLD:
             long_entry = rate_entry_for_model(
                 model,
-                GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+                gpt_5_6_long_context_rates_at(effective_at),
             )
             if long_entry is not None:
                 canonical_model, prices = long_entry
+                rate_effective_at = model_rate_effective_at(
+                    model,
+                    effective_at,
+                    prices,
+                    GPT_5_6_LONG_CONTEXT_PRICE_SCHEDULES,
+                )
                 context_tier = "long"
     elif canonical_model in GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS:
         context_tier = "short"
@@ -385,7 +456,7 @@ def price_entry_for_model(
                 context_tier = "long"
     return {
         "model": canonical_model,
-        "effective_at": utc_iso(effective_at) if effective_at is not None else None,
+        "effective_at": utc_iso(rate_effective_at) if rate_effective_at is not None else None,
         "context_tier": context_tier,
         "prices": prices,
     }
@@ -2731,6 +2802,15 @@ class CodexUsageAnalyzer:
                     "project_branch": project_info.project_branch,
                     "is_git_worktree": project_info.is_git_worktree,
                 }
+            )
+            timeline = detail.get("timeline")
+            detail.update(
+                pricing_for_timeline(
+                    timeline if isinstance(timeline, list) else [],
+                    str(detail.get("model") or ""),
+                    normalize_usage(detail.get("total_token_usage")),
+                    detail.get("end_at"),
+                )
             )
             summary.update({key: detail.get(key) for key in SUMMARY_KEYS})
             local_rows.append((summary, detail))

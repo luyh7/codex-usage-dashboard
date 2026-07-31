@@ -784,7 +784,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
                 "2026-07-09T17:00:00Z",
                 input_tokens=272_000,
             ),
-            dashboard.GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+            dashboard.GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
         )
         self.assertEqual(
             dashboard.price_for_model(
@@ -792,7 +792,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
                 "2026-07-09T17:00:00Z",
                 input_tokens=272_001,
             ),
-            dashboard.GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+            dashboard.GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
         )
 
         legacy_usage = {
@@ -822,6 +822,58 @@ class CodexUsageDashboardTests(unittest.TestCase):
             2.5,
         )
         self.assertIsNone(dashboard.price_for_model("gpt-5.99"))
+
+    def test_gpt_5_6_terra_luna_repricing_uses_docs_update_time(self) -> None:
+        before_update = "2026-07-31T00:38:09.999999Z"
+        at_update = "2026-07-31T00:38:10Z"
+        usage = {
+            "input_tokens": 3_000_000,
+            "cached_input_tokens": 1_000_000,
+            "cache_write_tokens": 1_000_000,
+            "output_tokens": 1_000_000,
+            "total_tokens": 4_000_000,
+        }
+
+        self.assertEqual(
+            dashboard.price_for_model("gpt-5.6-terra", before_update),
+            dashboard.GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-terra"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model("gpt-5.6-luna", before_update),
+            dashboard.GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-luna"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model("gpt-5.6-terra", at_update),
+            dashboard.GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-terra"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model("gpt-5.6-luna", at_update),
+            dashboard.GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-luna"],
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.6-terra", before_update),
+            34.25,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.6-terra", at_update),
+            27.4,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.6-luna", before_update),
+            13.7,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.6-luna", at_update),
+            2.74,
+        )
+        self.assertEqual(
+            dashboard.price_entry_for_model("gpt-5.6-terra", at_update)["effective_at"],
+            at_update,
+        )
+        self.assertEqual(
+            dashboard.price_entry_for_model("gpt-5.6-sol", at_update)["effective_at"],
+            "2026-07-09T17:00:00Z",
+        )
 
     def test_grok_4_5_prices_and_long_context_tier(self) -> None:
         usage = {
@@ -891,7 +943,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
         )
         self.assertEqual(
             dashboard.price_for_model("jws/gpt-5.6-sol", "2026-07-09T17:00:00Z"),
-            dashboard.GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+            dashboard.GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
         )
         self.assertEqual(
             dashboard.price_for_model("grok-xyz/grok-4.5", timestamp),
@@ -915,7 +967,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
                 "2026-07-09T17:00:00Z",
                 input_tokens=272_001,
             ),
-            dashboard.GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+            dashboard.GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
         )
 
     def test_auto_review_is_explicitly_zero_cost(self) -> None:
@@ -1914,6 +1966,81 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(snapshot["summary"]["session_count"], 1)
         self.assertEqual(second.cache_metrics["persistent_hits"], 0)
         self.assertEqual(second.cache_metrics["full_parses"], 1)
+
+    def test_persistent_cache_rows_are_repriced_from_their_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_home = root / ".codex"
+            cache_path = root / "cache" / "parsed-files.sqlite3"
+            usage = {
+                "input_tokens": 1_000_000,
+                "output_tokens": 1_000_000,
+                "total_tokens": 2_000_000,
+            }
+            self.write_rollout_rows(
+                codex_home,
+                "repriced-cache-session",
+                [
+                    {
+                        "timestamp": "2026-07-31T01:00:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": "repriced-cache-session",
+                            "cwd": "/work/repriced-cache",
+                            "model": "gpt-5.6-terra",
+                        },
+                    },
+                    {
+                        "timestamp": "2026-07-31T01:01:00Z",
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "token_count",
+                            "info": {
+                                "total_token_usage": usage,
+                                "last_token_usage": usage,
+                            },
+                        },
+                    },
+                ],
+            )
+            first = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            first.scan("all")
+            cached_source, cached_path, cached_kind = first.iter_session_files()[0]
+            cache_key = first.file_cache_key(cached_source, cached_path, cached_kind)
+            first.close()
+
+            cache = dashboard.PersistentParseCache(cache_path)
+            entry = cache.get(cache_key)
+            assert entry is not None
+            entry.summary["estimated_cost_usd"] = 999.0
+            entry.detail["estimated_cost_usd"] = 999.0
+            entry.detail["applied_price_segments"] = []
+            cache.put(cache_key, entry)
+            cache.close()
+
+            second = dashboard.CodexUsageAnalyzer(
+                codex_home,
+                persistent_cache=dashboard.PersistentParseCache(cache_path),
+            )
+            snapshot = second.scan("all")
+            second.close()
+
+        summary = snapshot["sessions"][0]
+        detail = snapshot["details_by_uid"][summary["uid"]]
+        self.assertEqual(second.cache_metrics["persistent_hits"], 1)
+        self.assertEqual(summary["estimated_cost_usd"], 22.0)
+        self.assertEqual(detail["estimated_cost_usd"], 22.0)
+        self.assertEqual(
+            detail["applied_price_segments"][0]["effective_at"],
+            "2026-07-31T00:38:10Z",
+        )
+        self.assertEqual(
+            detail["applied_price_segments"][0]["prices"],
+            dashboard.GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-terra"],
+        )
 
     def test_persistent_cache_prunes_files_missing_from_full_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
