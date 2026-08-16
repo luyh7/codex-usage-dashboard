@@ -5273,6 +5273,23 @@ HTML = r"""<!doctype html>
       return String(value);
     }
 
+    function fmtCalendarTokens(n) {
+      const value = Number(n || 0);
+      if (value >= 1000000000) {
+        const compact = value / 1000000000;
+        return (compact > 10 ? Math.round(compact) : compact.toFixed(2)) + 'B';
+      }
+      if (value >= 1000000) {
+        const compact = value / 1000000;
+        return (compact > 10 ? Math.round(compact) : compact.toFixed(2)) + 'M';
+      }
+      if (value >= 1000) {
+        const compact = value / 1000;
+        return (compact > 10 ? Math.round(compact) : compact.toFixed(1)) + 'K';
+      }
+      return String(value);
+    }
+
     function fmtDate(value) {
       if (!value) return '';
       const date = new Date(value);
@@ -6106,7 +6123,7 @@ HTML = r"""<!doctype html>
         days.push(`
           <button class="${classes}" type="button" data-calendar-date="${key}" ${disabled}>
             <span>${date.getDate()}</span>
-            ${tokens ? `<span class="calendar-usage">${escapeHtml(fmtCompact(tokens))}</span>` : ''}
+            ${tokens ? `<span class="calendar-usage">${escapeHtml(fmtCalendarTokens(tokens))}</span>` : ''}
           </button>
         `);
       }
