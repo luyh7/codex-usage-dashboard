@@ -187,6 +187,7 @@ DASHBOARD_FEATURES = [
     "persistent-parse-cache-v1",
     "append-resume-v1",
     "parallel-cold-parse-v1",
+    "continued-rollout-merge-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -561,8 +562,16 @@ def timeline_rows_with_deltas(
 
     result: list[tuple[dict[str, Any], dt.datetime, dict[str, int], dict[str, int]]] = []
     previous_usage = zero_usage()
-    for row, timestamp in rows:
+    for index, (row, timestamp) in enumerate(rows):
         cumulative_usage = normalize_usage(row.get("total_token_usage"))
+        if index == 0 and isinstance(row.get("last_token_usage"), dict):
+            explicit_last_usage = normalize_usage(row.get("last_token_usage"))
+            inferred_baseline = subtract_usage(cumulative_usage, explicit_last_usage)
+            if (
+                usage_has_tokens(explicit_last_usage)
+                and add_usage(inferred_baseline, explicit_last_usage) == cumulative_usage
+            ):
+                previous_usage = inferred_baseline
         delta_usage = timeline_usage_delta(cumulative_usage, previous_usage)
         previous_usage = cumulative_usage
         result.append((row, timestamp, cumulative_usage, delta_usage))
@@ -2416,7 +2425,10 @@ class CodexUsageAnalyzer:
         all_files: list[tuple[CodexLogSource, Path, str]],
     ) -> list[tuple[CodexLogSource, Path, str]]:
         metadata_by_path: dict[str, dict[str, Any]] = {}
-        files_by_thread: dict[tuple[str, str], tuple[CodexLogSource, Path, str]] = {}
+        files_by_thread: dict[
+            tuple[str, str],
+            list[tuple[CodexLogSource, Path, str]],
+        ] = {}
         for item in all_files:
             log_source, path, _source = item
             path_key = self.resolved_path_key(path)
@@ -2424,26 +2436,359 @@ class CodexUsageAnalyzer:
             metadata_by_path[path_key] = payload
             session_id = payload.get("id") or payload.get("session_id")
             if isinstance(session_id, str) and session_id:
-                files_by_thread.setdefault((log_source.id, session_id), item)
+                files_by_thread.setdefault((log_source.id, session_id), []).append(item)
 
         selected = {self.resolved_path_key(item[1]): item for item in candidates}
         queue = list(candidates)
         while queue:
             log_source, path, _source = queue.pop()
             payload = metadata_by_path.get(self.resolved_path_key(path), {})
+            session_id = payload.get("id") or payload.get("session_id")
+            if isinstance(session_id, str) and session_id:
+                for sibling in files_by_thread.get((log_source.id, session_id), []):
+                    sibling_key = self.resolved_path_key(sibling[1])
+                    if sibling_key in selected:
+                        continue
+                    selected[sibling_key] = sibling
+                    queue.append(sibling)
+
             forked_from_id = payload.get("forked_from_id")
             if not isinstance(forked_from_id, str) or not forked_from_id:
                 continue
-            dependency = files_by_thread.get((log_source.id, forked_from_id))
-            if dependency is None:
-                continue
-            dependency_key = self.resolved_path_key(dependency[1])
-            if dependency_key in selected:
-                continue
-            selected[dependency_key] = dependency
-            queue.append(dependency)
+            for dependency in files_by_thread.get((log_source.id, forked_from_id), []):
+                dependency_key = self.resolved_path_key(dependency[1])
+                if dependency_key in selected:
+                    continue
+                selected[dependency_key] = dependency
+                queue.append(dependency)
 
         return [item for item in all_files if self.resolved_path_key(item[1]) in selected]
+
+    @staticmethod
+    def merge_continued_session_fragments(
+        local_rows: list[tuple[dict[str, Any], dict[str, Any]]],
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        grouped: dict[
+            tuple[str, str],
+            list[tuple[dict[str, Any], dict[str, Any]]],
+        ] = {}
+        group_order: list[tuple[str, str]] = []
+        for summary, detail in local_rows:
+            environment_id = str(detail.get("environment_id") or "")
+            session_id = str(detail.get("session_id") or "")
+            key = (
+                environment_id,
+                session_id or f"uid:{detail.get('uid') or id(detail)}",
+            )
+            if key not in grouped:
+                grouped[key] = []
+                group_order.append(key)
+            grouped[key].append((summary, detail))
+
+        def detail_moment(detail: dict[str, Any]) -> dt.datetime:
+            timeline = detail.get("timeline")
+            if isinstance(timeline, list):
+                for row in timeline:
+                    if isinstance(row, dict):
+                        parsed = parse_timestamp(row.get("timestamp"))
+                        if parsed is not None:
+                            return parsed
+            for field in ("created_at", "start_at", "end_at"):
+                parsed = parse_timestamp(detail.get(field))
+                if parsed is not None:
+                    return parsed
+            return dt.datetime.max.replace(tzinfo=dt.UTC)
+
+        def timestamp_field(
+            details: list[dict[str, Any]],
+            field: str,
+            latest: bool = False,
+        ) -> str:
+            candidates = [
+                (parsed, str(detail.get(field)))
+                for detail in details
+                if (parsed := parse_timestamp(detail.get(field))) is not None
+            ]
+            if not candidates:
+                return ""
+            return (max if latest else min)(candidates, key=lambda item: item[0])[1]
+
+        merged_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for key in group_order:
+            fragments = grouped[key]
+            if len(fragments) == 1:
+                merged_rows.append(fragments[0])
+                continue
+
+            fragments.sort(
+                key=lambda item: (
+                    detail_moment(item[1]),
+                    str(item[1].get("path") or ""),
+                )
+            )
+            details = [detail for _summary, detail in fragments]
+            first_summary, first_detail = fragments[0]
+            latest_detail = fragments[-1][1]
+            merged = dict(first_detail)
+
+            timeline_items: list[tuple[dt.datetime, int, dict[str, Any]]] = []
+            seen_timeline: set[tuple[Any, ...]] = set()
+            sequence = 0
+            for detail in details:
+                timeline = detail.get("timeline")
+                if not isinstance(timeline, list):
+                    continue
+                for row in timeline:
+                    if not isinstance(row, dict):
+                        continue
+                    timestamp = parse_timestamp(row.get("timestamp"))
+                    fingerprint = (
+                        str(row.get("timestamp") or ""),
+                        str(row.get("model") or ""),
+                        timeline_usage_fingerprint(row),
+                    )
+                    if fingerprint in seen_timeline:
+                        continue
+                    seen_timeline.add(fingerprint)
+                    timeline_items.append(
+                        (
+                            timestamp or dt.datetime.max.replace(tzinfo=dt.UTC),
+                            sequence,
+                            row,
+                        )
+                    )
+                    sequence += 1
+            timeline_items.sort(key=lambda item: (item[0], item[1]))
+            timeline = [dict(item[2]) for item in timeline_items]
+
+            task_items: list[tuple[dt.datetime, int, dict[str, Any]]] = []
+            seen_tasks: set[tuple[Any, ...]] = set()
+            sequence = 0
+            for detail in details:
+                tasks = detail.get("tasks")
+                if not isinstance(tasks, list):
+                    continue
+                for task in tasks:
+                    if not isinstance(task, dict):
+                        continue
+                    task_key = (
+                        str(task.get("timestamp") or ""),
+                        str(task.get("turn_id") or ""),
+                        task.get("duration_ms"),
+                        task.get("time_to_first_token_ms"),
+                    )
+                    if task_key in seen_tasks:
+                        continue
+                    seen_tasks.add(task_key)
+                    task_items.append(
+                        (
+                            parse_timestamp(task.get("timestamp"))
+                            or dt.datetime.max.replace(tzinfo=dt.UTC),
+                            sequence,
+                            task,
+                        )
+                    )
+                    sequence += 1
+            task_items.sort(key=lambda item: (item[0], item[1]))
+            tasks = [dict(item[2]) for item in task_items]
+
+            tool_counts: dict[str, int] = {}
+            for detail in details:
+                counts = detail.get("tool_counts")
+                if not isinstance(counts, dict):
+                    continue
+                for name, count in counts.items():
+                    if isinstance(count, (int, float)):
+                        tool_counts[str(name)] = tool_counts.get(str(name), 0) + int(count)
+
+            turn_ids = {
+                str(turn_id)
+                for detail in details
+                for turn_id in (
+                    detail.get("_turn_ids")
+                    if isinstance(detail.get("_turn_ids"), list)
+                    else []
+                )
+                if isinstance(turn_id, str)
+            }
+            durations_ms = [
+                int(task["duration_ms"])
+                for task in tasks
+                if isinstance(task.get("duration_ms"), (int, float))
+            ]
+            ttf_ms = [
+                int(task["time_to_first_token_ms"])
+                for task in tasks
+                if isinstance(task.get("time_to_first_token_ms"), (int, float))
+            ]
+
+            latest_fields = (
+                "path",
+                "cwd",
+                "project",
+                "project_root",
+                "workspace_root",
+                "project_branch",
+                "is_git_worktree",
+                "model",
+                "effort",
+                "originator",
+                "cli_version",
+                "model_context_window",
+                "latest_rate_limits",
+                "latest_plan_type",
+                "latest_rate_limit_reached_type",
+                "last_agent_preview",
+                "_raw_end_at",
+            )
+            for field in latest_fields:
+                merged[field] = latest_detail.get(field)
+
+            merged["source"] = (
+                "active"
+                if any(detail.get("source") == "active" for detail in details)
+                else latest_detail.get("source")
+            )
+            merged["file_size"] = sum(int(detail.get("file_size") or 0) for detail in details)
+            merged["line_count"] = sum(int(detail.get("line_count") or 0) for detail in details)
+            merged["parse_errors"] = sum(int(detail.get("parse_errors") or 0) for detail in details)
+            merged["fast_skipped_line_count"] = sum(
+                int(detail.get("fast_skipped_line_count") or 0) for detail in details
+            )
+            merged["fast_skipped_bytes"] = sum(
+                int(detail.get("fast_skipped_bytes") or 0) for detail in details
+            )
+            merged["user_message_count"] = sum(
+                int(detail.get("user_message_count") or 0) for detail in details
+            )
+            merged["assistant_message_count"] = sum(
+                int(detail.get("assistant_message_count") or 0) for detail in details
+            )
+            merged["created_at"] = timestamp_field(details, "created_at")
+            merged["start_at"] = timestamp_field(details, "start_at")
+            merged["end_at"] = timestamp_field(details, "end_at", latest=True)
+            merged["updated_at"] = timestamp_field(details, "updated_at", latest=True)
+            merged["_raw_created_at"] = timestamp_field(details, "_raw_created_at")
+            merged["_raw_start_at"] = timestamp_field(details, "_raw_start_at")
+            merged["timeline"] = timeline
+            merged["tasks"] = tasks
+            merged["tool_counts"] = dict(
+                sorted(tool_counts.items(), key=lambda item: item[1], reverse=True)
+            )
+            merged["_turn_ids"] = sorted(turn_ids)
+            merged["models"] = unique_models(
+                *[detail.get("models") for detail in details],
+                timeline,
+                merged.get("model"),
+            )
+            merged["token_event_count"] = len(timeline)
+            merged["turn_count"] = len(turn_ids) or len(tasks) or len(timeline)
+            merged["completed_turn_count"] = len(tasks)
+            merged["duration_ms_total"] = sum(durations_ms)
+            merged["duration_ms_avg"] = (
+                int(sum(durations_ms) / len(durations_ms)) if durations_ms else None
+            )
+            merged["time_to_first_token_ms_avg"] = (
+                int(sum(ttf_ms) / len(ttf_ms)) if ttf_ms else None
+            )
+            merged["first_user_prompt"] = next(
+                (
+                    str(detail.get("first_user_prompt"))
+                    for detail in details
+                    if detail.get("first_user_prompt")
+                ),
+                "",
+            )
+
+            if timeline:
+                merged["total_token_usage"] = normalize_usage(
+                    timeline[-1].get("total_token_usage")
+                )
+                merged["last_token_usage"] = normalize_usage(
+                    timeline[-1].get("last_token_usage")
+                )
+                merged["branch_total_token_usage"] = dict(merged["total_token_usage"])
+                merged["model"] = str(timeline[-1].get("model") or merged.get("model") or "")
+                merged["model_context_window"] = timeline[-1].get("model_context_window")
+                merged["latest_rate_limits"] = timeline[-1].get("rate_limits")
+
+            input_tokens = int(merged["total_token_usage"].get("input_tokens", 0))
+            merged["cached_input_percent"] = (
+                round(
+                    int(merged["total_token_usage"].get("cached_input_tokens", 0))
+                    / input_tokens
+                    * 100,
+                    1,
+                )
+                if input_tokens
+                else None
+            )
+            merged.update(
+                pricing_for_timeline(
+                    timeline,
+                    str(merged.get("model") or ""),
+                    normalize_usage(merged.get("total_token_usage")),
+                    merged.get("end_at"),
+                )
+            )
+            merged_summary = dict(first_summary)
+            merged_summary.update({field: merged.get(field) for field in SUMMARY_KEYS})
+            merged_rows.append((merged_summary, merged))
+
+        return merged_rows
+
+    @staticmethod
+    def normalize_main_session_usage(
+        local_rows: list[tuple[dict[str, Any], dict[str, Any]]],
+    ) -> None:
+        for summary, detail in local_rows:
+            if detail.get("is_subagent") or detail.get("forked_from_id"):
+                continue
+            timeline = detail.get("timeline")
+            if not isinstance(timeline, list) or not timeline:
+                continue
+
+            normalized_timeline: list[dict[str, Any]] = []
+            total_usage = zero_usage()
+            last_usage = zero_usage()
+            for row, _timestamp, _cumulative_usage, delta_usage in timeline_rows_with_deltas(
+                timeline
+            ):
+                total_usage = add_usage(total_usage, delta_usage)
+                last_usage = delta_usage
+                normalized_row = dict(row)
+                normalized_row["total_token_usage"] = dict(total_usage)
+                normalized_row["last_token_usage"] = dict(delta_usage)
+                normalized_timeline.append(normalized_row)
+
+            detail["timeline"] = normalized_timeline
+            detail["total_token_usage"] = total_usage
+            detail["last_token_usage"] = last_usage
+            detail["branch_total_token_usage"] = dict(total_usage)
+            detail["token_event_count"] = len(normalized_timeline)
+            detail["model"] = str(
+                normalized_timeline[-1].get("model") or detail.get("model") or ""
+            )
+            detail["models"] = unique_models(
+                detail.get("models"),
+                normalized_timeline,
+                detail.get("model"),
+            )
+            input_tokens = int(total_usage.get("input_tokens", 0))
+            detail["cached_input_percent"] = (
+                round(int(total_usage.get("cached_input_tokens", 0)) / input_tokens * 100, 1)
+                if input_tokens
+                else None
+            )
+            detail.update(
+                pricing_for_timeline(
+                    normalized_timeline,
+                    str(detail.get("model") or ""),
+                    total_usage,
+                    normalized_timeline[-1].get("timestamp"),
+                )
+            )
+            summary.update({field: detail.get(field) for field in SUMMARY_KEYS})
 
     @staticmethod
     def normalize_subagent_usage(
@@ -2786,9 +3131,6 @@ class CodexUsageAnalyzer:
             cached_summary, cached_detail = parsed
             summary = dict(cached_summary)
             detail = dict(cached_detail)
-            for key in tuple(detail):
-                if key.startswith("_"):
-                    detail.pop(key, None)
             project_info = self.project_info_for_cwd(str(detail.get("cwd") or ""))
             detail.update(
                 {
@@ -2820,9 +3162,14 @@ class CodexUsageAnalyzer:
             self._pending_persistent_entries.clear()
             self.persistent_cache.put_many(pending)
 
+        local_rows = self.merge_continued_session_fragments(local_rows)
+        self.normalize_main_session_usage(local_rows)
         self.normalize_subagent_usage(local_rows)
 
         for summary, detail in local_rows:
+            for key in tuple(detail):
+                if key.startswith("_"):
+                    detail.pop(key, None)
             session_id = summary.get("session_id")
             titles = titles_by_source.get(str(summary.get("environment_id") or ""), {})
             if isinstance(session_id, str) and session_id in titles:

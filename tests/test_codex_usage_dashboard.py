@@ -302,6 +302,107 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(summary["title"], expected)
         self.assertEqual(detail["first_user_prompt"], expected)
 
+    def test_scan_merges_continued_rollout_files_for_the_same_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            sessions_dir = codex_home / "sessions"
+            sessions_dir.mkdir(parents=True)
+            session_id = "continued-session"
+
+            first_path = sessions_dir / f"rollout-2026-07-10T10-00-00-{session_id}.jsonl"
+            first_rows = [
+                {
+                    "timestamp": "2026-07-10T10:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": session_id,
+                        "cwd": "/work/continued-session",
+                        "model": "gpt-5",
+                    },
+                },
+                self.total_only_token_event("2026-07-10T10:01:00Z", 100, 100),
+                self.total_only_token_event("2026-07-10T10:02:00Z", 250, 150),
+            ]
+            first_path.write_text(
+                "\n".join(json.dumps(row) for row in first_rows),
+                encoding="utf-8",
+            )
+
+            continued_path = sessions_dir / (
+                f"rollout-2026-07-10T11-00-00-{session_id}_continuation.jsonl"
+            )
+            continued_rows = [
+                {
+                    "timestamp": "2026-07-10T11:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": session_id,
+                        "cwd": "/work/continued-session",
+                        "model": "gpt-5",
+                    },
+                },
+                self.total_only_token_event("2026-07-10T11:01:00Z", 310, 60),
+                self.total_only_token_event("2026-07-10T11:02:00Z", 400, 90),
+            ]
+            continued_path.write_text(
+                "\n".join(json.dumps(row) for row in continued_rows),
+                encoding="utf-8",
+            )
+
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            snapshot = analyzer.scan()
+
+            all_files = analyzer.iter_session_files()
+            continued_candidate = next(
+                item for item in all_files if item[1] == continued_path
+            )
+            dependent_files = analyzer.files_with_fork_dependencies(
+                [continued_candidate],
+                all_files,
+            )
+            standalone_snapshot = analyzer.build_snapshot(
+                [continued_candidate],
+                include_remotes=False,
+            )
+
+            self.assertEqual(snapshot["summary"]["session_count"], 1)
+            self.assertEqual(snapshot["summary"]["usage"]["total_tokens"], 400)
+            self.assertEqual(
+                {item[1] for item in dependent_files},
+                {first_path, continued_path},
+            )
+            self.assertEqual(
+                standalone_snapshot["summary"]["usage"]["total_tokens"],
+                150,
+            )
+            standalone_session = standalone_snapshot["sessions"][0]
+            standalone_detail = standalone_snapshot["details_by_uid"][
+                standalone_session["uid"]
+            ]
+            self.assertEqual(
+                standalone_detail["timeline"][0]["last_token_usage"]["total_tokens"],
+                60,
+            )
+            session = snapshot["sessions"][0]
+            detail = snapshot["details_by_uid"][session["uid"]]
+            self.assertEqual(session["total_token_usage"]["total_tokens"], 400)
+            self.assertEqual(detail["token_event_count"], 4)
+            self.assertEqual(
+                [row["last_token_usage"]["total_tokens"] for row in detail["timeline"]],
+                [100, 150, 60, 90],
+            )
+
+            continued_period = analyzer.detail_for_period(
+                detail,
+                dashboard.parse_timestamp("2026-07-10T11:00:00Z"),
+                dashboard.parse_timestamp("2026-07-10T12:00:00Z"),
+            )
+            self.assertEqual(continued_period["total_token_usage"]["total_tokens"], 150)
+            self.assertEqual(
+                continued_period["timeline"][0]["last_token_usage"]["total_tokens"],
+                60,
+            )
+
     def test_scan_skips_unused_large_payloads_without_changing_session_results(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir) / ".codex"
