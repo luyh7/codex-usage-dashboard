@@ -160,6 +160,13 @@ DASHBOARD_FEATURES = [
     "period-token-label",
     "all-period",
     "calendar-range-v2",
+    "calendar-month-year-picker-v1",
+    "calendar-month-year-token-totals-v1",
+    "calendar-incomplete-total-spinner-v1",
+    "calendar-incomplete-day-spinner-v1",
+    "calendar-per-day-load-state-v1",
+    "calendar-month-year-range-apply-v1",
+    "calendar-view-default-range-v1",
     "multi-codex-home",
     "wsl-windows-autodiscovery",
     "windows-cwd-folder-name",
@@ -4257,9 +4264,28 @@ HTML = r"""<!doctype html>
       margin-bottom: 10px;
     }
     .calendar-title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
       text-align: center;
       font-weight: 750;
       font-size: 14px;
+    }
+    .calendar-title-button {
+      min-height: 32px;
+      padding: 0 4px;
+      border: 0;
+      background: transparent;
+      font: inherit;
+    }
+    .calendar-title-button:hover {
+      background: var(--soft);
+    }
+    .calendar-title-caret {
+      margin-left: 2px;
+      color: var(--muted);
+      font-size: 10px;
     }
     .calendar-actions {
       grid-template-columns: 1fr 1fr;
@@ -4269,6 +4295,84 @@ HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: repeat(7, minmax(0, 1fr));
       gap: 4px;
+    }
+    .calendar-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-auto-rows: 64px;
+      align-content: center;
+      gap: 6px;
+      min-height: 295px;
+    }
+    .calendar-picker-option {
+      display: grid;
+      grid-template-rows: 18px 15px;
+      align-content: center;
+      gap: 3px;
+      min-width: 0;
+      padding: 0 6px;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .calendar-picker-option.in-range {
+      border-color: #99c9bb;
+      background: #eef8f4;
+    }
+    .calendar-picker-option.selected {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    .calendar-picker-option:disabled {
+      color: #b8c0bd;
+      cursor: default;
+      background: #f8faf9;
+    }
+    .calendar-picker-usage {
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .calendar-picker-option.selected .calendar-picker-usage {
+      color: rgba(255, 255, 255, 0.84);
+    }
+    .calendar-picker-spinner {
+      box-sizing: border-box;
+      width: 12px;
+      height: 12px;
+      flex: none;
+      border-width: 2px;
+      border-color: rgba(99, 116, 109, 0.25);
+      border-top-color: currentColor;
+    }
+    .calendar-picker-option.selected .calendar-picker-spinner {
+      border-color: rgba(255, 255, 255, 0.3);
+      border-top-color: currentColor;
+    }
+    .calendar-day-spinner {
+      box-sizing: border-box;
+      width: 12px;
+      height: 12px;
+      justify-self: center;
+      flex: none;
+      border-width: 2px;
+      border-color: rgba(99, 116, 109, 0.25);
+      border-top-color: currentColor;
+    }
+    .calendar-day.range-edge .calendar-day-spinner {
+      border-color: rgba(255, 255, 255, 0.3);
+      border-top-color: currentColor;
+    }
+    .calendar-day-loading {
+      display: grid;
+      place-items: center;
     }
     .calendar-weekday {
       color: var(--muted);
@@ -5123,12 +5227,15 @@ HTML = r"""<!doctype html>
       periodCache: new Map(),
       dailyUsage: [],
       dailyUsageComplete: false,
+      dailyUsageLoadedDates: new Set(),
       dailyUsageLoading: false,
       remotes: [],
       currentDeviceShortCode: '',
       pendingRemoteSnapshot: null,
       calendarOpen: false,
       calendarMonth: '',
+      calendarView: 'days',
+      calendarYearPage: 0,
       calendarDraftStart: '',
       calendarDraftEnd: '',
       lang: 'zh',
@@ -5187,6 +5294,14 @@ HTML = r"""<!doctype html>
         calendarCancel: '取消',
         calendarPrev: '上月',
         calendarNext: '下月',
+        calendarPrevYear: '上一年',
+        calendarNextYear: '下一年',
+        calendarPrevYears: '前 12 年',
+        calendarNextYears: '后 12 年',
+        calendarSelectMonth: '选择月份',
+        calendarSelectYear: '选择年份',
+        calendarMonths: '月份',
+        calendarYears: '年份',
         calendarWeekdays: ['一', '二', '三', '四', '五', '六', '日'],
         searchPlaceholder: '搜索标题、项目、路径、模型、环境',
         environment: '环境',
@@ -5354,6 +5469,14 @@ HTML = r"""<!doctype html>
         calendarCancel: 'Cancel',
         calendarPrev: 'Prev',
         calendarNext: 'Next',
+        calendarPrevYear: 'Previous year',
+        calendarNextYear: 'Next year',
+        calendarPrevYears: 'Previous 12 years',
+        calendarNextYears: 'Next 12 years',
+        calendarSelectMonth: 'Select month',
+        calendarSelectYear: 'Select year',
+        calendarMonths: 'Months',
+        calendarYears: 'Years',
         calendarWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
         searchPlaceholder: 'Search title, project, path, model, or environment',
         environment: 'Environment',
@@ -5772,6 +5895,57 @@ HTML = r"""<!doctype html>
       return Array.from(rowsByDate.values()).sort((left, right) => String(left.date).localeCompare(String(right.date)));
     }
 
+    function markDailyUsageDatesLoaded(period, rows = []) {
+      (rows || []).forEach(row => {
+        const key = String(row?.date || '');
+        if (/^\d{4}-\d{2}-\d{2}$/.test(key)) state.dailyUsageLoadedDates.add(key);
+      });
+      const start = dateFromKey(period?.start_date);
+      const end = dateFromKey(period?.end_date);
+      if (!start || !end) return;
+      const todayKey = dateKey(new Date());
+      for (let cursor = new Date(start), count = 0; cursor <= end && count < 36600; count += 1) {
+        const key = dateKey(cursor);
+        if (key > todayKey) break;
+        state.dailyUsageLoadedDates.add(key);
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    function invalidateDailyUsage() {
+      state.dailyUsageComplete = false;
+      state.dailyUsageLoadedDates.clear();
+    }
+
+    function isDailyUsageDateComplete(key) {
+      return state.dailyUsageComplete || state.dailyUsageLoadedDates.has(key);
+    }
+
+    function isDailyUsageRangeComplete(start, end) {
+      if (state.dailyUsageComplete) return true;
+      for (let cursor = new Date(start), count = 0; cursor <= end && count < 36600; count += 1) {
+        if (!state.dailyUsageLoadedDates.has(dateKey(cursor))) return false;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return true;
+    }
+
+    function isCalendarMonthComplete(year, month) {
+      const start = new Date(year, month, 1);
+      const today = dateFromKey(dateKey(new Date()));
+      if (start > today) return false;
+      const end = new Date(year, month + 1, 0);
+      return isDailyUsageRangeComplete(start, end > today ? today : end);
+    }
+
+    function isCalendarYearComplete(year) {
+      const start = new Date(year, 0, 1);
+      const today = dateFromKey(dateKey(new Date()));
+      if (start > today) return false;
+      const end = new Date(year, 11, 31);
+      return isDailyUsageRangeComplete(start, end > today ? today : end);
+    }
+
     async function applySessionData(data, requestedPeriod, requestedStart, requestedEnd, selectTop = true) {
       const nextSnapshotToken = data.snapshot_token || '';
       if (state.snapshotToken !== nextSnapshotToken) state.staleReloadToken = '';
@@ -5782,8 +5956,10 @@ HTML = r"""<!doctype html>
       if (data.daily_usage_complete) {
         state.dailyUsage = incomingDailyUsage;
         state.dailyUsageComplete = true;
+        state.dailyUsageLoadedDates.clear();
       } else {
         state.dailyUsage = mergeDailyUsage(state.dailyUsage, incomingDailyUsage);
+        markDailyUsageDatesLoaded(data.period, incomingDailyUsage);
       }
       state.remotes = data.remotes || [];
       state.currentDeviceShortCode = data.current_device_short_code || '';
@@ -6350,12 +6526,58 @@ HTML = r"""<!doctype html>
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     }
 
+    function yearPageStart(year) {
+      return Math.floor(Number(year) / 12) * 12;
+    }
+
+    function calendarMonthStart() {
+      return dateFromKey(`${state.calendarMonth || monthKey(new Date())}-01`) || new Date();
+    }
+
+    function calendarMonthLabel(month, style = 'long') {
+      if (state.lang !== 'en') return `${month + 1}月`;
+      return new Date(2000, month, 1).toLocaleDateString(locale(), { month: style });
+    }
+
+    function calendarYearLabel(year) {
+      return state.lang === 'en' ? String(year) : `${year}年`;
+    }
+
     function usageByDate() {
       const map = new Map();
       state.dailyUsage.forEach(row => {
         map.set(row.date, Number(row.usage?.total_tokens || 0));
       });
       return map;
+    }
+
+    function calendarUsageTotals() {
+      const months = new Map();
+      const years = new Map();
+      state.dailyUsage.forEach(row => {
+        const key = String(row.date || '');
+        const tokens = Number(row.usage?.total_tokens || 0);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || !Number.isFinite(tokens)) return;
+        const month = key.slice(0, 7);
+        const year = key.slice(0, 4);
+        months.set(month, (months.get(month) || 0) + tokens);
+        years.set(year, (years.get(year) || 0) + tokens);
+      });
+      return { months, years };
+    }
+
+    function calendarPickerUsage(tokens, loading) {
+      if (loading) {
+        return `<span class="calendar-picker-usage" role="img" aria-label="${escapeHtml(t('loading'))}"><span class="loading-spinner calendar-picker-spinner" aria-hidden="true"></span></span>`;
+      }
+      return `<span class="calendar-picker-usage">${tokens ? escapeHtml(fmtCalendarTokens(tokens)) : ''}</span>`;
+    }
+
+    function calendarDayUsage(tokens, loading) {
+      if (loading) {
+        return `<span class="calendar-usage calendar-day-loading" role="img" aria-label="${escapeHtml(t('loading'))}"><span class="loading-spinner calendar-day-spinner" aria-hidden="true"></span></span>`;
+      }
+      return tokens ? `<span class="calendar-usage">${escapeHtml(fmtCalendarTokens(tokens))}</span>` : '';
     }
 
     function latestUsageDate() {
@@ -6369,6 +6591,8 @@ HTML = r"""<!doctype html>
       state.calendarDraftEnd = state.customEndDate || '';
       const seed = state.calendarDraftStart || latestUsageDate();
       state.calendarMonth = monthKey(dateFromKey(seed) || new Date());
+      state.calendarView = 'days';
+      state.calendarYearPage = yearPageStart(calendarMonthStart().getFullYear());
       updateCalendarVisibility();
       renderCalendar();
       loadDailyUsage();
@@ -6403,10 +6627,80 @@ HTML = r"""<!doctype html>
       popover.hidden = !state.calendarOpen;
     }
 
-    function changeCalendarMonth(delta) {
-      const current = dateFromKey(`${state.calendarMonth || monthKey(new Date())}-01`) || new Date();
-      current.setMonth(current.getMonth() + delta);
+    function changeCalendarView(view) {
+      const nextView = ['days', 'months', 'years'].includes(view) ? view : 'days';
+      const current = calendarMonthStart();
+      if (nextView === 'months' && state.calendarView !== 'months') {
+        setCalendarDraftMonth(current.getFullYear(), current.getMonth());
+      } else if (nextView === 'years' && state.calendarView !== 'years') {
+        setCalendarDraftYear(current.getFullYear());
+      }
+      state.calendarView = nextView;
+      if (nextView === 'years') {
+        state.calendarYearPage = yearPageStart(calendarMonthStart().getFullYear());
+      }
+      renderCalendar();
+    }
+
+    function changeCalendarPage(delta) {
+      if (state.calendarView === 'years') {
+        state.calendarYearPage += delta * 12;
+        renderCalendar();
+        return;
+      }
+      const current = calendarMonthStart();
+      if (state.calendarView === 'months') current.setFullYear(current.getFullYear() + delta);
+      else current.setMonth(current.getMonth() + delta);
       state.calendarMonth = monthKey(current);
+      renderCalendar();
+    }
+
+    function setCalendarDraftRange(start, end) {
+      const todayKey = dateKey(new Date());
+      const startKey = dateKey(start);
+      if (startKey > todayKey) return false;
+      const endKey = dateKey(end);
+      state.calendarDraftStart = startKey;
+      state.calendarDraftEnd = endKey > todayKey ? todayKey : endKey;
+      return true;
+    }
+
+    function setCalendarDraftMonth(year, month) {
+      return setCalendarDraftRange(
+        new Date(year, month, 1),
+        new Date(year, month + 1, 0),
+      );
+    }
+
+    function setCalendarDraftYear(year) {
+      return setCalendarDraftRange(
+        new Date(year, 0, 1),
+        new Date(year, 11, 31),
+      );
+    }
+
+    function selectCalendarMonth(month) {
+      const selectedMonth = Number(month);
+      if (!Number.isInteger(selectedMonth) || selectedMonth < 0 || selectedMonth > 11) return;
+      const current = calendarMonthStart();
+      current.setMonth(selectedMonth);
+      if (monthKey(current) > monthKey(new Date())) return;
+      setCalendarDraftMonth(current.getFullYear(), selectedMonth);
+      state.calendarMonth = monthKey(current);
+      state.calendarView = 'days';
+      renderCalendar();
+    }
+
+    function selectCalendarYear(year) {
+      const selectedYear = Number(year);
+      const today = new Date();
+      if (!Number.isInteger(selectedYear) || selectedYear > today.getFullYear()) return;
+      const current = calendarMonthStart();
+      current.setFullYear(selectedYear);
+      if (monthKey(current) > monthKey(today)) current.setMonth(today.getMonth());
+      setCalendarDraftYear(selectedYear);
+      state.calendarMonth = monthKey(current);
+      state.calendarView = 'months';
       renderCalendar();
     }
 
@@ -6419,6 +6713,15 @@ HTML = r"""<!doctype html>
 
     function isDraftEdge(key) {
       return key === state.calendarDraftStart || key === state.calendarDraftEnd;
+    }
+
+    function calendarDraftState(startKey, endKey, fallbackSelected = false) {
+      if (!state.calendarDraftStart) return { inRange: false, selected: fallbackSelected };
+      const draftEnd = state.calendarDraftEnd || state.calendarDraftStart;
+      return {
+        inRange: endKey >= state.calendarDraftStart && startKey <= draftEnd,
+        selected: startKey === state.calendarDraftStart && endKey === draftEnd,
+      };
     }
 
     function selectCalendarDate(key) {
@@ -6442,59 +6745,136 @@ HTML = r"""<!doctype html>
       const popover = document.getElementById('calendarPopover');
       if (!popover || !state.calendarOpen) return;
 
-      const usageMap = usageByDate();
-      const todayKey = dateKey(new Date());
-      const monthStart = dateFromKey(`${state.calendarMonth || monthKey(new Date())}-01`) || new Date();
+      const today = new Date();
+      const todayKey = dateKey(today);
+      const monthStart = calendarMonthStart();
       monthStart.setDate(1);
-      const title = monthStart.toLocaleDateString(locale(), { year: 'numeric', month: 'long' });
-      const firstGridDate = new Date(monthStart);
-      firstGridDate.setDate(monthStart.getDate() - ((monthStart.getDay() + 6) % 7));
-      const weekdays = (I18N[state.lang] && I18N[state.lang].calendarWeekdays) || I18N.zh.calendarWeekdays;
-      const nextMonth = new Date(monthStart);
-      nextMonth.setMonth(nextMonth.getMonth() + 1);
-      const nextDisabled = monthKey(nextMonth) > monthKey(new Date()) ? 'disabled' : '';
+      let body = '';
+      let headerTitle = '';
+      let previousTitle = t('calendarPrev');
+      let nextTitle = t('calendarNext');
+      let nextDisabled = '';
+      const usageTotals = state.calendarView === 'days' ? null : calendarUsageTotals();
 
-      const days = [];
-      for (let index = 0; index < 42; index += 1) {
-        const date = new Date(firstGridDate);
-        date.setDate(firstGridDate.getDate() + index);
-        const key = dateKey(date);
-        const tokens = usageMap.get(key) || 0;
-        const classes = [
-          'calendar-day',
-          date.getMonth() === monthStart.getMonth() ? '' : 'outside',
-          inDraftRange(key) ? 'in-range' : '',
-          isDraftEdge(key) ? 'range-edge' : '',
-        ].filter(Boolean).join(' ');
-        const disabled = key > todayKey ? 'disabled' : '';
-        days.push(`
-          <button class="${classes}" type="button" data-calendar-date="${key}" ${disabled}>
-            <span>${date.getDate()}</span>
-            ${tokens ? `<span class="calendar-usage">${escapeHtml(fmtCalendarTokens(tokens))}</span>` : ''}
-          </button>
-        `);
+      if (state.calendarView === 'months') {
+        const selectedYear = monthStart.getFullYear();
+        previousTitle = t('calendarPrevYear');
+        nextTitle = t('calendarNextYear');
+        nextDisabled = selectedYear >= today.getFullYear() ? 'disabled' : '';
+        headerTitle = `
+          <div class="calendar-title">
+            <button class="calendar-title-button" type="button" data-calendar-years aria-label="${escapeHtml(t('calendarSelectYear'))}">${escapeHtml(calendarYearLabel(selectedYear))}<span class="calendar-title-caret" aria-hidden="true">&#9662;</span></button>
+          </div>
+        `;
+        const months = Array.from({ length: 12 }, (_, month) => {
+          const future = selectedYear > today.getFullYear()
+            || (selectedYear === today.getFullYear() && month > today.getMonth());
+          const key = `${selectedYear}-${String(month + 1).padStart(2, '0')}`;
+          const end = dateKey(new Date(selectedYear, month + 1, 0));
+          const rangeEnd = end > todayKey ? todayKey : end;
+          const draftState = calendarDraftState(`${key}-01`, rangeEnd, month === monthStart.getMonth());
+          const tokens = usageTotals.months.get(key) || 0;
+          return `
+            <button class="calendar-picker-option${draftState.inRange ? ' in-range' : ''}${draftState.selected ? ' selected' : ''}" type="button" data-calendar-month="${month}" aria-pressed="${draftState.inRange || draftState.selected ? 'true' : 'false'}" ${future ? 'disabled' : ''}>
+              <span>${escapeHtml(calendarMonthLabel(month, 'short'))}</span>
+              ${calendarPickerUsage(tokens, !future && !isCalendarMonthComplete(selectedYear, month))}
+            </button>
+          `;
+        });
+        body = `<div class="calendar-picker-grid" role="group" aria-label="${escapeHtml(t('calendarMonths'))}">${months.join('')}</div>`;
+      } else if (state.calendarView === 'years') {
+        const pageStart = state.calendarYearPage || yearPageStart(monthStart.getFullYear());
+        const pageEnd = pageStart + 11;
+        previousTitle = t('calendarPrevYears');
+        nextTitle = t('calendarNextYears');
+        nextDisabled = pageStart + 12 > today.getFullYear() ? 'disabled' : '';
+        headerTitle = `<div class="calendar-title">${escapeHtml(`${calendarYearLabel(pageStart)}-${calendarYearLabel(pageEnd)}`)}</div>`;
+        const years = Array.from({ length: 12 }, (_, offset) => {
+          const year = pageStart + offset;
+          const tokens = usageTotals.years.get(String(year)) || 0;
+          const future = year > today.getFullYear();
+          const end = `${year}-12-31` > todayKey ? todayKey : `${year}-12-31`;
+          const draftState = calendarDraftState(`${year}-01-01`, end, year === monthStart.getFullYear());
+          return `
+            <button class="calendar-picker-option${draftState.inRange ? ' in-range' : ''}${draftState.selected ? ' selected' : ''}" type="button" data-calendar-year="${year}" aria-pressed="${draftState.inRange || draftState.selected ? 'true' : 'false'}" ${future ? 'disabled' : ''}>
+              <span>${escapeHtml(calendarYearLabel(year))}</span>
+              ${calendarPickerUsage(tokens, !future && !isCalendarYearComplete(year))}
+            </button>
+          `;
+        });
+        body = `<div class="calendar-picker-grid" role="group" aria-label="${escapeHtml(t('calendarYears'))}">${years.join('')}</div>`;
+      } else {
+        const usageMap = usageByDate();
+        const firstGridDate = new Date(monthStart);
+        firstGridDate.setDate(monthStart.getDate() - ((monthStart.getDay() + 6) % 7));
+        const weekdays = (I18N[state.lang] && I18N[state.lang].calendarWeekdays) || I18N.zh.calendarWeekdays;
+        const nextMonth = new Date(monthStart);
+        nextMonth.setMonth(nextMonth.getMonth() + 1);
+        nextDisabled = monthKey(nextMonth) > monthKey(today) ? 'disabled' : '';
+        headerTitle = `
+          <div class="calendar-title">
+            <button class="calendar-title-button" type="button" data-calendar-years aria-label="${escapeHtml(t('calendarSelectYear'))}">${escapeHtml(calendarYearLabel(monthStart.getFullYear()))}<span class="calendar-title-caret" aria-hidden="true">&#9662;</span></button>
+            <button class="calendar-title-button" type="button" data-calendar-months aria-label="${escapeHtml(t('calendarSelectMonth'))}">${escapeHtml(calendarMonthLabel(monthStart.getMonth()))}<span class="calendar-title-caret" aria-hidden="true">&#9662;</span></button>
+          </div>
+        `;
+
+        const days = [];
+        for (let index = 0; index < 42; index += 1) {
+          const date = new Date(firstGridDate);
+          date.setDate(firstGridDate.getDate() + index);
+          const key = dateKey(date);
+          const tokens = usageMap.get(key) || 0;
+          const future = key > todayKey;
+          const classes = [
+            'calendar-day',
+            date.getMonth() === monthStart.getMonth() ? '' : 'outside',
+            inDraftRange(key) ? 'in-range' : '',
+            isDraftEdge(key) ? 'range-edge' : '',
+          ].filter(Boolean).join(' ');
+          days.push(`
+            <button class="${classes}" type="button" data-calendar-date="${key}" ${future ? 'disabled' : ''}>
+              <span>${date.getDate()}</span>
+              ${calendarDayUsage(future ? 0 : tokens, !future && !isDailyUsageDateComplete(key))}
+            </button>
+          `);
+        }
+        body = `
+          <div class="calendar-grid">
+            ${weekdays.map(day => `<div class="calendar-weekday">${escapeHtml(day)}</div>`).join('')}
+            ${days.join('')}
+          </div>
+        `;
       }
 
       popover.innerHTML = `
         <div class="calendar-head">
-          <button type="button" title="${escapeHtml(t('calendarPrev'))}" data-calendar-prev>&lt;</button>
-          <div class="calendar-title">${escapeHtml(title)}</div>
-          <button type="button" title="${escapeHtml(t('calendarNext'))}" data-calendar-next ${nextDisabled}>&gt;</button>
+          <button type="button" title="${escapeHtml(previousTitle)}" aria-label="${escapeHtml(previousTitle)}" data-calendar-prev>&lt;</button>
+          ${headerTitle}
+          <button type="button" title="${escapeHtml(nextTitle)}" aria-label="${escapeHtml(nextTitle)}" data-calendar-next ${nextDisabled}>&gt;</button>
         </div>
-        <div class="calendar-grid">
-          ${weekdays.map(day => `<div class="calendar-weekday">${escapeHtml(day)}</div>`).join('')}
-          ${days.join('')}
-        </div>
+        ${body}
         <div class="calendar-actions">
           <button type="button" data-calendar-cancel>${escapeHtml(t('calendarCancel'))}</button>
           <button class="primary" type="button" data-calendar-apply ${state.calendarDraftStart ? '' : 'disabled'}>${escapeHtml(t('calendarApply'))}</button>
         </div>
       `;
 
-      popover.querySelector('[data-calendar-prev]').addEventListener('click', () => changeCalendarMonth(-1));
-      popover.querySelector('[data-calendar-next]').addEventListener('click', () => changeCalendarMonth(1));
+      popover.querySelector('[data-calendar-prev]').addEventListener('click', () => changeCalendarPage(-1));
+      popover.querySelector('[data-calendar-next]').addEventListener('click', () => changeCalendarPage(1));
       popover.querySelector('[data-calendar-cancel]').addEventListener('click', closeCalendar);
       popover.querySelector('[data-calendar-apply]').addEventListener('click', applyCalendarRange);
+      popover.querySelectorAll('[data-calendar-months]').forEach(button => {
+        button.addEventListener('click', () => changeCalendarView('months'));
+      });
+      popover.querySelectorAll('[data-calendar-years]').forEach(button => {
+        button.addEventListener('click', () => changeCalendarView('years'));
+      });
+      popover.querySelectorAll('[data-calendar-month]').forEach(button => {
+        button.addEventListener('click', () => selectCalendarMonth(button.dataset.calendarMonth));
+      });
+      popover.querySelectorAll('[data-calendar-year]').forEach(button => {
+        button.addEventListener('click', () => selectCalendarYear(button.dataset.calendarYear));
+      });
       popover.querySelectorAll('[data-calendar-date]').forEach(button => {
         button.addEventListener('click', () => selectCalendarDate(button.dataset.calendarDate));
       });
@@ -7045,7 +7425,7 @@ HTML = r"""<!doctype html>
       const data = await res.json();
       if (res.ok && data.ok) {
         state.periodCache.clear();
-        state.dailyUsageComplete = false;
+        invalidateDailyUsage();
         await loadData(false);
         renderRemoteModal(t('remoteImported'));
         document.getElementById('remoteModal').hidden = false;
@@ -7112,7 +7492,7 @@ HTML = r"""<!doctype html>
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'unknown');
         state.periodCache.clear();
-        state.dailyUsageComplete = false;
+        invalidateDailyUsage();
         await loadData(false);
         renderRemoteModal(t('remoteDeleted'));
       } catch (err) {

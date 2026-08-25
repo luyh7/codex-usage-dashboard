@@ -2612,6 +2612,60 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("state.snapshotToken !== requestedToken", html)
         self.assertIn("void showDetails(first.uid)", html)
 
+    def test_calendar_can_switch_between_day_month_and_year_views(self) -> None:
+        html = dashboard.HTML
+
+        self.assertIn("calendarView: 'days'", html)
+        self.assertIn("calendarYearPage: 0", html)
+        self.assertIn("function changeCalendarView(view)", html)
+        self.assertIn("function changeCalendarPage(delta)", html)
+        self.assertIn("function setCalendarDraftRange(start, end)", html)
+        self.assertIn("function setCalendarDraftMonth(year, month)", html)
+        self.assertIn("function setCalendarDraftYear(year)", html)
+        self.assertIn("function selectCalendarMonth(month)", html)
+        self.assertIn("function selectCalendarYear(year)", html)
+        self.assertIn("setCalendarDraftMonth(current.getFullYear(), current.getMonth())", html)
+        self.assertIn("setCalendarDraftYear(current.getFullYear())", html)
+        self.assertIn("function calendarDraftState(startKey, endKey, fallbackSelected = false)", html)
+        self.assertIn("calendar-picker-option${draftState.inRange ? ' in-range' : ''}", html)
+        self.assertIn("new Date(year, month + 1, 0)", html)
+        self.assertIn("new Date(year, 11, 31)", html)
+        self.assertIn("function calendarUsageTotals()", html)
+        self.assertIn("function calendarPickerUsage(tokens, loading)", html)
+        self.assertIn("function calendarDayUsage(tokens, loading)", html)
+        self.assertIn("dailyUsageLoadedDates: new Set()", html)
+        self.assertIn("function markDailyUsageDatesLoaded(period, rows = [])", html)
+        self.assertIn("function invalidateDailyUsage()", html)
+        self.assertIn("function isDailyUsageDateComplete(key)", html)
+        self.assertIn("function isDailyUsageRangeComplete(start, end)", html)
+        self.assertIn("function isCalendarMonthComplete(year, month)", html)
+        self.assertIn("function isCalendarYearComplete(year)", html)
+        self.assertIn("markDailyUsageDatesLoaded(data.period, incomingDailyUsage)", html)
+        self.assertIn("calendarPickerUsage(tokens, !future && !isCalendarMonthComplete(selectedYear, month))", html)
+        self.assertIn("calendarPickerUsage(tokens, !future && !isCalendarYearComplete(year))", html)
+        self.assertIn("calendarDayUsage(future ? 0 : tokens, !future && !isDailyUsageDateComplete(key))", html)
+        self.assertIn("loading-spinner calendar-picker-spinner", html)
+        self.assertIn("loading-spinner calendar-day-spinner", html)
+        self.assertIn("usageTotals.months.get(key)", html)
+        self.assertIn("usageTotals.years.get(String(year))", html)
+        self.assertIn("calendar-picker-usage", html)
+        self.assertIn("data-calendar-months", html)
+        self.assertIn("data-calendar-years", html)
+        self.assertIn("data-calendar-month=", html)
+        self.assertIn("data-calendar-year=", html)
+        self.assertIn("calendar-picker-grid", html)
+        self.assertIn("calendarSelectMonth: '选择月份'", html)
+        self.assertIn("calendarSelectYear: '选择年份'", html)
+        self.assertIn("calendarSelectMonth: 'Select month'", html)
+        self.assertIn("calendarSelectYear: 'Select year'", html)
+        self.assertIn("calendar-month-year-picker-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("calendar-month-year-token-totals-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("calendar-incomplete-total-spinner-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("calendar-incomplete-day-spinner-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("calendar-per-day-load-state-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("calendar-month-year-range-apply-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("calendar-view-default-range-v1", dashboard.DASHBOARD_FEATURES)
+
     def test_html_shows_loading_animation_for_interactive_data_requests(self) -> None:
         html = dashboard.HTML
         overlay_start = html.index('<div class="loading-overlay" id="loadingOverlay"')
@@ -2740,6 +2794,34 @@ class CodexUsageDashboardTests(unittest.TestCase):
             self.assertEqual(opener.health_dashboard_url(8765), "http://127.0.0.1:8765/")
             opener.urlopen = lambda *_args, **_kwargs: Response(
                 [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "effective-dated-pricing-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-month-year-picker-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-month-year-token-totals-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-incomplete-total-spinner-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-incomplete-day-spinner-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-per-day-load-state-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-month-year-range-apply-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-view-default-range-v1"]
             )
             self.assertIsNone(opener.health_dashboard_url(8765))
             opener.urlopen = lambda *_args, **_kwargs: Response(

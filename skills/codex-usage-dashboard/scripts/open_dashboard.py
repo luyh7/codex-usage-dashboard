@@ -53,6 +53,13 @@ def health_dashboard_url(port: int) -> str | None:
         and payload.get("app") == "codex-usage-dashboard"
         and isinstance(features, list)
         and "calendar-range-v2" in features
+        and "calendar-month-year-picker-v1" in features
+        and "calendar-month-year-token-totals-v1" in features
+        and "calendar-incomplete-total-spinner-v1" in features
+        and "calendar-incomplete-day-spinner-v1" in features
+        and "calendar-per-day-load-state-v1" in features
+        and "calendar-month-year-range-apply-v1" in features
+        and "calendar-view-default-range-v1" in features
         and "multi-codex-home" in features
         and "windows-cwd-folder-name" in features
         and "project-grouped-default-view" in features
