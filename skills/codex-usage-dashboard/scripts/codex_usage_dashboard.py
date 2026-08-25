@@ -141,6 +141,7 @@ APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
 PARSE_CACHE_VERSION = 4
+COMPONENT_CACHE_VERSION = 1
 PARSE_CACHE_SAMPLE_BYTES = 4096
 DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
 DEFAULT_PARSE_MIN_FILES = 8
@@ -195,6 +196,9 @@ DASHBOARD_FEATURES = [
     "append-resume-v1",
     "parallel-cold-parse-v1",
     "continued-rollout-merge-v1",
+    "conditional-session-refresh-v1",
+    "client-detail-cache-v1",
+    "component-snapshot-cache-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -1864,6 +1868,12 @@ class FileParseCacheEntry(NamedTuple):
     tail_digest: str
 
 
+class LocalComponentCacheEntry(NamedTuple):
+    signature: tuple[Any, ...]
+    rows: list[tuple[dict[str, Any], dict[str, Any]]]
+    daily_usage: list[dict[str, Any]] | None
+
+
 class PersistentParseCache:
     def __init__(self, path: Path | None = None):
         self.path = path or parse_cache_path()
@@ -2190,6 +2200,8 @@ class CodexUsageAnalyzer:
             "incremental_parses": 0,
             "incremental_bytes": 0,
             "parallel_files": 0,
+            "component_hits": 0,
+            "component_misses": 0,
         }
         self._pending_persistent_entries: dict[str, FileParseCacheEntry] = {}
         self._snapshot_cache_signature: tuple[Any, ...] | None = None
@@ -2201,6 +2213,15 @@ class CodexUsageAnalyzer:
         ] = {}
         self._project_info_cache: dict[str, ProjectInfo] = {}
         self._session_meta_cache: dict[str, tuple[int, int, dict[str, Any]]] = {}
+        self._file_component_revisions: dict[
+            str,
+            tuple[FileParseCacheEntry, int],
+        ] = {}
+        self._next_file_component_revision = 0
+        self._local_component_cache: dict[
+            tuple[tuple[str, str], ...],
+            list[LocalComponentCacheEntry],
+        ] = {}
         self._last_pruned_cache_keys: frozenset[str] | None = None
         self._scan_lock = threading.RLock()
         self._published_lock = threading.Lock()
@@ -2293,6 +2314,22 @@ class CodexUsageAnalyzer:
         for cache_key in tuple(self._cache):
             if cache_key not in valid_keys:
                 self._cache.pop(cache_key, None)
+                self._file_component_revisions.pop(cache_key, None)
+        for identity, candidates in tuple(self._local_component_cache.items()):
+            retained = [
+                entry
+                for entry in candidates
+                if all(
+                    isinstance(fragment_signature, tuple)
+                    and bool(fragment_signature)
+                    and fragment_signature[0] in valid_keys
+                    for fragment_signature in entry.signature[2:]
+                )
+            ]
+            if retained:
+                self._local_component_cache[identity] = retained
+            else:
+                self._local_component_cache.pop(identity, None)
         if self.persistent_cache is not None:
             owned_roots = {
                 str(log_source.codex_home / directory)
@@ -2677,6 +2714,13 @@ class CodexUsageAnalyzer:
             merged["updated_at"] = timestamp_field(details, "updated_at", latest=True)
             merged["_raw_created_at"] = timestamp_field(details, "_raw_created_at")
             merged["_raw_start_at"] = timestamp_field(details, "_raw_start_at")
+            component_orders = [
+                int(detail["_component_order"])
+                for detail in details
+                if isinstance(detail.get("_component_order"), int)
+            ]
+            if component_orders:
+                merged["_component_order"] = min(component_orders)
             merged["timeline"] = timeline
             merged["tasks"] = tasks
             merged["tool_counts"] = dict(
@@ -2753,6 +2797,15 @@ class CodexUsageAnalyzer:
                 continue
             timeline = detail.get("timeline")
             if not isinstance(timeline, list) or not timeline:
+                detail.update(
+                    pricing_for_timeline(
+                        [],
+                        str(detail.get("model") or ""),
+                        normalize_usage(detail.get("total_token_usage")),
+                        detail.get("end_at"),
+                    )
+                )
+                summary.update({field: detail.get(field) for field in SUMMARY_KEYS})
                 continue
 
             normalized_timeline: list[dict[str, Any]] = []
@@ -3085,6 +3138,251 @@ class CodexUsageAnalyzer:
         if self.persistent_cache is not None:
             self.persistent_cache.close()
 
+    def local_fragment_signature(
+        self,
+        log_source: CodexLogSource,
+        path: Path,
+        source: str,
+        cached_detail: dict[str, Any],
+        project_info: ProjectInfo,
+    ) -> tuple[Any, ...] | None:
+        cache_key = self.file_cache_key(log_source, path, source)
+        entry = self._cache.get(cache_key)
+        if entry is None or entry.detail is not cached_detail:
+            return None
+        tracked = self._file_component_revisions.get(cache_key)
+        if tracked is None or tracked[0] is not entry:
+            self._next_file_component_revision += 1
+            tracked = (entry, self._next_file_component_revision)
+            self._file_component_revisions[cache_key] = tracked
+        return (
+            cache_key,
+            tracked[1],
+            entry.mtime_ns,
+            entry.size,
+            entry.device,
+            entry.inode,
+            log_source.label,
+            str(log_source.codex_home),
+            *project_info,
+        )
+
+    @staticmethod
+    def group_local_fragments(
+        fragments: list[
+            tuple[
+                dict[str, Any],
+                dict[str, Any],
+                tuple[Any, ...] | None,
+            ]
+        ],
+    ) -> list[
+        tuple[
+            tuple[tuple[str, str], ...],
+            tuple[Any, ...] | None,
+            list[tuple[dict[str, Any], dict[str, Any]]],
+        ]
+    ]:
+        nodes: list[tuple[str, str]] = []
+        present: set[tuple[str, str]] = set()
+        parents: dict[tuple[str, str], tuple[str, str]] = {}
+
+        for index, (_summary, detail, _signature) in enumerate(fragments):
+            environment_id = str(detail.get("environment_id") or "")
+            session_id = str(detail.get("session_id") or "")
+            fallback = str(detail.get("uid") or detail.get("path") or index)
+            node = (environment_id, session_id or f"uid:{fallback}")
+            nodes.append(node)
+            present.add(node)
+            parents.setdefault(node, node)
+
+        def find(node: tuple[str, str]) -> tuple[str, str]:
+            root = node
+            while parents[root] != root:
+                root = parents[root]
+            while parents[node] != node:
+                next_node = parents[node]
+                parents[node] = root
+                node = next_node
+            return root
+
+        def union(left: tuple[str, str], right: tuple[str, str]) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root != right_root:
+                parents[right_root] = left_root
+
+        for node, (_summary, detail, _signature) in zip(nodes, fragments):
+            parent_id = str(
+                detail.get("forked_from_id")
+                or detail.get("parent_thread_id")
+                or ""
+            )
+            parent_node = (node[0], parent_id)
+            if parent_id and parent_node in present:
+                union(node, parent_node)
+
+        grouped: dict[
+            tuple[str, str],
+            list[
+                tuple[
+                    tuple[str, str],
+                    dict[str, Any],
+                    dict[str, Any],
+                    tuple[Any, ...] | None,
+                ]
+            ],
+        ] = {}
+        group_order: list[tuple[str, str]] = []
+        for node, (summary, detail, signature) in zip(nodes, fragments):
+            root = find(node)
+            if root not in grouped:
+                grouped[root] = []
+                group_order.append(root)
+            grouped[root].append((node, summary, detail, signature))
+
+        components = []
+        timezone_key = str(dt.datetime.now().astimezone().tzinfo)
+        for root in group_order:
+            members = grouped[root]
+            identity = tuple(sorted({member[0] for member in members}))
+            signatures = [member[3] for member in members]
+            signature = (
+                (COMPONENT_CACHE_VERSION, timezone_key, *sorted(signatures))
+                if all(item is not None for item in signatures)
+                else None
+            )
+            rows = [(member[1], member[2]) for member in members]
+            components.append((identity, signature, rows))
+        return components
+
+    @staticmethod
+    def merge_daily_usage_rows(groups: Any) -> list[dict[str, Any]]:
+        by_day: dict[str, dict[str, Any]] = {}
+        for rows in groups:
+            for row in rows:
+                day = str(row.get("date") or "")
+                if not day:
+                    continue
+                by_day.setdefault(day, {"date": day, "usage": zero_usage()})
+                by_day[day]["usage"] = add_usage(
+                    by_day[day]["usage"],
+                    normalize_usage(row.get("usage")),
+                )
+        return sorted(by_day.values(), key=lambda row: row["date"])
+
+    def normalize_local_components(
+        self,
+        fragments: list[
+            tuple[
+                dict[str, Any],
+                dict[str, Any],
+                tuple[Any, ...] | None,
+            ]
+        ],
+        include_daily_usage: bool,
+    ) -> tuple[
+        list[tuple[dict[str, Any], dict[str, Any]]],
+        list[dict[str, Any]],
+    ]:
+        local_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        daily_groups: list[list[dict[str, Any]]] = []
+
+        for identity, signature, fragment_rows in self.group_local_fragments(fragments):
+            current_orders: dict[tuple[str, str], int] = {}
+            for _summary, detail in fragment_rows:
+                key = (
+                    str(detail.get("environment_id") or ""),
+                    str(detail.get("session_id") or ""),
+                )
+                order = detail.get("_component_order")
+                if isinstance(order, int):
+                    current_orders[key] = min(current_orders.get(key, order), order)
+            entry = None
+            candidates = self._local_component_cache.get(identity, [])
+            if signature is not None:
+                entry = next(
+                    (candidate for candidate in candidates if candidate.signature == signature),
+                    None,
+                )
+
+            if entry is None:
+                self.cache_metrics["component_misses"] += 1
+                normalized_rows = self.merge_continued_session_fragments(fragment_rows)
+                self.normalize_main_session_usage(normalized_rows)
+                self.normalize_subagent_usage(normalized_rows)
+                component_daily_usage = (
+                    self.build_daily_usage_static(
+                        detail for _summary, detail in normalized_rows
+                    )
+                    if include_daily_usage
+                    else None
+                )
+                if signature is not None:
+                    entry = LocalComponentCacheEntry(
+                        signature,
+                        normalized_rows,
+                        component_daily_usage,
+                    )
+                    retained = [
+                        candidate
+                        for candidate in candidates
+                        if candidate.signature != signature
+                    ][:1]
+                    if identity not in self._local_component_cache and len(self._local_component_cache) >= 8192:
+                        self._local_component_cache.pop(next(iter(self._local_component_cache)))
+                    self._local_component_cache[identity] = [entry, *retained]
+            else:
+                self.cache_metrics["component_hits"] += 1
+                if candidates and candidates[0] is not entry:
+                    self._local_component_cache[identity] = [
+                        entry,
+                        *[candidate for candidate in candidates if candidate is not entry][:1],
+                    ]
+
+            if entry is not None and include_daily_usage and entry.daily_usage is None:
+                component_daily_usage = self.build_daily_usage_static(
+                    detail for _summary, detail in entry.rows
+                )
+                entry = LocalComponentCacheEntry(
+                    entry.signature,
+                    entry.rows,
+                    component_daily_usage,
+                )
+                self._local_component_cache[identity] = [
+                    entry,
+                    *[
+                        candidate
+                        for candidate in self._local_component_cache.get(identity, [])
+                        if candidate.signature != entry.signature
+                    ][:1],
+                ]
+
+            if entry is None:
+                rows = normalized_rows
+            else:
+                rows = entry.rows
+                component_daily_usage = entry.daily_usage
+
+            # Cached nested collections are immutable after normalization. Snapshot-specific
+            # title/internal-field changes below are intentionally limited to top-level copies.
+            for summary, detail in rows:
+                snapshot_detail = dict(detail)
+                key = (
+                    str(snapshot_detail.get("environment_id") or ""),
+                    str(snapshot_detail.get("session_id") or ""),
+                )
+                if key in current_orders:
+                    snapshot_detail["_component_order"] = current_orders[key]
+                local_rows.append((dict(summary), snapshot_detail))
+            if component_daily_usage is not None:
+                daily_groups.append(component_daily_usage)
+
+        local_rows.sort(
+            key=lambda item: int(item[1].get("_component_order", sys.maxsize))
+        )
+        return local_rows, self.merge_daily_usage_rows(daily_groups)
+
     def build_snapshot(
         self,
         files: list[tuple[CodexLogSource, Path, str]],
@@ -3097,7 +3395,13 @@ class CodexUsageAnalyzer:
         }
         sessions: list[dict[str, Any]] = []
         details_by_uid: dict[str, dict[str, Any]] = {}
-        local_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        local_fragments: list[
+            tuple[
+                dict[str, Any],
+                dict[str, Any],
+                tuple[Any, ...] | None,
+            ]
+        ] = []
 
         parsed_by_index: dict[int, tuple[dict[str, Any], dict[str, Any]]] = {}
         full_misses: list[tuple[int, tuple[CodexLogSource, Path, str]]] = []
@@ -3131,14 +3435,21 @@ class CodexUsageAnalyzer:
             if parsed is not None:
                 parsed_by_index[index] = parsed
 
-        for index, (log_source, _path, source) in enumerate(files):
+        for index, (log_source, path, source) in enumerate(files):
             parsed = parsed_by_index.get(index)
             if parsed is None:
                 continue
             cached_summary, cached_detail = parsed
+            project_info = self.project_info_for_cwd(str(cached_detail.get("cwd") or ""))
+            fragment_signature = self.local_fragment_signature(
+                log_source,
+                path,
+                source,
+                cached_detail,
+                project_info,
+            )
             summary = dict(cached_summary)
             detail = dict(cached_detail)
-            project_info = self.project_info_for_cwd(str(detail.get("cwd") or ""))
             detail.update(
                 {
                     "source": source,
@@ -3150,28 +3461,21 @@ class CodexUsageAnalyzer:
                     "workspace_root": project_info.workspace_root,
                     "project_branch": project_info.project_branch,
                     "is_git_worktree": project_info.is_git_worktree,
+                    "_component_order": index,
                 }
             )
-            timeline = detail.get("timeline")
-            detail.update(
-                pricing_for_timeline(
-                    timeline if isinstance(timeline, list) else [],
-                    str(detail.get("model") or ""),
-                    normalize_usage(detail.get("total_token_usage")),
-                    detail.get("end_at"),
-                )
-            )
             summary.update({key: detail.get(key) for key in SUMMARY_KEYS})
-            local_rows.append((summary, detail))
+            local_fragments.append((summary, detail, fragment_signature))
 
         if self.persistent_cache is not None and self._pending_persistent_entries:
             pending = list(self._pending_persistent_entries.items())
             self._pending_persistent_entries.clear()
             self.persistent_cache.put_many(pending)
 
-        local_rows = self.merge_continued_session_fragments(local_rows)
-        self.normalize_main_session_usage(local_rows)
-        self.normalize_subagent_usage(local_rows)
+        local_rows, local_daily_usage = self.normalize_local_components(
+            local_fragments,
+            include_daily_usage,
+        )
 
         for summary, detail in local_rows:
             for key in tuple(detail):
@@ -3187,11 +3491,14 @@ class CodexUsageAnalyzer:
             details_by_uid[summary["uid"]] = detail
 
         codex_sources: list[dict[str, Any]] = codex_source_payloads(self.codex_sources)
+        remote_daily_usage: list[dict[str, Any]] = []
         if include_remotes and self.remote_store is not None:
             remote_sessions, remote_details, remote_sources = self.remote_store.transformed_sessions()
             sessions.extend(remote_sessions)
             details_by_uid.update(remote_details)
             codex_sources.extend(remote_sources)
+            if include_daily_usage:
+                remote_daily_usage = self.build_daily_usage(remote_details.values())
 
         sessions.sort(key=lambda row: row["total_token_usage"].get("total_tokens", 0), reverse=True)
         generated_at = dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
@@ -3202,7 +3509,11 @@ class CodexUsageAnalyzer:
             "sessions": sessions,
             "details_by_uid": details_by_uid,
             "summary": self.build_summary(sessions),
-            "daily_usage": self.build_daily_usage(details_by_uid.values()) if include_daily_usage else [],
+            "daily_usage": (
+                self.merge_daily_usage_rows((local_daily_usage, remote_daily_usage))
+                if include_daily_usage
+                else []
+            ),
             "daily_usage_complete": include_daily_usage,
             "period": {"key": "all", "start_at": None, "end_at": generated_at},
         }
@@ -5209,6 +5520,7 @@ HTML = r"""<!doctype html>
       generatedAt: '',
       snapshotToken: '',
       staleReloadToken: '',
+      detailCache: new Map(),
       selectedUid: null,
       viewMode: 'project',
       sortKey: 'end_at',
@@ -5948,7 +6260,10 @@ HTML = r"""<!doctype html>
 
     async function applySessionData(data, requestedPeriod, requestedStart, requestedEnd, selectTop = true) {
       const nextSnapshotToken = data.snapshot_token || '';
-      if (state.snapshotToken !== nextSnapshotToken) state.staleReloadToken = '';
+      if (state.snapshotToken !== nextSnapshotToken) {
+        state.staleReloadToken = '';
+        state.detailCache.clear();
+      }
       state.snapshotToken = nextSnapshotToken;
       state.sessions = data.sessions || [];
       state.summary = data.summary || null;
@@ -6018,7 +6333,10 @@ HTML = r"""<!doctype html>
       refreshBtn.disabled = true;
       refreshBtn.textContent = t('scanning');
       try {
-        const res = await fetch('/api/sessions?' + periodParams(requestedPeriod).toString(), { cache: 'no-store' });
+        const params = periodParams(requestedPeriod);
+        if (state.snapshotToken) params.set('snapshot_token', state.snapshotToken);
+        const res = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
+        if (res.status === 204) return;
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         if (
@@ -7092,7 +7410,13 @@ HTML = r"""<!doctype html>
     async function showDetails(uid, renderRows = true) {
       state.selectedUid = uid;
       const requestedToken = state.snapshotToken;
+      const cacheKey = `${requestedToken}|${uid}`;
       if (renderRows) renderTable();
+      const cachedDetail = state.detailCache.get(cacheKey);
+      if (cachedDetail) {
+        renderDetails(cachedDetail);
+        return;
+      }
       document.getElementById('detailStatus').textContent = t('detailsLoading');
       try {
         const params = periodParams();
@@ -7111,6 +7435,7 @@ HTML = r"""<!doctype html>
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const detail = await res.json();
         if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
+        state.detailCache.set(cacheKey, detail);
         renderDetails(detail);
       } catch (err) {
         if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
@@ -7546,7 +7871,12 @@ HTML = r"""<!doctype html>
       });
     });
     window.addEventListener('resize', () => {
-      if (state.selectedUid) showDetails(state.selectedUid, false);
+      const cacheKey = `${state.snapshotToken}|${state.selectedUid || ''}`;
+      const detail = state.detailCache.get(cacheKey);
+      if (detail) requestAnimationFrame(() => renderDetails(detail));
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) void loadData(false, { silent: true });
     });
     document.addEventListener('click', event => {
       if (state.calendarOpen && !event.target.closest('#periodWrap')) closeCalendar();
@@ -7560,7 +7890,9 @@ HTML = r"""<!doctype html>
     populateSourceFilter();
     populateLimitSelect();
     loadData(true);
-    setInterval(() => loadData(false, { silent: true }), 10000);
+    setInterval(() => {
+      if (!document.hidden) void loadData(false, { silent: true });
+    }, 10000);
   </script>
 </body>
 </html>
@@ -7601,7 +7933,11 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                 period = query.get("period", ["today"])[0]
                 start_date = query.get("start", [""])[0] or None
                 end_date = query.get("end", [""])[0] or None
+                snapshot_token = query.get("snapshot_token", [""])[0] or None
                 snapshot = analyzer.scan(period, start_date, end_date)
+                if snapshot_token == snapshot.get("snapshot_token"):
+                    self.send_bytes(b"", "application/json; charset=utf-8", status=204)
+                    return
                 payload = {
                     "snapshot_token": snapshot["snapshot_token"],
                     "generated_at": snapshot["generated_at"],

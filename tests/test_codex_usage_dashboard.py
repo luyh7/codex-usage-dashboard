@@ -210,6 +210,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
         total_tokens: int,
         timestamp: str,
         cwd: str | None = None,
+        model: str = "gpt-5",
     ) -> Path:
         sessions_dir = codex_home / "sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -221,7 +222,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
                 "payload": {
                     "id": session_id,
                     "cwd": cwd or f"/work/{session_id}",
-                    "model": "gpt-5",
+                    "model": model,
                 },
             },
             {
@@ -1650,6 +1651,266 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertNotIn(token, analyzer._published_snapshots)
         self.assertNotIn(token, analyzer._session_payload_cache)
 
+    def test_rebuild_does_not_reprice_an_unchanged_independent_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            changed_path = self.write_usage_file(
+                codex_home,
+                "changed-component",
+                100,
+                "2026-07-10T10:00:00Z",
+                model="gpt-5.1-codex",
+            )
+            self.write_usage_file(
+                codex_home,
+                "unchanged-component",
+                200,
+                "2026-07-10T11:00:00Z",
+                model="gpt-5.2-codex",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            analyzer.scan("all")
+
+            previous_mtime_ns = changed_path.stat().st_mtime_ns
+            self.write_usage_file(
+                codex_home,
+                "changed-component",
+                250,
+                "2026-07-10T10:00:00Z",
+                model="gpt-5.1-codex",
+            )
+            changed_mtime_ns = previous_mtime_ns + 1_000_000
+            os.utime(changed_path, ns=(changed_mtime_ns, changed_mtime_ns))
+
+            priced_models: list[str] = []
+            original_pricing = dashboard.pricing_for_timeline
+
+            def recording_pricing(timeline, fallback_model, *args, **kwargs):
+                priced_models.append(fallback_model)
+                return original_pricing(timeline, fallback_model, *args, **kwargs)
+
+            dashboard.pricing_for_timeline = recording_pricing
+            try:
+                rebuilt = analyzer.scan("all")
+            finally:
+                dashboard.pricing_for_timeline = original_pricing
+
+        usage_by_session = {
+            row["session_id"]: row["total_token_usage"]["total_tokens"]
+            for row in rebuilt["sessions"]
+        }
+        self.assertEqual(usage_by_session["changed-component"], 250)
+        self.assertEqual(usage_by_session["unchanged-component"], 200)
+        self.assertIn("gpt-5.1-codex", priced_models)
+        self.assertNotIn("gpt-5.2-codex", priced_models)
+
+    def test_rebuild_invalidates_parent_and_child_as_one_component_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            parent_path, _child_path = self.write_parent_and_subagent_rollouts(codex_home)
+            self.write_usage_file(
+                codex_home,
+                "independent-component",
+                75,
+                "2026-07-10T09:00:00Z",
+                model="gpt-5.2-codex",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            first = analyzer.scan("all")
+
+            parent_rows = [
+                json.loads(line)
+                for line in parent_path.read_text(encoding="utf-8").splitlines()
+            ]
+            changed_event = next(
+                row
+                for row in parent_rows
+                if row.get("timestamp") == "2026-07-10T10:05:00Z"
+            )
+            changed_event["payload"]["info"]["total_token_usage"] = {
+                "input_tokens": 190,
+                "cached_input_tokens": 50,
+                "output_tokens": 50,
+                "total_tokens": 240,
+            }
+            changed_event["payload"]["info"]["last_token_usage"] = {
+                "input_tokens": 110,
+                "cached_input_tokens": 30,
+                "output_tokens": 30,
+                "total_tokens": 140,
+            }
+            previous_mtime_ns = parent_path.stat().st_mtime_ns
+            parent_path.write_text(
+                "\n".join(json.dumps(row) for row in parent_rows),
+                encoding="utf-8",
+            )
+            changed_mtime_ns = previous_mtime_ns + 1_000_000
+            os.utime(parent_path, ns=(changed_mtime_ns, changed_mtime_ns))
+
+            pricing_calls: list[tuple[str, tuple[str, ...]]] = []
+            original_pricing = dashboard.pricing_for_timeline
+
+            def recording_pricing(timeline, fallback_model, *args, **kwargs):
+                timestamps = tuple(
+                    str(row.get("timestamp") or "")
+                    for row in timeline
+                    if isinstance(row, dict)
+                )
+                pricing_calls.append((fallback_model, timestamps))
+                return original_pricing(timeline, fallback_model, *args, **kwargs)
+
+            dashboard.pricing_for_timeline = recording_pricing
+            try:
+                rebuilt = analyzer.scan("all")
+            finally:
+                dashboard.pricing_for_timeline = original_pricing
+
+        first_by_session = {row["session_id"]: row for row in first["sessions"]}
+        rebuilt_by_session = {row["session_id"]: row for row in rebuilt["sessions"]}
+        rebuilt_details = rebuilt["details_by_uid"]
+        parent_detail = rebuilt_details[rebuilt_by_session["parent-thread"]["uid"]]
+        child_detail = rebuilt_details[rebuilt_by_session["child-thread"]["uid"]]
+
+        self.assertEqual(first_by_session["child-thread"]["total_token_usage"]["total_tokens"], 150)
+        self.assertEqual(rebuilt_by_session["child-thread"]["total_token_usage"]["total_tokens"], 300)
+        self.assertEqual(
+            [row["last_token_usage"]["total_tokens"] for row in parent_detail["timeline"]],
+            [100, 140, 90],
+        )
+        self.assertEqual(child_detail["inherited_token_event_count"], 1)
+        self.assertTrue(
+            any("2026-07-10T10:20:00Z" in timestamps for _model, timestamps in pricing_calls)
+        )
+        self.assertTrue(
+            any("2026-07-10T10:12:00Z" in timestamps for _model, timestamps in pricing_calls)
+        )
+        self.assertNotIn("gpt-5.2-codex", [model for model, _timestamps in pricing_calls])
+
+    def test_component_cache_does_not_resurrect_a_result_after_metadata_repeats(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            path = self.write_usage_file(
+                codex_home,
+                "metadata-cycle",
+                111,
+                "2026-07-10T10:00:00Z",
+            )
+            a_bytes = path.read_bytes()
+            a_stat = path.stat()
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            first = analyzer.scan("all")
+
+            self.write_usage_file(
+                codex_home,
+                "metadata-cycle",
+                222,
+                "2026-07-10T10:00:00Z",
+            )
+            b_bytes = path.read_bytes()
+            os.utime(
+                path,
+                ns=(a_stat.st_atime_ns, a_stat.st_mtime_ns + 1_000_000_000),
+            )
+            second = analyzer.scan("all")
+
+            self.write_usage_file(
+                codex_home,
+                "metadata-cycle",
+                333,
+                "2026-07-10T10:00:00Z",
+            )
+            c_bytes = path.read_bytes()
+            os.utime(path, ns=(a_stat.st_atime_ns, a_stat.st_mtime_ns))
+            c_stat = path.stat()
+            third = analyzer.scan("all")
+
+        self.assertEqual(len({len(a_bytes), len(b_bytes), len(c_bytes)}), 1)
+        self.assertEqual(len({a_bytes, b_bytes, c_bytes}), 3)
+        self.assertEqual(c_stat.st_size, a_stat.st_size)
+        self.assertEqual(c_stat.st_mtime_ns, a_stat.st_mtime_ns)
+        self.assertEqual((c_stat.st_dev, c_stat.st_ino), (a_stat.st_dev, a_stat.st_ino))
+        self.assertEqual(first["summary"]["usage"]["total_tokens"], 111)
+        self.assertEqual(second["summary"]["usage"]["total_tokens"], 222)
+        self.assertEqual(third["summary"]["usage"]["total_tokens"], 333)
+
+    def test_component_cache_preserves_first_seen_order_when_usage_ties(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            parent_id = "order-parent-a"
+            child_id = "order-child-b"
+            independent_id = "order-independent-c"
+            parent_path = self.write_rollout_rows(
+                codex_home,
+                parent_id,
+                [
+                    {
+                        "timestamp": "2026-07-10T10:00:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": parent_id,
+                            "session_id": parent_id,
+                            "thread_source": "user",
+                            "cwd": "/work/order",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-10T10:01:00Z", 100, 100),
+                ],
+            )
+            independent_path = self.write_usage_file(
+                codex_home,
+                independent_id,
+                100,
+                "2026-07-10T10:05:00Z",
+            )
+            child_path = self.write_rollout_rows(
+                codex_home,
+                child_id,
+                [
+                    {
+                        "timestamp": "2026-07-10T10:10:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": child_id,
+                            "session_id": parent_id,
+                            "thread_source": "subagent",
+                            "source": {
+                                "subagent": {
+                                    "thread_spawn": {
+                                        "parent_thread_id": parent_id,
+                                        "forked_from_id": parent_id,
+                                    }
+                                }
+                            },
+                            "cwd": "/work/order",
+                            "model": "gpt-5",
+                        },
+                    },
+                    self.total_only_token_event("2026-07-10T10:10:01Z", 100, 100),
+                    self.total_only_token_event("2026-07-10T10:11:00Z", 200, 100),
+                ],
+            )
+            base_mtime_ns = parent_path.stat().st_mtime_ns
+            os.utime(parent_path, ns=(base_mtime_ns, base_mtime_ns + 3_000_000))
+            os.utime(independent_path, ns=(base_mtime_ns, base_mtime_ns + 2_000_000))
+            os.utime(child_path, ns=(base_mtime_ns, base_mtime_ns + 1_000_000))
+
+            snapshot = dashboard.CodexUsageAnalyzer(codex_home).scan("all")
+
+        self.assertEqual(
+            [row["total_token_usage"]["total_tokens"] for row in snapshot["sessions"]],
+            [100, 100, 100],
+        )
+        self.assertEqual(
+            [row["session_id"] for row in snapshot["sessions"]],
+            [parent_id, independent_id, child_id],
+        )
+        self.assertEqual(snapshot["summary"]["top_session_uid"], snapshot["sessions"][0]["uid"])
+        self.assertEqual(
+            snapshot["details_by_uid"][snapshot["summary"]["top_session_uid"]]["session_id"],
+            parent_id,
+        )
+
     def test_persistent_parse_cache_reuses_unchanged_files_across_analyzers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -2612,6 +2873,49 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("state.snapshotToken !== requestedToken", html)
         self.assertIn("void showDetails(first.uid)", html)
 
+    def test_html_refresh_uses_conditional_lists_and_cached_details(self) -> None:
+        html = dashboard.HTML
+        load_data = html[
+            html.index("async function loadData") : html.index("function modelsOf")
+        ]
+        resize_handler = html[
+            html.index("window.addEventListener('resize'") : html.index(
+                "document.addEventListener('visibilitychange'"
+            )
+        ]
+
+        self.assertIn(
+            "if (state.snapshotToken) params.set('snapshot_token', state.snapshotToken);",
+            load_data,
+        )
+        self.assertLess(
+            load_data.index("if (res.status === 204) return;"),
+            load_data.index("const data = await res.json();"),
+        )
+        self.assertIn("detailCache: new Map()", html)
+        self.assertIn("const cacheKey = `${requestedToken}|${uid}`;", html)
+        self.assertIn("const cachedDetail = state.detailCache.get(cacheKey);", html)
+        self.assertIn("state.detailCache.set(cacheKey, detail);", html)
+        self.assertIn("state.detailCache.get(cacheKey)", resize_handler)
+        self.assertIn("renderDetails(detail)", resize_handler)
+        self.assertNotIn("showDetails", resize_handler)
+        self.assertIn(
+            "if (!document.hidden) void loadData(false, { silent: true });",
+            html,
+        )
+        self.assertIn(
+            "document.addEventListener('visibilitychange', () => {\n"
+            "      if (!document.hidden) void loadData(false, { silent: true });\n"
+            "    });",
+            html,
+        )
+        self.assertIn(
+            "setInterval(() => {\n"
+            "      if (!document.hidden) void loadData(false, { silent: true });\n"
+            "    }, 10000);",
+            html,
+        )
+
     def test_calendar_can_switch_between_day_month_and_year_views(self) -> None:
         html = dashboard.HTML
 
@@ -2760,6 +3064,54 @@ class CodexUsageDashboardTests(unittest.TestCase):
                 legacy_detail = json.loads(response.read())
                 self.assertEqual(response.status, 200)
                 self.assertEqual(legacy_detail["uid"], uid)
+            finally:
+                connection.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_http_sessions_returns_no_content_for_an_unchanged_snapshot_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            self.write_usage_file(
+                codex_home,
+                "http-unchanged-snapshot",
+                100,
+                "2026-07-10T10:00:00Z",
+            )
+            analyzer = dashboard.CodexUsageAnalyzer(codex_home)
+            server = dashboard.FixedPortHTTPServer(
+                ("127.0.0.1", 0),
+                dashboard.make_handler(analyzer),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            connection = http.client.HTTPConnection(
+                "127.0.0.1",
+                server.server_address[1],
+                timeout=5,
+            )
+            try:
+                connection.request("GET", "/api/sessions?period=all")
+                response = connection.getresponse()
+                initial_payload = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+
+                connection.request(
+                    "GET",
+                    "/api/sessions?"
+                    + urlencode(
+                        {
+                            "period": "all",
+                            "snapshot_token": initial_payload["snapshot_token"],
+                        }
+                    ),
+                )
+                response = connection.getresponse()
+                body = response.read()
+
+                self.assertEqual(response.status, 204)
+                self.assertEqual(body, b"")
             finally:
                 connection.close()
                 server.shutdown()

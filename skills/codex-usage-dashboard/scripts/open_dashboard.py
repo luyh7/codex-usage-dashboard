@@ -86,6 +86,9 @@ def health_dashboard_url(port: int) -> str | None:
         and "persistent-parse-cache-v1" in features
         and "append-resume-v1" in features
         and "parallel-cold-parse-v1" in features
+        and "conditional-session-refresh-v1" in features
+        and "client-detail-cache-v1" in features
+        and "component-snapshot-cache-v1" in features
     ):
         return url
     return None
