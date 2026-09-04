@@ -188,7 +188,7 @@ PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
 APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
-PARSE_CACHE_VERSION = 5
+PARSE_CACHE_VERSION = 6
 COMPONENT_CACHE_VERSION = 1
 PARSE_CACHE_SAMPLE_BYTES = 4096
 DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
@@ -248,6 +248,7 @@ DASHBOARD_FEATURES = [
     "client-detail-cache-v1",
     "component-snapshot-cache-v1",
     "fast-mode-pricing-v1",
+    "subagent-fast-mode-inheritance-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -414,6 +415,58 @@ def unique_service_tiers(*sources: Any) -> list[str]:
         elif isinstance(source, dict):
             add(source.get("service_tier") or service_tier_from_payload(source))
     return tiers
+
+
+def normalize_service_tier_events(*sources: Any) -> list[dict[str, str]]:
+    """Merge explicit service-tier changes in timestamp order."""
+    ordered: list[tuple[dt.datetime, int, dict[str, str]]] = []
+    seen: set[tuple[str, str]] = set()
+    sequence = 0
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for event in source:
+            if not isinstance(event, dict):
+                continue
+            timestamp = str(event.get("timestamp") or "")
+            service_tier = service_tier_from_payload(event)
+            fingerprint = (timestamp, service_tier)
+            if not timestamp or not service_tier or fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            ordered.append(
+                (
+                    parse_timestamp(timestamp)
+                    or dt.datetime.max.replace(tzinfo=dt.UTC),
+                    sequence,
+                    {"timestamp": timestamp, "service_tier": service_tier},
+                )
+            )
+            sequence += 1
+    ordered.sort(key=lambda item: (item[0], item[1]))
+    return [event for _timestamp, _sequence, event in ordered]
+
+
+def service_tier_at_timestamp(detail: Any, timestamp: Any) -> str:
+    """Return the latest explicitly recorded tier at or before a moment."""
+    if not isinstance(detail, dict):
+        return ""
+    target = timestamp if isinstance(timestamp, dt.datetime) else parse_timestamp(timestamp)
+    if target is None:
+        return ""
+    service_tier = ""
+    events = normalize_service_tier_events(
+        detail.get("_service_tier_events"),
+        detail.get("timeline"),
+    )
+    for event in events:
+        event_timestamp = parse_timestamp(event.get("timestamp"))
+        if event_timestamp is None:
+            continue
+        if event_timestamp > target:
+            break
+        service_tier = str(event.get("service_tier") or "")
+    return service_tier
 
 
 def service_tier_cost_multiplier(model: str, service_tier: Any) -> float | None:
@@ -2750,6 +2803,9 @@ class CodexUsageAnalyzer:
                     sequence += 1
             timeline_items.sort(key=lambda item: (item[0], item[1]))
             timeline = [dict(item[2]) for item in timeline_items]
+            service_tier_events = normalize_service_tier_events(
+                *[detail.get("_service_tier_events") for detail in details]
+            )
 
             task_items: list[tuple[dt.datetime, int, dict[str, Any]]] = []
             seen_tasks: set[tuple[Any, ...]] = set()
@@ -2869,6 +2925,7 @@ class CodexUsageAnalyzer:
             if component_orders:
                 merged["_component_order"] = min(component_orders)
             merged["timeline"] = timeline
+            merged["_service_tier_events"] = service_tier_events
             merged["tasks"] = tasks
             merged["tool_counts"] = dict(
                 sorted(tool_counts.items(), key=lambda item: item[1], reverse=True)
@@ -3035,6 +3092,36 @@ class CodexUsageAnalyzer:
             if key not in raw_timelines and isinstance(timeline, list):
                 raw_timelines[key] = timeline
 
+        def service_tier_for_detail_at(
+            detail: dict[str, Any] | None,
+            timestamp: Any,
+            visited: set[tuple[str, str]] | None = None,
+        ) -> str:
+            if detail is None:
+                return ""
+            environment_id = str(detail.get("environment_id") or "")
+            session_id = str(detail.get("session_id") or "")
+            key = (environment_id, session_id)
+            visited = set() if visited is None else visited
+            if key in visited:
+                return ""
+            visited.add(key)
+
+            explicit_tier = service_tier_at_timestamp(detail, timestamp)
+            if explicit_tier:
+                return explicit_tier
+
+            parent_id = str(
+                detail.get("forked_from_id")
+                or detail.get("parent_thread_id")
+                or ""
+            )
+            if not parent_id:
+                return ""
+            parent_detail = details_by_thread.get((environment_id, parent_id))
+            inherited_at = detail.get("created_at") or timestamp
+            return service_tier_for_detail_at(parent_detail, inherited_at, visited)
+
         for summary, detail in local_rows:
             if not (detail.get("is_subagent") or detail.get("forked_from_id")):
                 continue
@@ -3051,6 +3138,10 @@ class CodexUsageAnalyzer:
             parent_detail = details_by_thread.get(parent_key)
             parent_timeline = raw_timelines.get(parent_key)
             fork_at = parse_timestamp(detail.get("created_at"))
+            inherited_service_tier = service_tier_for_detail_at(
+                parent_detail,
+                fork_at,
+            )
             parent_timeline_at_fork = parent_timeline
             if fork_at is not None and isinstance(parent_timeline, list):
                 parent_timeline_at_fork = [
@@ -3114,6 +3205,18 @@ class CodexUsageAnalyzer:
                 inherited_event_count,
                 inherited_override,
             )
+            if inherited_service_tier:
+                rebased = [
+                    {
+                        **row,
+                        "service_tier": str(
+                            row.get("service_tier") or inherited_service_tier
+                        ),
+                    }
+                    for row in rebased
+                ]
+                if not detail.get("service_tier"):
+                    detail["service_tier"] = inherited_service_tier
             detail["timeline"] = rebased
             detail["total_token_usage"] = total_usage
             detail["last_token_usage"] = last_usage
@@ -3984,6 +4087,9 @@ class CodexUsageAnalyzer:
         models = unique_models(base.get("models"), model)
         service_tier = str(base.get("service_tier") or "").strip().lower()
         service_tiers = unique_service_tiers(base.get("service_tiers"), service_tier)
+        service_tier_events = normalize_service_tier_events(
+            base.get("_service_tier_events")
+        )
         effort = str(base.get("effort") or "")
         originator = str(base.get("originator") or "")
         cli_version = str(base.get("cli_version") or "")
@@ -4045,7 +4151,7 @@ class CodexUsageAnalyzer:
             if cleaned not in models:
                 models.append(cleaned)
 
-        def note_service_tier(value: Any) -> None:
+        def note_service_tier(value: Any, timestamp: Any = None) -> None:
             nonlocal service_tier
             if not isinstance(value, str):
                 return
@@ -4055,6 +4161,16 @@ class CodexUsageAnalyzer:
             service_tier = cleaned
             if cleaned not in service_tiers:
                 service_tiers.append(cleaned)
+            if timestamp and (
+                not service_tier_events
+                or service_tier_events[-1].get("service_tier") != cleaned
+            ):
+                service_tier_events.append(
+                    {
+                        "timestamp": str(timestamp),
+                        "service_tier": cleaned,
+                    }
+                )
 
         rollout_stats = RolloutReadStats()
         for item in read_rollout_jsonl(
@@ -4088,7 +4204,7 @@ class CodexUsageAnalyzer:
                     originator = str(payload.get("originator") or originator)
                     cli_version = str(payload.get("cli_version") or cli_version)
                     note_model(model_from_payload(payload) or model)
-                    note_service_tier(service_tier_from_payload(payload))
+                    note_service_tier(service_tier_from_payload(payload), timestamp)
 
                     raw_thread_source = payload.get("thread_source")
                     if isinstance(raw_thread_source, str):
@@ -4149,7 +4265,7 @@ class CodexUsageAnalyzer:
                     turn_ids.add(turn_id)
                 cwd = str(payload.get("cwd") or cwd)
                 note_model(model_from_payload(payload) or model)
-                note_service_tier(service_tier_from_payload(payload))
+                note_service_tier(service_tier_from_payload(payload), timestamp)
                 effort = str(
                     payload.get("effort")
                     or payload.get("reasoning_effort")
@@ -4179,7 +4295,7 @@ class CodexUsageAnalyzer:
                     # Desktop/WSL model switches often arrive here before the next
                     # turn_context, so apply them immediately for timeline pricing.
                     note_model(model_from_payload(payload))
-                    note_service_tier(service_tier_from_payload(payload))
+                    note_service_tier(service_tier_from_payload(payload), timestamp)
                     thread_settings = (
                         payload.get("thread_settings")
                         if isinstance(payload.get("thread_settings"), dict)
@@ -4204,11 +4320,12 @@ class CodexUsageAnalyzer:
                         token_event_count += 1
                         # Prefer explicit model on the token event when present.
                         note_model(model_from_payload(info) or model_from_payload(payload) or model)
-                        note_service_tier(
+                        explicit_service_tier = (
                             service_tier_from_payload(info)
                             or service_tier_from_payload(payload)
-                            or service_tier
                         )
+                        if explicit_service_tier:
+                            note_service_tier(explicit_service_tier, timestamp)
                         total_usage = normalize_usage(info.get("total_token_usage"))
                         last_usage = normalize_usage(info.get("last_token_usage"))
                         window = info.get("model_context_window")
@@ -4347,6 +4464,9 @@ class CodexUsageAnalyzer:
             "models": models,
             "service_tier": service_tier,
             "service_tiers": service_tiers,
+            "_service_tier_events": normalize_service_tier_events(
+                service_tier_events
+            ),
             "effort": effort,
             "originator": originator,
             "cli_version": cli_version,

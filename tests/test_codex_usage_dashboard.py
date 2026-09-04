@@ -563,6 +563,112 @@ class CodexUsageDashboardTests(unittest.TestCase):
             480,
         )
 
+    def test_subagent_inherits_parent_service_tier_at_spawn(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codex_home = Path(temp_dir) / ".codex"
+            parent_id = "fast-parent"
+            child_id = "fast-child"
+            request_usage = {
+                "input_tokens": 1_000_000,
+                "cached_input_tokens": 0,
+                "output_tokens": 1_000_000,
+                "total_tokens": 2_000_000,
+            }
+
+            def token_event(timestamp: str, request_count: int) -> dict:
+                return {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                key: value * request_count
+                                for key, value in request_usage.items()
+                            },
+                            "last_token_usage": request_usage,
+                        },
+                    },
+                }
+
+            self.write_rollout_rows(
+                codex_home,
+                parent_id,
+                [
+                    {
+                        "timestamp": "2026-07-24T00:00:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": parent_id,
+                            "session_id": parent_id,
+                            "thread_source": "user",
+                            "cwd": "/work/fast-subagent",
+                            "model": "gpt-5.4",
+                        },
+                    },
+                    {
+                        "timestamp": "2026-07-24T00:00:01Z",
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "thread_settings_applied",
+                            "thread_settings": {"service_tier": "priority"},
+                        },
+                    },
+                    token_event("2026-07-24T00:00:10Z", 1),
+                ],
+            )
+            self.write_rollout_rows(
+                codex_home,
+                child_id,
+                [
+                    {
+                        "timestamp": "2026-07-24T00:00:02Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": child_id,
+                            "session_id": parent_id,
+                            "thread_source": "subagent",
+                            "source": {
+                                "subagent": {
+                                    "thread_spawn": {
+                                        "parent_thread_id": parent_id,
+                                        "agent_path": "/root/fast-child",
+                                    }
+                                }
+                            },
+                            "cwd": "/work/fast-subagent",
+                            "model": "gpt-5.4",
+                        },
+                    },
+                    token_event("2026-07-24T00:00:03Z", 1),
+                    {
+                        "timestamp": "2026-07-24T00:00:04Z",
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "thread_settings_applied",
+                            "thread_settings": {"service_tier": "default"},
+                        },
+                    },
+                    token_event("2026-07-24T00:00:05Z", 2),
+                ],
+            )
+
+            snapshot = dashboard.CodexUsageAnalyzer(codex_home).scan()
+
+        child = next(row for row in snapshot["sessions"] if row["session_id"] == child_id)
+        detail = snapshot["details_by_uid"][child["uid"]]
+        self.assertEqual(
+            [row["service_tier"] for row in detail["timeline"]],
+            ["priority", "default"],
+        )
+        self.assertEqual(child["service_tier"], "default")
+        self.assertEqual(child["service_tiers"], ["priority", "default"])
+        self.assertEqual(child["estimated_cost_usd"], 52.5)
+        self.assertEqual(
+            [segment["cost_multiplier"] for segment in detail["applied_price_segments"]],
+            [2.0, 1.0],
+        )
+
     def test_subagent_before_parent_first_token_resolves_zero_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir) / ".codex"
@@ -3085,6 +3191,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn("git-worktree-project-grouping", dashboard.DASHBOARD_FEATURES)
         self.assertIn("effective-dated-pricing-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("fast-mode-pricing-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("subagent-fast-mode-inheritance-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("expandable-agent-task-rollups-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("compact-agent-task-tree-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("aligned-agent-task-tree-v1", dashboard.DASHBOARD_FEATURES)
@@ -3396,6 +3503,14 @@ class CodexUsageDashboardTests(unittest.TestCase):
             self.assertEqual(opener.health_dashboard_url(8765), "http://127.0.0.1:8765/")
             opener.urlopen = lambda *_args, **_kwargs: Response(
                 [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "effective-dated-pricing-v1"]
+            )
+            self.assertIsNone(opener.health_dashboard_url(8765))
+            opener.urlopen = lambda *_args, **_kwargs: Response(
+                [
+                    feature
+                    for feature in dashboard.DASHBOARD_FEATURES
+                    if feature != "subagent-fast-mode-inheritance-v1"
+                ]
             )
             self.assertIsNone(opener.health_dashboard_url(8765))
             opener.urlopen = lambda *_args, **_kwargs: Response(

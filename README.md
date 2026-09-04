@@ -157,7 +157,7 @@ Under WSL, the default scan also includes:
 /mnt/c/Users/<you>/.codex/archived_sessions
 ```
 
-It parses Codex `token_count` events, including `total_token_usage`, `last_token_usage`, model context window, task timing, and tool calls. It also tracks `thread_settings_applied.thread_settings.service_tier` changes so Fast mode is priced only for the token events recorded after that mode becomes active.
+It parses Codex `token_count` events, including `total_token_usage`, `last_token_usage`, model context window, task timing, and tool calls. It also tracks `thread_settings_applied.thread_settings.service_tier` changes so Fast mode is priced only for the token events recorded after that mode becomes active. When a subagent log omits the tier, it inherits the parent's tier at spawn time until the subagent records its own tier change.
 
 ## Privacy
 
