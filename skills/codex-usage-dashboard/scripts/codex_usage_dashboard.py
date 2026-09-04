@@ -46,6 +46,28 @@ TOKEN_KEYS = (
     "total_tokens",
 )
 
+# Codex persists Fast mode as `priority`; the API also accepts `fast` as input.
+FAST_MODE_SERVICE_TIERS = {"fast", "priority"}
+FAST_MODE_COST_MULTIPLIERS_BY_MODEL = {
+    "codex-auto-review": 1.0,
+    "gpt-5.6": 2.0,
+    "gpt-5.6-sol": 2.0,
+    "gpt-5.6-terra": 2.0,
+    "gpt-5.6-luna": 2.0,
+    "gpt-5.5": 2.5,
+    "gpt-5.4": 2.0,
+    "gpt-5.4-mini": 2.0,
+    "gpt-5.3-codex": 2.0,
+    "gpt-5.3-chat-latest": 2.0,
+    "gpt-5.2": 2.0,
+    "gpt-5.2-codex": 2.0,
+    "gpt-5.2-chat-latest": 2.0,
+    "gpt-5.1-codex": 2.0,
+    "gpt-5.1-codex-max": 2.0,
+    "gpt-5": 2.0,
+    "gpt-5-codex": 2.0,
+}
+
 ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS = {
     # Auto-review has no public API list price; show it as zero by dashboard convention.
     "codex-auto-review": {"input": 0.0, "cached_input": 0.0, "output": 0.0},
@@ -78,9 +100,18 @@ GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS = {
 # pricing Markdown's Last-Modified time as the exact boundary: 2026-07-31
 # 00:38:10 UTC (2026-07-31 08:38:10 in Asia/Shanghai).
 GPT_5_6_REPRICING_EFFECTIVE_AT = dt.datetime(2026, 7, 31, 0, 38, 10, tzinfo=dt.UTC)
-GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS = {
+GPT_5_6_PRE_PROMOTION_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
     "gpt-5.6-sol": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 30.00},
+    "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 12.00},
+    "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "cache_write_input": 0.25, "output": 1.20},
+}
+# The pricing page added GPT-5.6 Sol promotional prices on 2026-09-04.
+# Use its Markdown Last-Modified timestamp as the exact boundary.
+GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT = dt.datetime(2026, 9, 4, 4, 39, 29, tzinfo=dt.UTC)
+GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6": {"input": 4.00, "cached_input": 0.40, "cache_write_input": 5.00, "output": 20.00},
+    "gpt-5.6-sol": {"input": 4.00, "cached_input": 0.40, "cache_write_input": 5.00, "output": 20.00},
     "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 12.00},
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "cache_write_input": 0.25, "output": 1.20},
 }
@@ -92,15 +123,25 @@ GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6-terra": {"input": 5.00, "cached_input": 0.50, "cache_write_input": 6.25, "output": 22.50},
     "gpt-5.6-luna": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 9.00},
 }
-GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+GPT_5_6_PRE_PROMOTION_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
     "gpt-5.6-sol": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 45.00},
     "gpt-5.6-terra": {"input": 4.00, "cached_input": 0.40, "cache_write_input": 5.00, "output": 18.00},
     "gpt-5.6-luna": {"input": 0.40, "cached_input": 0.04, "cache_write_input": 0.50, "output": 1.80},
 }
+GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6": {"input": 8.00, "cached_input": 0.80, "cache_write_input": 10.00, "output": 30.00},
+    "gpt-5.6-sol": {"input": 8.00, "cached_input": 0.80, "cache_write_input": 10.00, "output": 30.00},
+    "gpt-5.6-terra": {"input": 4.00, "cached_input": 0.40, "cache_write_input": 5.00, "output": 18.00},
+    "gpt-5.6-luna": {"input": 0.40, "cached_input": 0.04, "cache_write_input": 0.50, "output": 1.80},
+}
 GPT_5_6_LONG_CONTEXT_PRICE_SCHEDULES = (
     (GPT_5_6_PRICING_EFFECTIVE_AT, GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS),
-    (GPT_5_6_REPRICING_EFFECTIVE_AT, GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS),
+    (
+        GPT_5_6_REPRICING_EFFECTIVE_AT,
+        GPT_5_6_PRE_PROMOTION_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+    ),
+    (GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT, GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS),
 )
 # Public xAI API list prices for Grok 4.5 (docs.x.ai).
 # Long-context tier applies to requests that exceed 200K input tokens.
@@ -123,6 +164,12 @@ GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS = {
     **GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS,
     **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
 }
+GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS = {
+    **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
+    **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GPT_5_6_PRE_PROMOTION_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
+}
 MODEL_PRICE_SCHEDULES = (
     (
         None,
@@ -133,14 +180,15 @@ MODEL_PRICE_SCHEDULES = (
         },
     ),
     (GPT_5_6_PRICING_EFFECTIVE_AT, GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS),
-    (GPT_5_6_REPRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
+    (GPT_5_6_REPRICING_EFFECTIVE_AT, GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS),
+    (GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
 )
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
 APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
-PARSE_CACHE_VERSION = 4
+PARSE_CACHE_VERSION = 5
 COMPONENT_CACHE_VERSION = 1
 PARSE_CACHE_SAMPLE_BYTES = 4096
 DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
@@ -199,6 +247,7 @@ DASHBOARD_FEATURES = [
     "conditional-session-refresh-v1",
     "client-detail-cache-v1",
     "component-snapshot-cache-v1",
+    "fast-mode-pricing-v1",
 ]
 
 SUMMARY_KEYS = (
@@ -236,6 +285,8 @@ SUMMARY_KEYS = (
     "is_git_worktree",
     "model",
     "models",
+    "service_tier",
+    "service_tiers",
     "effort",
     "total_token_usage",
     "last_token_usage",
@@ -297,6 +348,24 @@ def model_from_payload(payload: Any) -> str:
     return ""
 
 
+def service_tier_from_payload(payload: Any) -> str:
+    """Extract the active processing tier from common Codex log payload shapes."""
+    if not isinstance(payload, dict):
+        return ""
+
+    candidates: list[Any] = [payload.get("service_tier")]
+    thread_settings = payload.get("thread_settings")
+    if isinstance(thread_settings, dict):
+        candidates.append(thread_settings.get("service_tier"))
+
+    for value in candidates:
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned:
+                return cleaned
+    return ""
+
+
 def unique_models(*sources: Any) -> list[str]:
     """Collect model names in first-appearance order, de-duplicated."""
     models: list[str] = []
@@ -320,6 +389,38 @@ def unique_models(*sources: Any) -> list[str]:
         elif isinstance(source, dict):
             add(source.get("model") or model_from_payload(source))
     return models
+
+
+def unique_service_tiers(*sources: Any) -> list[str]:
+    """Collect service tiers in first-appearance order, de-duplicated."""
+    tiers: list[str] = []
+
+    def add(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        cleaned = value.strip().lower()
+        if cleaned and cleaned not in tiers:
+            tiers.append(cleaned)
+
+    for source in sources:
+        if isinstance(source, str):
+            add(source)
+        elif isinstance(source, list):
+            for item in source:
+                if isinstance(item, str):
+                    add(item)
+                elif isinstance(item, dict):
+                    add(item.get("service_tier") or service_tier_from_payload(item))
+        elif isinstance(source, dict):
+            add(source.get("service_tier") or service_tier_from_payload(source))
+    return tiers
+
+
+def service_tier_cost_multiplier(model: str, service_tier: Any) -> float | None:
+    tier = str(service_tier or "").strip().lower()
+    if tier not in FAST_MODE_SERVICE_TIERS:
+        return 1.0
+    return FAST_MODE_COST_MULTIPLIERS_BY_MODEL.get(pricing_model_key(model))
 
 
 def normalize_usage(value: Any) -> dict[str, int]:
@@ -427,6 +528,7 @@ def price_entry_for_model(
     model: str,
     timestamp: Any = None,
     input_tokens: int | None = None,
+    service_tier: Any = None,
 ) -> dict[str, Any] | None:
     effective_at, rates = price_schedule_at(timestamp)
     entry = rate_entry_for_model(model, rates)
@@ -466,11 +568,21 @@ def price_entry_for_model(
             if long_entry is not None:
                 canonical_model, prices = long_entry
                 context_tier = "long"
+    normalized_service_tier = str(service_tier or "").strip().lower()
+    cost_multiplier = service_tier_cost_multiplier(canonical_model, normalized_service_tier)
+    if cost_multiplier is None:
+        return None
+    effective_prices = {
+        key: value * cost_multiplier
+        for key, value in prices.items()
+    }
     return {
         "model": canonical_model,
         "effective_at": utc_iso(rate_effective_at) if rate_effective_at is not None else None,
         "context_tier": context_tier,
-        "prices": prices,
+        "service_tier": normalized_service_tier,
+        "cost_multiplier": cost_multiplier,
+        "prices": effective_prices,
     }
 
 
@@ -478,8 +590,9 @@ def price_for_model(
     model: str,
     timestamp: Any = None,
     input_tokens: int | None = None,
+    service_tier: Any = None,
 ) -> dict[str, float] | None:
-    entry = price_entry_for_model(model, timestamp, input_tokens)
+    entry = price_entry_for_model(model, timestamp, input_tokens, service_tier)
     return entry["prices"] if entry else None
 
 
@@ -510,8 +623,18 @@ def total_cost_from_parts(parts: dict[str, float]) -> float:
     )
 
 
-def estimate_cost_usd(usage: dict[str, int], model: str, timestamp: Any = None) -> float | None:
-    price = price_for_model(model, timestamp, max(int(usage.get("input_tokens", 0)), 0))
+def estimate_cost_usd(
+    usage: dict[str, int],
+    model: str,
+    timestamp: Any = None,
+    service_tier: Any = None,
+) -> float | None:
+    price = price_for_model(
+        model,
+        timestamp,
+        max(int(usage.get("input_tokens", 0)), 0),
+        service_tier,
+    )
     if not price:
         return None
     parts = usage_cost_parts(usage, price)
@@ -524,8 +647,14 @@ def estimate_cost_breakdown_usd(
     usage: dict[str, int],
     model: str,
     timestamp: Any = None,
+    service_tier: Any = None,
 ) -> dict[str, float] | None:
-    price = price_for_model(model, timestamp, max(int(usage.get("input_tokens", 0)), 0))
+    price = price_for_model(
+        model,
+        timestamp,
+        max(int(usage.get("input_tokens", 0)), 0),
+        service_tier,
+    )
     if not price:
         return None
     parts = usage_cost_parts(usage, price)
@@ -662,8 +791,9 @@ def pricing_for_timeline(
     fallback_model: str,
     fallback_usage: dict[str, int] | None = None,
     fallback_timestamp: Any = None,
+    fallback_service_tier: Any = None,
 ) -> dict[str, Any]:
-    items: list[tuple[dict[str, int], str, Any, bool]] = []
+    items: list[tuple[dict[str, int], str, Any, bool, str]] = []
     for row, _timestamp, _cumulative_usage, delta_usage in timeline_rows_with_deltas(timeline):
         if usage_has_tokens(delta_usage):
             items.append(
@@ -672,11 +802,20 @@ def pricing_for_timeline(
                     str(row.get("model") or fallback_model),
                     row.get("timestamp"),
                     True,
+                    service_tier_from_payload(row),
                 )
             )
 
     if not items:
-        items.append((normalize_usage(fallback_usage), fallback_model, fallback_timestamp, False))
+        items.append(
+            (
+                normalize_usage(fallback_usage),
+                fallback_model,
+                fallback_timestamp,
+                False,
+                service_tier_from_payload({"service_tier": fallback_service_tier}),
+            )
+        )
 
     known = True
     total_parts = {
@@ -691,9 +830,9 @@ def pricing_for_timeline(
     }
     segments_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
 
-    for usage, model, timestamp, is_request_usage in items:
+    for usage, model, timestamp, is_request_usage, service_tier in items:
         request_input_tokens = max(int(usage.get("input_tokens", 0)), 0) if is_request_usage else None
-        entry = price_entry_for_model(model, timestamp, request_input_tokens)
+        entry = price_entry_for_model(model, timestamp, request_input_tokens, service_tier)
         if entry is None:
             known = False
             continue
@@ -711,6 +850,8 @@ def pricing_for_timeline(
             entry["model"],
             entry["effective_at"],
             entry["context_tier"],
+            entry["service_tier"],
+            entry["cost_multiplier"],
             prices.get("input"),
             prices.get("cached_input"),
             prices.get("cache_write_input"),
@@ -722,6 +863,8 @@ def pricing_for_timeline(
                 "model": entry["model"],
                 "effective_at": entry["effective_at"],
                 "context_tier": entry["context_tier"],
+                "service_tier": entry["service_tier"],
+                "cost_multiplier": entry["cost_multiplier"],
                 "prices": dict(prices),
                 "usage": zero_usage(),
                 "estimated_cost_usd": 0.0,
@@ -1812,6 +1955,8 @@ class RemoteSnapshotStore:
                                 or transformed.get("total_token_usage")
                             ),
                             transformed_detail.get("end_at") or transformed.get("end_at"),
+                            transformed_detail.get("service_tier")
+                            or transformed.get("service_tier"),
                         )
                         transformed_detail.update(pricing)
                         for key in (
@@ -2589,6 +2734,7 @@ class CodexUsageAnalyzer:
                     fingerprint = (
                         str(row.get("timestamp") or ""),
                         str(row.get("model") or ""),
+                        str(row.get("service_tier") or ""),
                         timeline_usage_fingerprint(row),
                     )
                     if fingerprint in seen_timeline:
@@ -2675,6 +2821,7 @@ class CodexUsageAnalyzer:
                 "project_branch",
                 "is_git_worktree",
                 "model",
+                "service_tier",
                 "effort",
                 "originator",
                 "cli_version",
@@ -2732,6 +2879,11 @@ class CodexUsageAnalyzer:
                 timeline,
                 merged.get("model"),
             )
+            merged["service_tiers"] = unique_service_tiers(
+                *[detail.get("service_tiers") for detail in details],
+                timeline,
+                merged.get("service_tier"),
+            )
             merged["token_event_count"] = len(timeline)
             merged["turn_count"] = len(turn_ids) or len(tasks) or len(timeline)
             merged["completed_turn_count"] = len(tasks)
@@ -2760,6 +2912,9 @@ class CodexUsageAnalyzer:
                 )
                 merged["branch_total_token_usage"] = dict(merged["total_token_usage"])
                 merged["model"] = str(timeline[-1].get("model") or merged.get("model") or "")
+                merged["service_tier"] = str(
+                    timeline[-1].get("service_tier") or merged.get("service_tier") or ""
+                )
                 merged["model_context_window"] = timeline[-1].get("model_context_window")
                 merged["latest_rate_limits"] = timeline[-1].get("rate_limits")
 
@@ -2780,6 +2935,7 @@ class CodexUsageAnalyzer:
                     str(merged.get("model") or ""),
                     normalize_usage(merged.get("total_token_usage")),
                     merged.get("end_at"),
+                    merged.get("service_tier"),
                 )
             )
             merged_summary = dict(first_summary)
@@ -2803,6 +2959,7 @@ class CodexUsageAnalyzer:
                         str(detail.get("model") or ""),
                         normalize_usage(detail.get("total_token_usage")),
                         detail.get("end_at"),
+                        detail.get("service_tier"),
                     )
                 )
                 summary.update({field: detail.get(field) for field in SUMMARY_KEYS})
@@ -2829,10 +2986,20 @@ class CodexUsageAnalyzer:
             detail["model"] = str(
                 normalized_timeline[-1].get("model") or detail.get("model") or ""
             )
+            detail["service_tier"] = str(
+                normalized_timeline[-1].get("service_tier")
+                or detail.get("service_tier")
+                or ""
+            )
             detail["models"] = unique_models(
                 detail.get("models"),
                 normalized_timeline,
                 detail.get("model"),
+            )
+            detail["service_tiers"] = unique_service_tiers(
+                detail.get("service_tiers"),
+                normalized_timeline,
+                detail.get("service_tier"),
             )
             input_tokens = int(total_usage.get("input_tokens", 0))
             detail["cached_input_percent"] = (
@@ -2846,6 +3013,7 @@ class CodexUsageAnalyzer:
                     str(detail.get("model") or ""),
                     total_usage,
                     normalized_timeline[-1].get("timestamp"),
+                    detail.get("service_tier"),
                 )
             )
             summary.update({field: detail.get(field) for field in SUMMARY_KEYS})
@@ -2997,15 +3165,23 @@ class CodexUsageAnalyzer:
             period_models = unique_models(rebased, detail.get("model") if not rebased else None)
             if rebased:
                 detail["model"] = str(rebased[-1].get("model") or detail.get("model") or "")
+                detail["service_tier"] = str(
+                    rebased[-1].get("service_tier") or detail.get("service_tier") or ""
+                )
                 detail["models"] = period_models or unique_models(detail["model"])
             else:
                 detail["models"] = period_models or unique_models(detail.get("models"), detail.get("model"))
+            detail["service_tiers"] = unique_service_tiers(
+                rebased,
+                detail.get("service_tier"),
+            )
             detail.update(
                 pricing_for_timeline(
                     rebased,
                     str(detail.get("model") or ""),
                     total_usage,
                     rebased[-1].get("timestamp") if rebased else detail.get("end_at"),
+                    detail.get("service_tier"),
                 )
             )
             if rebased:
@@ -3633,15 +3809,23 @@ class CodexUsageAnalyzer:
         period_models = unique_models(timeline, detail.get("model") if not timeline else None)
         if timeline:
             ranged["model"] = str(timeline[-1].get("model") or detail.get("model") or "")
+            ranged["service_tier"] = str(
+                timeline[-1].get("service_tier") or detail.get("service_tier") or ""
+            )
             ranged["models"] = period_models or unique_models(ranged["model"])
         else:
             ranged["models"] = period_models or unique_models(detail.get("models"), detail.get("model"))
+        ranged["service_tiers"] = unique_service_tiers(
+            timeline,
+            ranged.get("service_tier"),
+        )
         ranged.update(
             pricing_for_timeline(
                 timeline,
                 str(ranged.get("model") or detail.get("model") or ""),
                 total_usage,
                 timeline[-1].get("timestamp") if timeline else end_at,
+                ranged.get("service_tier"),
             )
         )
         ranged["cached_input_percent"] = cached_percent
@@ -3798,6 +3982,8 @@ class CodexUsageAnalyzer:
         cwd = str(base.get("cwd") or "")
         model = str(base.get("model") or "")
         models = unique_models(base.get("models"), model)
+        service_tier = str(base.get("service_tier") or "").strip().lower()
+        service_tiers = unique_service_tiers(base.get("service_tiers"), service_tier)
         effort = str(base.get("effort") or "")
         originator = str(base.get("originator") or "")
         cli_version = str(base.get("cli_version") or "")
@@ -3859,6 +4045,17 @@ class CodexUsageAnalyzer:
             if cleaned not in models:
                 models.append(cleaned)
 
+        def note_service_tier(value: Any) -> None:
+            nonlocal service_tier
+            if not isinstance(value, str):
+                return
+            cleaned = value.strip().lower()
+            if not cleaned:
+                return
+            service_tier = cleaned
+            if cleaned not in service_tiers:
+                service_tiers.append(cleaned)
+
         rollout_stats = RolloutReadStats()
         for item in read_rollout_jsonl(
             path,
@@ -3891,6 +4088,7 @@ class CodexUsageAnalyzer:
                     originator = str(payload.get("originator") or originator)
                     cli_version = str(payload.get("cli_version") or cli_version)
                     note_model(model_from_payload(payload) or model)
+                    note_service_tier(service_tier_from_payload(payload))
 
                     raw_thread_source = payload.get("thread_source")
                     if isinstance(raw_thread_source, str):
@@ -3951,6 +4149,7 @@ class CodexUsageAnalyzer:
                     turn_ids.add(turn_id)
                 cwd = str(payload.get("cwd") or cwd)
                 note_model(model_from_payload(payload) or model)
+                note_service_tier(service_tier_from_payload(payload))
                 effort = str(
                     payload.get("effort")
                     or payload.get("reasoning_effort")
@@ -3980,6 +4179,7 @@ class CodexUsageAnalyzer:
                     # Desktop/WSL model switches often arrive here before the next
                     # turn_context, so apply them immediately for timeline pricing.
                     note_model(model_from_payload(payload))
+                    note_service_tier(service_tier_from_payload(payload))
                     thread_settings = (
                         payload.get("thread_settings")
                         if isinstance(payload.get("thread_settings"), dict)
@@ -4004,6 +4204,11 @@ class CodexUsageAnalyzer:
                         token_event_count += 1
                         # Prefer explicit model on the token event when present.
                         note_model(model_from_payload(info) or model_from_payload(payload) or model)
+                        note_service_tier(
+                            service_tier_from_payload(info)
+                            or service_tier_from_payload(payload)
+                            or service_tier
+                        )
                         total_usage = normalize_usage(info.get("total_token_usage"))
                         last_usage = normalize_usage(info.get("last_token_usage"))
                         window = info.get("model_context_window")
@@ -4013,6 +4218,7 @@ class CodexUsageAnalyzer:
                             {
                                 "timestamp": timestamp,
                                 "model": model,
+                                "service_tier": service_tier,
                                 "total_token_usage": total_usage,
                                 "last_token_usage": last_usage,
                                 "model_context_window": model_context_window,
@@ -4086,12 +4292,19 @@ class CodexUsageAnalyzer:
         # Rebuild from timeline so incremental cache bases without `models`
         # still surface every model that actually generated token events.
         models = unique_models(models, timeline, model)
+        service_tiers = unique_service_tiers(service_tiers, timeline, service_tier)
 
         cached_percent = None
         input_tokens = total_usage.get("input_tokens", 0)
         if input_tokens:
             cached_percent = round(total_usage.get("cached_input_tokens", 0) / input_tokens * 100, 1)
-        pricing = pricing_for_timeline(timeline, model, total_usage, end_at)
+        pricing = pricing_for_timeline(
+            timeline,
+            model,
+            total_usage,
+            end_at,
+            service_tier,
+        )
         project_info = self.project_info_for_cwd(cwd)
 
         detail: dict[str, Any] = {
@@ -4132,6 +4345,8 @@ class CodexUsageAnalyzer:
             "is_git_worktree": project_info.is_git_worktree,
             "model": model,
             "models": models,
+            "service_tier": service_tier,
+            "service_tiers": service_tiers,
             "effort": effort,
             "originator": originator,
             "cli_version": cli_version,
@@ -5640,6 +5855,8 @@ HTML = r"""<!doctype html>
         cacheHit: '缓存命中',
         turns: '轮次',
         reasoningEffort: '推理强度',
+        serviceTier: '服务层级',
+        fastMode: 'Fast 模式',
         conversationDetails: '对话明细',
         loading: '加载中',
         loadingData: '正在加载用量数据',
@@ -5663,7 +5880,7 @@ HTML = r"""<!doctype html>
         taskRowCount: '{tasks} 个任务 · {agents} 个 agent',
         taskTotal: '任务合计',
         mixed: '混合',
-        priceKnown: '按公开 API 标准价格估算花费',
+        priceKnown: '按公开 API 价格估算花费',
         priceUnknown: '没有匹配到公开模型价格',
         archived: '归档',
         justNow: '刚刚',
@@ -5699,6 +5916,7 @@ HTML = r"""<!doctype html>
         unitPriceSegment: '{model}：{price} / 100万 tokens · 该档合计 {tokens} tokens',
         priceShortContext: '（短上下文）',
         priceLongContext: '（长上下文）',
+        priceFastMode: '（Fast 2×）',
         cumulativeChart: '累计曲线',
         metadata: '元数据',
         totalTokens: '总 tokens',
@@ -5815,6 +6033,8 @@ HTML = r"""<!doctype html>
         cacheHit: 'Cache hit',
         turns: 'Turns',
         reasoningEffort: 'Reasoning',
+        serviceTier: 'Service tier',
+        fastMode: 'Fast mode',
         conversationDetails: 'Details',
         loading: 'Loading',
         loadingData: 'Loading usage data',
@@ -5874,6 +6094,7 @@ HTML = r"""<!doctype html>
         unitPriceSegment: '{model}: {price} / 1M tokens · {tokens} tokens at this rate',
         priceShortContext: ' (short context)',
         priceLongContext: ' (long context)',
+        priceFastMode: ' (Fast 2x)',
         cumulativeChart: 'Cumulative Chart',
         metadata: 'Metadata',
         totalTokens: 'Total tokens',
@@ -6375,10 +6596,31 @@ HTML = r"""<!doctype html>
       return modelsOf(row).join(', ');
     }
 
+    function serviceTiersOf(row) {
+      if (Array.isArray(row?.service_tiers) && row.service_tiers.length) {
+        return row.service_tiers.map(tier => String(tier || '').toLowerCase()).filter(Boolean);
+      }
+      return row?.service_tier ? [String(row.service_tier).toLowerCase()] : [];
+    }
+
+    function isFastTier(tier) {
+      return tier === 'priority' || tier === 'fast';
+    }
+
+    function serviceTierLabel(row) {
+      return serviceTiersOf(row)
+        .map(tier => isFastTier(tier) ? t('fastMode') : tier)
+        .join(', ');
+    }
+
     function modelBadges(row) {
-      return modelsOf(row)
+      const models = modelsOf(row)
         .map(model => `<span class="badge">${escapeHtml(model)}</span>`)
         .join('');
+      const fast = serviceTiersOf(row).some(isFastTier)
+        ? `<span class="badge">${escapeHtml(t('fastMode'))}</span>`
+        : '';
+      return models + fast;
     }
 
     function populateModelFilter() {
@@ -7468,6 +7710,7 @@ HTML = r"""<!doctype html>
         return `
           <tr>
             <td title="${escapeHtml(fmtDate(row.timestamp))}">${escapeHtml(fmtRelativeTime(row.timestamp))}</td>
+            <td>${escapeHtml(serviceTierLabel(row) || 'N/A')}</td>
             <td class="number">${fmt(last.total_tokens)}</td>
             <td class="number">${fmt(last.input_tokens)}</td>
             <td class="number">${fmt(last.cached_input_tokens)}</td>
@@ -7511,6 +7754,7 @@ HTML = r"""<!doctype html>
           ${kv(t('cost'), fmtUsd(detail.estimated_cost_usd))}
           ${kv(t('cachePercent'), detail.cached_input_percent == null ? '' : detail.cached_input_percent + '%')}
           ${kv(t('reasoningEffort'), detail.effort || 'N/A')}
+          ${kv(t('serviceTier'), serviceTierLabel(detail) || 'N/A')}
           ${kv(t('time'), `${fmtRelativeTime(detail.end_at)} (${fmtDate(detail.start_at)} - ${fmtDate(detail.end_at)})`)}
           ${kv(t('totalDuration'), fmtDuration(detail.duration_ms_total))}
           ${kv(t('ttftAvg'), fmtDuration(detail.time_to_first_token_ms_avg))}
@@ -7537,7 +7781,7 @@ HTML = r"""<!doctype html>
         ${toolRows ? `<table class="mini-table"><thead><tr><th>${escapeHtml(t('tool'))}</th><th>${escapeHtml(t('count'))}</th></tr></thead><tbody>${toolRows}</tbody></table>` : `<div class="notice">${escapeHtml(t('noToolCalls'))}</div>`}
 
         <div class="section-label">${escapeHtml(t('timelineDetails'))}</div>
-        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table timeline-table"><thead><tr><th>${escapeHtml(t('timelineTime'))}</th><th>${escapeHtml(t('timelineTotal'))}</th><th>${escapeHtml(t('input'))}</th><th>${escapeHtml(t('cached'))}</th><th>${escapeHtml(t('cacheWrite'))}</th><th>${escapeHtml(t('output'))}</th><th>${escapeHtml(t('reasoning'))}</th></tr></thead><tbody>${timelineRows}</tbody></table></div>` : `<div class="notice">${escapeHtml(t('noTimeline'))}</div>`}
+        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table timeline-table"><thead><tr><th>${escapeHtml(t('timelineTime'))}</th><th>${escapeHtml(t('serviceTier'))}</th><th>${escapeHtml(t('timelineTotal'))}</th><th>${escapeHtml(t('input'))}</th><th>${escapeHtml(t('cached'))}</th><th>${escapeHtml(t('cacheWrite'))}</th><th>${escapeHtml(t('output'))}</th><th>${escapeHtml(t('reasoning'))}</th></tr></thead><tbody>${timelineRows}</tbody></table></div>` : `<div class="notice">${escapeHtml(t('noTimeline'))}</div>`}
       `;
       drawTimeline(detail.timeline || []);
     }
@@ -7567,8 +7811,9 @@ HTML = r"""<!doctype html>
         const tier = segment.context_tier === 'long'
           ? t('priceLongContext')
           : (segment.context_tier === 'short' ? t('priceShortContext') : '');
+        const fast = Number(segment.cost_multiplier) === 2 ? t('priceFastMode') : '';
         return [t('unitPriceSegment', {
-          model: `${segment.model || 'unknown'}${tier}`,
+          model: `${segment.model || 'unknown'}${tier}${fast}`,
           price: fmtUsdRate(price),
           tokens: fmt(tokens),
         })];

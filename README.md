@@ -55,6 +55,7 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Compact list columns for total tokens, output tokens, cost, cache hit rate, turns, model, and reasoning effort.
 - Detail view with token breakdown, estimated dollar cost, and hoverable unit prices for input, cached input, cache writes, output, and reasoning.
 - Effective-dated pricing with per-request GPT-5.6 short/long context tiers, so earlier usage is not repriced when a new model launches.
+- Fast mode detection from each session's recorded service tier, using published model-specific Fast rates (2x for the GPT-5.6 family).
 - Fork-aware subagent accounting: inherited parent history is removed from child totals, costs, and timelines instead of being counted again.
 - Token-count timeline with latest entries shown first.
 - Tool call counts, project path, log file path, and session metadata.
@@ -156,7 +157,7 @@ Under WSL, the default scan also includes:
 /mnt/c/Users/<you>/.codex/archived_sessions
 ```
 
-It parses Codex `token_count` events, including `total_token_usage`, `last_token_usage`, model context window, task timing, and tool calls.
+It parses Codex `token_count` events, including `total_token_usage`, `last_token_usage`, model context window, task timing, and tool calls. It also tracks `thread_settings_applied.thread_settings.service_tier` changes so Fast mode is priced only for the token events recorded after that mode becomes active.
 
 ## Privacy
 
@@ -165,7 +166,7 @@ This is a local dashboard. It does not upload your Codex logs. It starts a local
 ## Limitations
 
 - Codex-only: designed for OpenAI Codex Desktop/CLI local session logs.
-- Cost is an estimate from public standard API prices and may not match ChatGPT/Codex subscription billing.
+- Cost is an estimate from public API prices, including the documented Fast mode multiplier, and may not match ChatGPT/Codex subscription billing.
 - `codex-auto-review` is shown as $0.00 by dashboard convention; this is not a public API unit price.
 - Automatic remote syncing across machines is not included. Multi-device support is manual export/import. WSL + Windows works on the same machine when the Windows profile is mounted under `/mnt/c`.
 

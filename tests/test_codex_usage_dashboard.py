@@ -977,6 +977,197 @@ class CodexUsageDashboardTests(unittest.TestCase):
             "2026-07-09T17:00:00Z",
         )
 
+    def test_fast_mode_uses_published_model_multipliers(self) -> None:
+        usage = {
+            "input_tokens": 1_000_000,
+            "cached_input_tokens": 0,
+            "output_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+        }
+        timestamp = "2026-07-24T00:00:00Z"
+        standard_cost = dashboard.estimate_cost_usd(usage, "gpt-5.4", timestamp)
+
+        self.assertEqual(standard_cost, 17.5)
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.4", timestamp, "priority"),
+            35.0,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.4", timestamp, "fast"),
+            35.0,
+        )
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.4", timestamp, "unknown"),
+            standard_cost,
+        )
+        entry = dashboard.price_entry_for_model(
+            "gpt-5.4",
+            timestamp,
+            service_tier="priority",
+        )
+        assert entry is not None
+        self.assertEqual(entry["cost_multiplier"], 2.0)
+        self.assertEqual(entry["service_tier"], "priority")
+        self.assertEqual(entry["prices"]["input"], 5.0)
+        self.assertEqual(entry["prices"]["output"], 30.0)
+        self.assertEqual(
+            dashboard.estimate_cost_usd(usage, "gpt-5.5", timestamp, "priority"),
+            87.5,
+        )
+        self.assertIsNone(
+            dashboard.estimate_cost_usd(usage, "grok-4.5", timestamp, "priority")
+        )
+
+    def test_gpt_5_6_sol_promotion_updates_standard_and_fast_rates(self) -> None:
+        before = "2026-09-04T04:39:28.999999Z"
+        at_promotion = "2026-09-04T04:39:29Z"
+
+        self.assertEqual(
+            dashboard.price_for_model("gpt-5.6-sol", before, input_tokens=272_000),
+            dashboard.GPT_5_6_PRE_PROMOTION_MODEL_PRICES_USD_PER_M_TOKENS[
+                "gpt-5.6-sol"
+            ],
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "gpt-5.6-sol",
+                at_promotion,
+                input_tokens=272_000,
+            ),
+            dashboard.GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS["gpt-5.6-sol"],
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "gpt-5.6-sol",
+                at_promotion,
+                input_tokens=272_000,
+                service_tier="priority",
+            ),
+            {
+                "input": 8.0,
+                "cached_input": 0.8,
+                "cache_write_input": 10.0,
+                "output": 40.0,
+            },
+        )
+        self.assertEqual(
+            dashboard.price_for_model(
+                "gpt-5.6-sol",
+                at_promotion,
+                input_tokens=272_001,
+                service_tier="priority",
+            ),
+            {
+                "input": 16.0,
+                "cached_input": 1.6,
+                "cache_write_input": 20.0,
+                "output": 60.0,
+            },
+        )
+        entry = dashboard.price_entry_for_model("gpt-5.6-sol", at_promotion)
+        assert entry is not None
+        self.assertEqual(entry["effective_at"], at_promotion)
+
+    def test_parse_file_prices_service_tier_changes_per_token_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rollout-2026-07-24T00-00-00-fast-mode.jsonl"
+            first_usage = {
+                "input_tokens": 1_000_000,
+                "cached_input_tokens": 0,
+                "output_tokens": 1_000_000,
+                "total_tokens": 2_000_000,
+            }
+            total_usage = {
+                "input_tokens": 2_000_000,
+                "cached_input_tokens": 0,
+                "output_tokens": 2_000_000,
+                "total_tokens": 4_000_000,
+            }
+            rows = [
+                {
+                    "timestamp": "2026-07-24T00:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "fast-mode-session",
+                        "cwd": "/work/fast-mode",
+                        "model": "gpt-5.4",
+                    },
+                },
+                {
+                    "timestamp": "2026-07-24T00:00:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "thread_settings_applied",
+                        "thread_settings": {"service_tier": "default"},
+                    },
+                },
+                {
+                    "timestamp": "2026-07-24T00:00:02Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": first_usage,
+                            "last_token_usage": first_usage,
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-24T00:01:00Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "thread_settings_applied",
+                        "thread_settings": {"service_tier": "priority"},
+                    },
+                },
+                {
+                    "timestamp": "2026-07-24T00:01:01Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": total_usage,
+                            "last_token_usage": first_usage,
+                        },
+                    },
+                },
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+            analyzer = dashboard.CodexUsageAnalyzer(Path(temp_dir))
+            summary, detail = analyzer.parse_file(path, "active")
+            standard_period = analyzer.detail_for_period(
+                detail,
+                dashboard.parse_timestamp("2026-07-24T00:00:00Z"),
+                dashboard.parse_timestamp("2026-07-24T00:00:59Z"),
+            )
+            fast_period = analyzer.detail_for_period(
+                detail,
+                dashboard.parse_timestamp("2026-07-24T00:01:00Z"),
+                dashboard.parse_timestamp("2026-07-24T00:01:59Z"),
+            )
+
+        self.assertEqual(
+            [row["service_tier"] for row in detail["timeline"]],
+            ["default", "priority"],
+        )
+        self.assertEqual(detail["service_tier"], "priority")
+        self.assertEqual(detail["service_tiers"], ["default", "priority"])
+        self.assertEqual(summary["service_tier"], "priority")
+        self.assertEqual(detail["estimated_cost_usd"], 52.5)
+        self.assertEqual(
+            [segment["cost_multiplier"] for segment in detail["applied_price_segments"]],
+            [1.0, 2.0],
+        )
+        self.assertEqual(
+            [segment["estimated_cost_usd"] for segment in detail["applied_price_segments"]],
+            [17.5, 35.0],
+        )
+        self.assertEqual(standard_period["service_tiers"], ["default"])
+        self.assertEqual(standard_period["estimated_cost_usd"], 17.5)
+        self.assertEqual(fast_period["service_tiers"], ["priority"])
+        self.assertEqual(fast_period["estimated_cost_usd"], 35.0)
+
     def test_grok_4_5_prices_and_long_context_tier(self) -> None:
         usage = {
             "input_tokens": 100_000,
@@ -1547,6 +1738,62 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertEqual(details[sessions[0]["uid"]]["estimated_cost_usd"], 17.5)
         self.assertEqual(sessions[0]["total_token_usage"]["cache_write_tokens"], 25)
         self.assertEqual(details[sessions[0]["uid"]]["timeline"][1]["total_token_usage"]["cache_write_tokens"], 25)
+
+    def test_remote_snapshot_reprices_fast_mode_from_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = dashboard.RemoteSnapshotStore("mac-local", Path(temp_dir) / "remotes")
+            usage = {
+                "input_tokens": 1_000_000,
+                "output_tokens": 1_000_000,
+                "total_tokens": 2_000_000,
+            }
+            payload = {
+                "schema": dashboard.SNAPSHOT_SCHEMA,
+                "version": dashboard.SNAPSHOT_VERSION,
+                "device": {"short_code": "mac-fast", "label": "Fast Mac"},
+                "snapshot": {
+                    "generated_at": "2026-07-24T00:01:00Z",
+                    "sessions": [
+                        {
+                            "uid": "fast-uid",
+                            "session_id": "fast-session",
+                            "model": "gpt-5.4",
+                            "service_tier": "priority",
+                            "service_tiers": ["priority"],
+                            "total_token_usage": usage,
+                            "estimated_cost_usd": 0.0,
+                            "price_model_known": True,
+                        }
+                    ],
+                    "details_by_uid": {
+                        "fast-uid": {
+                            "uid": "fast-uid",
+                            "session_id": "fast-session",
+                            "model": "gpt-5.4",
+                            "service_tier": "priority",
+                            "service_tiers": ["priority"],
+                            "end_at": "2026-07-24T00:00:00Z",
+                            "total_token_usage": usage,
+                            "timeline": [
+                                {
+                                    "timestamp": "2026-07-24T00:00:00Z",
+                                    "model": "gpt-5.4",
+                                    "service_tier": "priority",
+                                    "total_token_usage": usage,
+                                    "last_token_usage": usage,
+                                }
+                            ],
+                        }
+                    },
+                },
+            }
+            self.assertTrue(store.import_snapshot(payload, label="Fast Mac")["ok"])
+            sessions, details, _sources = store.transformed_sessions()
+
+        detail = details[sessions[0]["uid"]]
+        self.assertEqual(sessions[0]["estimated_cost_usd"], 35.0)
+        self.assertEqual(detail["estimated_cost_usd"], 35.0)
+        self.assertEqual(detail["applied_price_segments"][0]["cost_multiplier"], 2.0)
 
     def test_scan_combines_multiple_codex_homes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2837,6 +3084,7 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertLess(html.index("${environmentBadge(group)}"), html.index('<div class="project-meta">'))
         self.assertIn("git-worktree-project-grouping", dashboard.DASHBOARD_FEATURES)
         self.assertIn("effective-dated-pricing-v1", dashboard.DASHBOARD_FEATURES)
+        self.assertIn("fast-mode-pricing-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("expandable-agent-task-rollups-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("compact-agent-task-tree-v1", dashboard.DASHBOARD_FEATURES)
         self.assertIn("aligned-agent-task-tree-v1", dashboard.DASHBOARD_FEATURES)
@@ -2858,6 +3106,8 @@ class CodexUsageDashboardTests(unittest.TestCase):
         self.assertIn('class="price-tooltip-trigger"', html)
         self.assertIn('tabindex="0"', html)
         self.assertIn("unitPriceSegment", html)
+        self.assertIn("priceFastMode", html)
+        self.assertIn("function serviceTiersOf(row)", html)
         self.assertIn("cache_write_tokens", html)
         self.assertIn("function loadDailyUsage()", html)
         self.assertIn("/api/daily-usage", html)
