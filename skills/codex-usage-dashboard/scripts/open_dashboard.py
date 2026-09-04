@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import platform
@@ -16,15 +17,15 @@ from pathlib import Path
 from urllib.request import urlopen
 
 
-HOST = "127.0.0.1"
+DEFAULT_HOST = "127.0.0.1"
 PORT = 8765
 LAUNCH_LOG_ENV = "COUSASH_DASHBOARD_LAUNCH_LOG"
 STARTUP_TIMEOUT_SECONDS = 30.0
 POLL_INTERVAL_SECONDS = 0.15
 
 
-def dashboard_url(port: int) -> str:
-    return f"http://{HOST}:{port}/"
+def dashboard_url(port: int, host: str = DEFAULT_HOST) -> str:
+    return f"http://{host}:{port}/"
 
 
 def dashboard_script() -> Path:
@@ -38,8 +39,8 @@ def dashboard_log_path() -> Path:
     return Path(tempfile.gettempdir()) / "codex-usage-dashboard.log"
 
 
-def health_dashboard_url(port: int) -> str | None:
-    url = dashboard_url(port)
+def health_dashboard_url(port: int, host: str = DEFAULT_HOST) -> str | None:
+    url = dashboard_url(port, host)
     try:
         with urlopen(url + "api/health", timeout=0.4) as response:
             if response.status != 200:
@@ -94,8 +95,8 @@ def health_dashboard_url(port: int) -> str | None:
     return None
 
 
-def dashboard_running_url() -> str | None:
-    return health_dashboard_url(PORT)
+def dashboard_running_url(host: str = DEFAULT_HOST) -> str | None:
+    return health_dashboard_url(PORT, host)
 
 
 def windows_pythonw() -> str:
@@ -116,21 +117,22 @@ def open_browser(url: str) -> None:
 
 def wait_for_dashboard_url(
     process: subprocess.Popen[bytes] | None,
+    host: str = DEFAULT_HOST,
     timeout: float = STARTUP_TIMEOUT_SECONDS,
     interval: float = POLL_INTERVAL_SECONDS,
 ) -> str | None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        running_url = dashboard_running_url()
+        running_url = dashboard_running_url(host)
         if running_url:
             return running_url
         if process is not None and process.poll() is not None:
             return None
         time.sleep(interval)
-    return dashboard_running_url()
+    return dashboard_running_url(host)
 
 
-def start_dashboard() -> subprocess.Popen[bytes] | None:
+def start_dashboard(host: str) -> subprocess.Popen[bytes] | None:
     system = platform.system()
     script = str(dashboard_script())
     log_path = dashboard_log_path()
@@ -142,7 +144,7 @@ def start_dashboard() -> subprocess.Popen[bytes] | None:
             creationflags |= getattr(subprocess, name, 0)
         with log_path.open("ab") as log_file:
             return subprocess.Popen(
-                [windows_pythonw(), "-u", script, "--port", str(PORT)],
+                [windows_pythonw(), "-u", script, "--host", host, "--port", str(PORT)],
                 cwd=str(Path(script).parent),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
@@ -157,7 +159,7 @@ def start_dashboard() -> subprocess.Popen[bytes] | None:
 
     with log_path.open("ab") as log_file:
         return subprocess.Popen(
-            [python, "-u", script, "--port", str(PORT)],
+            [python, "-u", script, "--host", host, "--port", str(PORT)],
             cwd=str(Path(script).parent),
             stdin=subprocess.DEVNULL,
             stdout=log_file,
@@ -168,14 +170,18 @@ def start_dashboard() -> subprocess.Popen[bytes] | None:
 
 
 def main() -> int:
-    running_url = dashboard_running_url()
+    parser = argparse.ArgumentParser(description="Open the bundled Codex usage dashboard.")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="Bind host. Defaults to 127.0.0.1.")
+    args = parser.parse_args()
+
+    running_url = dashboard_running_url(args.host)
     if running_url:
         open_browser(running_url)
         print(running_url)
         return 0
 
-    process = start_dashboard()
-    started_url = wait_for_dashboard_url(process)
+    process = start_dashboard(args.host)
+    started_url = wait_for_dashboard_url(process, args.host)
     if started_url:
         open_browser(started_url)
         print(started_url)
@@ -188,7 +194,7 @@ def main() -> int:
         )
         return 1
 
-    print(f"Dashboard is still starting. Try {dashboard_url(PORT)}. Logs: {dashboard_log_path()}.")
+    print(f"Dashboard is still starting. Try {dashboard_url(PORT, args.host)}. Logs: {dashboard_log_path()}.")
     return 0
 
 
