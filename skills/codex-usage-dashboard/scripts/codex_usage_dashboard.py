@@ -194,6 +194,8 @@ PARSE_CACHE_SAMPLE_BYTES = 4096
 DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
 DEFAULT_PARSE_MIN_FILES = 8
 DEFAULT_PARSE_MIN_BYTES = 256 * 1024 * 1024
+HISTORICAL_FILE_REFRESH_SECONDS = 2.0
+ACTIVE_FILE_AGE_SECONDS = 24 * 60 * 60
 
 
 def environment_int(name: str, default: int) -> int:
@@ -224,6 +226,8 @@ DASHBOARD_FEATURES = [
     "project-env-tag-in-conversation-column",
     "git-worktree-project-grouping",
     "remote-snapshot-import-v1",
+    "remote-snapshot-cache-v1",
+    "session-inventory-cache-v1",
     "effective-dated-pricing-v1",
     "bounded-period-scan-v1",
     "fork-aware-subagent-usage-v1",
@@ -1746,6 +1750,9 @@ class RemoteSnapshotStore:
     def __init__(self, current_device_code: str | None = None, root: Path | None = None):
         self.current_device_code = safe_device_code(current_device_code or current_device_short_code())
         self.root = root or remote_snapshots_dir()
+        self._cache_lock = threading.RLock()
+        self._payload_cache: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+        self._transformed_cache: dict[str, tuple[dict[str, Any], bytes]] = {}
 
     def snapshot_path(self, device_code: str) -> Path:
         code = safe_device_code(device_code)
@@ -1781,32 +1788,64 @@ class RemoteSnapshotStore:
         return read_json_file(self.snapshot_path(device_code))
 
     def read_all(self) -> list[dict[str, Any]]:
-        try:
-            paths = sorted(self.root.glob("*.json"))
-        except OSError:
-            return []
-        payloads: list[dict[str, Any]] = []
-        for path in paths:
-            payload = read_json_file(path)
-            if not payload:
-                continue
-            try:
-                code, _device, _snapshot = self.validate_snapshot(payload)
-            except ValueError:
-                continue
-            payloads.append(payload)
-        return payloads
+        return clone_json(self._read_all_cached())
 
-    def state_signature(self) -> tuple[tuple[str, int | None, int | None], ...]:
+    def _read_all_cached(self) -> list[dict[str, Any]]:
+        # Cached payloads are read-only. Import and rename use the uncached read_remote.
+        with self._cache_lock:
+            signature = self.state_signature()
+            present = {entry[0] for entry in signature}
+            for key in tuple(self._payload_cache):
+                if key not in present:
+                    self._payload_cache.pop(key, None)
+            payloads: list[dict[str, Any]] = []
+            for entry in signature:
+                key = entry[0]
+                cached = self._payload_cache.get(key)
+                if cached is not None and cached[0] == entry:
+                    payloads.append(cached[1])
+                    continue
+                self._payload_cache.pop(key, None)
+                path = Path(key)
+                payload = read_json_file(path)
+                if not payload:
+                    continue
+                try:
+                    self.validate_snapshot(payload)
+                except ValueError:
+                    continue
+                if self.remote_file_signature(path) == entry:
+                    self._payload_cache[key] = (entry, payload)
+                payloads.append(payload)
+            active_payloads = {id(payload) for payload in payloads}
+            for code, cached in tuple(self._transformed_cache.items()):
+                if id(cached[0]) not in active_payloads:
+                    self._transformed_cache.pop(code, None)
+            return payloads
+
+    @staticmethod
+    def remote_file_signature(path: Path) -> tuple[Any, ...]:
+        try:
+            stat = path.stat()
+        except OSError:
+            return (str(path), None)
+        return (str(path), *file_stat_tuple(stat), stat.st_ctime_ns)
+
+    def state_signature(self) -> tuple[tuple[Any, ...], ...]:
         try:
             paths = sorted(self.root.glob("*.json"))
         except OSError:
             return ()
-        return tuple(path_state_signature(path) for path in paths)
+        return tuple(self.remote_file_signature(path) for path in paths)
+
+    def invalidate_remote(self, device_code: str) -> None:
+        with self._cache_lock:
+            self._payload_cache.pop(str(self.snapshot_path(device_code)), None)
+            self._transformed_cache.pop(device_code, None)
 
     def list_remotes(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        for payload in self.read_all():
+        for payload in self._read_all_cached():
             try:
                 code, device, snapshot = self.validate_snapshot(payload)
             except ValueError:
@@ -1880,6 +1919,7 @@ class RemoteSnapshotStore:
             "snapshot": merged_snapshot,
         }
         safe_json_dump(self.snapshot_path(code), stored)
+        self.invalidate_remote(code)
         return {"ok": True, "remote": self.remote_metadata(stored), "created": not bool(existing)}
 
     def merge_snapshots(self, existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
@@ -1950,6 +1990,7 @@ class RemoteSnapshotStore:
         device["label"] = clean_text(label, 120) or validated_code
         payload["device"] = device
         safe_json_dump(self.snapshot_path(validated_code), payload)
+        self.invalidate_remote(validated_code)
         return self.remote_metadata(payload)
 
     def delete_remote(self, device_code: str) -> None:
@@ -1957,77 +1998,90 @@ class RemoteSnapshotStore:
         if not path.exists():
             raise FileNotFoundError(device_code)
         path.unlink()
+        self.invalidate_remote(device_code)
 
     def transformed_sessions(self) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, str]]]:
         sessions: list[dict[str, Any]] = []
         details: dict[str, dict[str, Any]] = {}
         sources: list[dict[str, str]] = []
-        for payload in self.read_all():
-            try:
+        with self._cache_lock:
+            for payload in self._read_all_cached():
                 code, device, snapshot = self.validate_snapshot(payload)
-            except ValueError:
+                cached = self._transformed_cache.get(code)
+                if cached is None or cached[0] is not payload:
+                    transformed = self.transform_snapshot(payload, code, device, snapshot)
+                    encoded = json.dumps(transformed, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    self._transformed_cache[code] = (payload, encoded)
+                else:
+                    # Decode once per publication so nested objects cannot poison the cache.
+                    transformed = json.loads(cached[1])
+                rows, remote_details, remote_sources = transformed
+                sessions.extend(rows)
+                details.update(remote_details)
+                sources.extend(remote_sources)
+        return sessions, details, sources
+
+    def transform_snapshot(
+        self,
+        payload: dict[str, Any],
+        code: str,
+        device: dict[str, Any],
+        snapshot: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, str]]]:
+        sessions: list[dict[str, Any]] = []
+        details: dict[str, dict[str, Any]] = {}
+        label = str(device.get("label") or code)
+        source_id = f"remote-{code}"
+        sources = [{"id": source_id, "label": label, "codex_home": f"remote:{code}", "is_remote": True}]
+        raw_details = snapshot.get("details_by_uid") if isinstance(snapshot.get("details_by_uid"), dict) else {}
+        for session in snapshot.get("sessions", []):
+            if not isinstance(session, dict):
                 continue
-            label = str(device.get("label") or code)
-            source_id = f"remote-{code}"
-            sources.append({"id": source_id, "label": label, "codex_home": f"remote:{code}", "is_remote": True})
-            raw_details = snapshot.get("details_by_uid") if isinstance(snapshot.get("details_by_uid"), dict) else {}
-            for session in snapshot.get("sessions", []):
-                if not isinstance(session, dict):
-                    continue
-                transformed = self.transform_row(session, code, label, source_id, payload)
-                raw_uid = session.get("uid")
-                raw_detail = raw_details.get(raw_uid) if isinstance(raw_uid, str) else None
-                if isinstance(raw_detail, dict):
-                    transformed_detail = self.transform_row(
-                        raw_detail,
-                        code,
-                        label,
-                        source_id,
-                        payload,
-                        transformed["uid"],
+            transformed = self.transform_row(session, code, label, source_id, payload)
+            raw_uid = session.get("uid")
+            raw_detail = raw_details.get(raw_uid) if isinstance(raw_uid, str) else None
+            if isinstance(raw_detail, dict):
+                transformed_detail = self.transform_row(
+                    raw_detail, code, label, source_id, payload, transformed["uid"],
+                )
+                remote_timeline = transformed_detail.get("timeline")
+                timeline_rows: list[dict[str, Any]] = []
+                if isinstance(remote_timeline, list):
+                    timeline_rows = [
+                        row
+                        for row in remote_timeline
+                        if isinstance(row, dict)
+                        and usage_has_tokens(normalize_usage(row.get("total_token_usage")))
+                    ]
+                can_reprice = bool(timeline_rows) and all(
+                    isinstance(row.get("model"), str) and bool(row.get("model"))
+                    for row in timeline_rows
+                )
+                if can_reprice:
+                    pricing = pricing_for_timeline(
+                        remote_timeline,
+                        str(transformed_detail.get("model") or transformed.get("model") or ""),
+                        normalize_usage(
+                            transformed_detail.get("total_token_usage")
+                            or transformed.get("total_token_usage")
+                        ),
+                        transformed_detail.get("end_at") or transformed.get("end_at"),
+                        transformed_detail.get("service_tier")
+                        or transformed.get("service_tier"),
                     )
-                    remote_timeline = transformed_detail.get("timeline")
-                    timeline_rows: list[dict[str, Any]] = []
-                    if isinstance(remote_timeline, list):
-                        timeline_rows = [
-                            row
-                            for row in remote_timeline
-                            if isinstance(row, dict)
-                            and usage_has_tokens(normalize_usage(row.get("total_token_usage")))
-                        ]
-                    can_reprice = bool(timeline_rows) and all(
-                        isinstance(row.get("model"), str) and bool(row.get("model"))
-                        for row in timeline_rows
-                    )
-                    if can_reprice:
-                        pricing = pricing_for_timeline(
-                            remote_timeline,
-                            str(transformed_detail.get("model") or transformed.get("model") or ""),
-                            normalize_usage(
-                                transformed_detail.get("total_token_usage")
-                                or transformed.get("total_token_usage")
-                            ),
-                            transformed_detail.get("end_at") or transformed.get("end_at"),
-                            transformed_detail.get("service_tier")
-                            or transformed.get("service_tier"),
-                        )
-                        transformed_detail.update(pricing)
-                        for key in (
-                            "estimated_cost_usd",
-                            "estimated_cost_breakdown_usd",
-                            "price_model_known",
-                        ):
-                            transformed[key] = pricing[key]
-                    else:
-                        for key in (
-                            "estimated_cost_usd",
-                            "estimated_cost_breakdown_usd",
-                            "price_model_known",
-                        ):
-                            transformed_detail[key] = transformed.get(key)
-                        transformed_detail.setdefault("applied_price_segments", [])
-                    details[transformed["uid"]] = transformed_detail
-                sessions.append({key: transformed.get(key) for key in SUMMARY_KEYS})
+                    transformed_detail.update(pricing)
+                    for key in (
+                        "estimated_cost_usd", "estimated_cost_breakdown_usd", "price_model_known",
+                    ):
+                        transformed[key] = pricing[key]
+                else:
+                    for key in (
+                        "estimated_cost_usd", "estimated_cost_breakdown_usd", "price_model_known",
+                    ):
+                        transformed_detail[key] = transformed.get(key)
+                    transformed_detail.setdefault("applied_price_segments", [])
+                details[transformed["uid"]] = transformed_detail
+            sessions.append({key: transformed.get(key) for key in SUMMARY_KEYS})
         return sessions, details, sources
 
     def transform_row(
@@ -2371,6 +2425,7 @@ class CodexUsageAnalyzer:
         persistent_cache: PersistentParseCache | None = None,
         resolve_project_info: bool = True,
         parallel_workers: int = 0,
+        inventory_refresh_seconds: float | None = None,
     ):
         if isinstance(codex_home, list):
             if codex_home and isinstance(codex_home[0], CodexLogSource):
@@ -2410,7 +2465,28 @@ class CodexUsageAnalyzer:
             tuple[tuple[Any, ...], dict[str, Any]],
         ] = {}
         self._project_info_cache: dict[str, ProjectInfo] = {}
-        self._session_meta_cache: dict[str, tuple[int, int, dict[str, Any]]] = {}
+        self._session_meta_cache: dict[str, tuple[tuple[int, ...], dict[str, Any]]] = {}
+        self._directory_cache: dict[
+            Path, tuple[tuple[int, ...], list[Path], list[Path]],
+        ] = {}
+        self._inventory_stats: dict[Path, tuple[float, os.stat_result]] = {}
+        self._fresh_inventory_stats: set[Path] = set()
+        self._scan_file_stats: dict[Path, os.stat_result] = {}
+        self._history_refresh_intervals = {
+            source.id: (
+                max(0.0, inventory_refresh_seconds)
+                if inventory_refresh_seconds is not None
+                else HISTORICAL_FILE_REFRESH_SECONDS
+                if re.match(r"^/mnt/[a-zA-Z]/", str(source.codex_home))
+                else 0.0
+            )
+            for source in sources
+        }
+        self._dependency_index_signature: tuple[Any, ...] | None = None
+        self._metadata_by_path: dict[str, dict[str, Any]] = {}
+        self._files_by_thread: dict[
+            tuple[str, str], list[tuple[CodexLogSource, Path, str]],
+        ] = {}
         self._file_component_revisions: dict[
             str,
             tuple[FileParseCacheEntry, int],
@@ -2539,35 +2615,107 @@ class CodexUsageAnalyzer:
     def cached_session_meta(self, path: Path) -> dict[str, Any]:
         path_key = self.resolved_path_key(path)
         try:
-            stat = path.stat()
+            stat = self.session_file_stat(path)
         except OSError:
             return {}
         cached = self._session_meta_cache.get(path_key)
-        if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
-            return cached[2]
+        signature = (*file_stat_tuple(stat), stat.st_ctime_ns)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
         payload = first_session_meta_payload(path)
-        self._session_meta_cache[path_key] = (stat.st_mtime_ns, stat.st_size, payload)
+        self._session_meta_cache[path_key] = (signature, payload)
         return payload
+
+    def session_file_stat(self, path: Path) -> os.stat_result:
+        stat = self._scan_file_stats.get(path)
+        return stat if stat is not None else path.stat()
+
+    def session_file_signature(self, path: Path) -> tuple[Any, ...]:
+        stat = self.session_file_stat(path)
+        return (str(path), *file_stat_tuple(stat), stat.st_ctime_ns)
+
+    def session_directory_entries(
+        self, directory: Path, checked_at: float,
+    ) -> tuple[list[Path], list[Path]]:
+        try:
+            stat = directory.stat()
+            signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_dev, stat.st_ino)
+            cached = self._directory_cache.get(directory)
+            if cached is not None and cached[0] == signature:
+                return cached[1], cached[2]
+            files: list[Path] = []
+            directories: list[Path] = []
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    path = Path(entry.path)
+                    if entry.is_dir(follow_symlinks=False):
+                        directories.append(path)
+                    elif path.match("*.jsonl"):
+                        try:
+                            file_stat = entry.stat()
+                        except OSError:
+                            continue
+                        files.append(path)
+                        self._inventory_stats[path] = (checked_at, file_stat)
+                        self._fresh_inventory_stats.add(path)
+            self._directory_cache[directory] = (signature, files, directories)
+            return files, directories
+        except OSError:
+            self._directory_cache.pop(directory, None)
+            return [], []
 
     def iter_session_files(self) -> list[tuple[CodexLogSource, Path, str]]:
         files: list[tuple[CodexLogSource, Path, str]] = []
+        self._scan_file_stats = {}
+        self._fresh_inventory_stats.clear()
+        checked_at = time.monotonic()
+        active_since = time.time() - ACTIVE_FILE_AGE_SECONDS
+        visited_directories: set[Path] = set()
         for log_source in self.codex_sources:
-            sessions_dir = log_source.codex_home / "sessions"
-            archived_dir = log_source.codex_home / "archived_sessions"
+            refresh_interval = self._history_refresh_intervals[log_source.id]
+            pending = [
+                (log_source.codex_home / "archived_sessions", "archived"),
+                (log_source.codex_home / "sessions", "active"),
+            ]
+            while pending:
+                directory, source = pending.pop()
+                visited_directories.add(directory)
+                paths, subdirectories = self.session_directory_entries(directory, checked_at)
+                if source == "active":
+                    pending.extend((path, source) for path in reversed(subdirectories))
+                for path in paths:
+                    cached = self._inventory_stats.get(path)
+                    if cached is not None and (
+                        path in self._fresh_inventory_stats
+                        or (
+                            cached[1].st_mtime < active_since
+                            and 0 <= checked_at - cached[0] < refresh_interval
+                        )
+                    ):
+                        stat = cached[1]
+                    else:
+                        try:
+                            stat = path.stat()
+                        except OSError:
+                            self._inventory_stats.pop(path, None)
+                            continue
+                        self._inventory_stats[path] = (checked_at, stat)
+                    self._scan_file_stats[path] = stat
+                    files.append((log_source, path, source))
 
-            if sessions_dir.exists():
-                for path in sessions_dir.rglob("*.jsonl"):
-                    files.append((log_source, path, "active"))
-            if archived_dir.exists():
-                for path in archived_dir.glob("*.jsonl"):
-                    files.append((log_source, path, "archived"))
-
-        files.sort(key=lambda item: item[1].stat().st_mtime if item[1].exists() else 0, reverse=True)
+        for directory in tuple(self._directory_cache):
+            if directory not in visited_directories:
+                self._directory_cache.pop(directory, None)
+        for path in tuple(self._inventory_stats):
+            if path not in self._scan_file_stats:
+                self._inventory_stats.pop(path, None)
+                self._session_meta_cache.pop(str(path), None)
+        files.sort(key=lambda item: self._scan_file_stats[item[1]].st_mtime_ns, reverse=True)
         return files
 
     def scan_signature(self, files: list[tuple[CodexLogSource, Path, str]], include_remotes: bool) -> tuple[Any, ...]:
         file_signature = tuple(
-            (log_source.id, source, *path_state_signature(path))
+            (log_source.id, source, *self.session_file_signature(path))
             for log_source, path, source in files
         )
         title_signature = tuple(
@@ -2646,8 +2794,8 @@ class CodexUsageAnalyzer:
             return cached
         return snapshot
 
-    @staticmethod
     def files_modified_since(
+        self,
         files: list[tuple[CodexLogSource, Path, str]],
         start_at: dt.datetime,
     ) -> list[tuple[CodexLogSource, Path, str]]:
@@ -2655,7 +2803,7 @@ class CodexUsageAnalyzer:
         candidates: list[tuple[CodexLogSource, Path, str]] = []
         for item in files:
             try:
-                if item[1].stat().st_mtime_ns >= cutoff_ns:
+                if self.session_file_stat(item[1]).st_mtime_ns >= cutoff_ns:
                     candidates.append(item)
             except OSError:
                 continue
@@ -2666,19 +2814,24 @@ class CodexUsageAnalyzer:
         candidates: list[tuple[CodexLogSource, Path, str]],
         all_files: list[tuple[CodexLogSource, Path, str]],
     ) -> list[tuple[CodexLogSource, Path, str]]:
-        metadata_by_path: dict[str, dict[str, Any]] = {}
-        files_by_thread: dict[
-            tuple[str, str],
-            list[tuple[CodexLogSource, Path, str]],
-        ] = {}
-        for item in all_files:
-            log_source, path, _source = item
-            path_key = self.resolved_path_key(path)
-            payload = self.cached_session_meta(path)
-            metadata_by_path[path_key] = payload
-            session_id = payload.get("id") or payload.get("session_id")
-            if isinstance(session_id, str) and session_id:
-                files_by_thread.setdefault((log_source.id, session_id), []).append(item)
+        signature = tuple(
+            (log_source.id, source, *self.session_file_signature(path))
+            for log_source, path, source in all_files
+        )
+        if signature != self._dependency_index_signature:
+            self._metadata_by_path = {}
+            self._files_by_thread = {}
+            for item in all_files:
+                log_source, path, _source = item
+                path_key = self.resolved_path_key(path)
+                payload = self.cached_session_meta(path)
+                self._metadata_by_path[path_key] = payload
+                session_id = payload.get("id") or payload.get("session_id")
+                if isinstance(session_id, str) and session_id:
+                    self._files_by_thread.setdefault((log_source.id, session_id), []).append(item)
+            self._dependency_index_signature = signature
+        metadata_by_path = self._metadata_by_path
+        files_by_thread = self._files_by_thread
 
         selected = {self.resolved_path_key(item[1]): item for item in candidates}
         queue = list(candidates)

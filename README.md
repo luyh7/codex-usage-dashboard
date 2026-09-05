@@ -60,6 +60,7 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Token-count timeline with latest entries shown first.
 - Tool call counts, project path, log file path, and session metadata.
 - Local and read-only: reads Codex session logs from one or more local Codex homes; does not modify Codex logs.
+- Reuses unchanged remote snapshots and cached session directory listings. Active logs are checked on every refresh; historical file metadata on Windows drives mounted under WSL is reused for up to two seconds between refreshes. New files, replacements, and archive moves invalidate their directory cache on the next refresh.
 - Manual multi-device snapshots: export `cousash-<device-short-code>.json` from one device and import it into another dashboard as remote data.
 - WSL + Windows support: when running in WSL, automatically merges WSL `~/.codex` with Windows `/mnt/c/Users/<you>/.codex` when present.
 - Cross-platform: works on Windows and macOS with Python 3.
