@@ -1124,6 +1124,105 @@ class CodexUsageDashboardTests(unittest.TestCase):
             dashboard.estimate_cost_usd(usage, "grok-4.5", timestamp, "priority")
         )
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js is needed for UI behavior checks")
+    def test_model_badges_show_fast_only_for_latest_fast_tier(self) -> None:
+        functions = dashboard.HTML.split("    function serviceTiersOf(row) {", 1)[1].split("    function populateModelFilter()", 1)[0]
+        script = '''
+const assert = require('node:assert/strict');
+const modelsOf = row => [row.model];
+const escapeHtml = value => value;
+const t = key => ({fastMode: 'Fast mode', standardMode: 'Standard mode'})[key];
+''' + "function serviceTiersOf(row) {" + functions + '''
+const mixed = {model: 'gpt-6-astra', service_tier: 'default', service_tiers: ['priority', 'default']};
+const model = '<span class="badge">gpt-6-astra</span>';
+assert.equal(modelBadges(mixed), model);
+assert.equal(serviceTierLabel(mixed), 'Fast mode, Standard mode');
+for (const service_tier of ['priority', 'fast']) {
+  assert.equal(modelBadges({...mixed, service_tier}), model + '<span class="badge">Fast</span>');
+}
+for (const service_tier of ['default', 'standard', '']) {
+  assert.equal(modelBadges({...mixed, service_tier}), model);
+}
+'''
+        result = subprocess.run(["node", "-e", script], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_runtime_log_tier_reprices_cached_rollouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            path = self.write_rollout_rows(home, "runtime-tier", [
+                {"timestamp": "2026-09-05T00:00:00Z", "type": "session_meta", "payload": {"id": "runtime-tier", "model": "gpt-6-astra"}},
+                {"timestamp": "2026-09-05T00:00:02Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 100}, "last_token_usage": {"input_tokens": 100}}}},
+                {"timestamp": "2026-09-05T00:00:04Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 200}, "last_token_usage": {"input_tokens": 100}}}},
+            ])
+            analyzer = dashboard.CodexUsageAnalyzer(home, resolve_project_info=False)
+            first = analyzer.scan("all", include_remotes=False)
+            self.assertAlmostEqual(first["sessions"][0]["estimated_cost_usd"], 0.002)
+            with sqlite3.connect(home / "logs_2.sqlite") as connection:
+                connection.execute("CREATE TABLE logs (id INTEGER PRIMARY KEY, ts INTEGER, ts_nanos INTEGER, thread_id TEXT, target TEXT, feedback_log_body TEXT)")
+                base = int(dt.datetime(2026, 9, 5, tzinfo=dt.UTC).timestamp())
+                connection.execute("INSERT INTO logs VALUES (1, ?, 0, 'runtime-tier', 'codex_core::session::handlers', ?)", (base + 1, 'Submission sub=Submission { op: TurnInput { request: TurnInputRequest { thread_settings: ThreadSettingsOverrides { service_tier: Some(Some("priority")) }, start: TurnStartOptions { service_tier: None } } } }'))
+            second = analyzer.scan("all", include_remotes=False)
+            self.assertEqual(second["sessions"][0]["service_tiers"], ["priority"])
+            self.assertAlmostEqual(second["sessions"][0]["estimated_cost_usd"], 0.004)
+            with sqlite3.connect(home / "logs_2.sqlite") as connection:
+                connection.execute("INSERT INTO logs VALUES (2, ?, 0, 'runtime-tier', 'codex_core::session::handlers', ?)", (base + 3, 'Submission sub=Submission { op: TurnInput { request: TurnInputRequest { thread_settings: ThreadSettingsOverrides { service_tier: Some(None) } } } }'))
+            third = analyzer.scan("all", include_remotes=False)
+            self.assertEqual(third["sessions"][0]["service_tiers"], ["priority", "default"])
+            self.assertAlmostEqual(third["sessions"][0]["estimated_cost_usd"], 0.003)
+            self.assertEqual(analyzer.cache_metrics["full_parses"], 1)
+            self.assertEqual(analyzer.scan("all", include_remotes=False)["snapshot_token"], third["snapshot_token"])
+            analyzer.close()
+
+    def test_runtime_tiers_respect_rollout_events_and_request_timestamps(self) -> None:
+        original = [{"timestamp": "2026-09-05T00:00:00Z", "service_tier": ""},
+                    {"timestamp": "2026-09-05T00:00:02Z", "service_tier": ""},
+                    {"timestamp": "2026-09-05T00:00:04Z", "service_tier": "default"}]
+        detail = {"timeline": original, "_service_tier_events": [
+            {"timestamp": "2026-09-05T00:00:03Z", "service_tier": "default"},
+        ]}
+        dashboard.apply_runtime_service_tiers(detail, [
+            {"timestamp": "2026-09-05T00:00:01Z", "service_tier": "priority"},
+            {"timestamp": "2026-09-05T00:00:03Z", "service_tier": "priority"},
+        ])
+        self.assertEqual([row["service_tier"] for row in detail["timeline"]], ["", "priority", "default"])
+        self.assertEqual(original[1]["service_tier"], "")
+
+    def test_runtime_tiers_tolerate_unavailable_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            self.assertEqual(dashboard.runtime_service_tier_events(home, {"thread"}), {})
+            self.assertFalse((home / "logs_2.sqlite").exists())
+            with sqlite3.connect(home / "logs_2.sqlite"):
+                pass
+            self.assertEqual(dashboard.runtime_service_tier_events(home, {"thread"}), {})
+
+    def test_runtime_log_tier_ignores_message_text_and_nested_settings(self) -> None:
+        body = 'Submission sub=Submission { op: TurnInput { request: TurnInputRequest { input: "thread_settings: ThreadSettingsOverrides { service_tier: Some(Some(\\"priority\\")) }", thread_settings: ThreadSettingsOverrides { service_tier: None, collaboration_mode: Settings { service_tier: Some(Some("priority")) } } } } }'
+        self.assertEqual(dashboard.service_tier_from_runtime_log(body), "")
+        self.assertEqual(dashboard.service_tier_from_runtime_log('unrelated service_tier: Some(Some("priority"))'), "")
+
+    def test_gpt_6_astra_effective_date_context_and_fast_pricing(self) -> None:
+        self.assertIsNone(dashboard.price_for_model("gpt-6-astra", "2026-09-02T23:59:59Z"))
+        short = {"input": 10.0, "cached_input": 1.0, "cache_write_input": 12.5, "output": 50.0}
+        long = {"input": 20.0, "cached_input": 2.0, "cache_write_input": 25.0, "output": 75.0}
+        for timestamp in ("2026-09-03T00:00:00Z", "2026-09-05T00:00:00Z", None):
+            for model in ("gpt-6-astra", "jws/gpt-6-astra"):
+                for tokens, rates, tier in ((272_000, short, "short"), (272_001, long, "long")):
+                    for service_tier, multiplier in (("", 1), ("priority", 2), ("fast", 2)):
+                        with self.subTest(timestamp=timestamp, model=model, tokens=tokens, service_tier=service_tier):
+                            entry = dashboard.price_entry_for_model(model, timestamp, tokens, service_tier)
+                            self.assertIsNotNone(entry)
+                            self.assertEqual(entry["prices"], {key: value * multiplier for key, value in rates.items()})
+                            self.assertEqual(entry["context_tier"], tier)
+                            self.assertEqual(entry["effective_at"], "2026-09-03T00:00:00Z")
+        usage = {"input_tokens": 200_000, "cached_input_tokens": 50_000, "cache_write_tokens": 50_000, "output_tokens": 10_000}
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-astra"), 2.175)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-astra", service_tier="priority"), 4.35)
+        usage["input_tokens"] = 300_000
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-astra"), 6.1)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-astra", service_tier="priority"), 12.2)
+
     def test_gpt_5_6_sol_promotion_updates_standard_and_fast_rates(self) -> None:
         before = "2026-09-04T04:39:28.999999Z"
         at_promotion = "2026-09-04T04:39:29Z"

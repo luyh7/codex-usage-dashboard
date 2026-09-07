@@ -49,6 +49,7 @@ TOKEN_KEYS = (
 # Codex persists Fast mode as `priority`; the API also accepts `fast` as input.
 FAST_MODE_SERVICE_TIERS = {"fast", "priority"}
 FAST_MODE_COST_MULTIPLIERS_BY_MODEL = {
+    "gpt-6-astra": 2.0,
     "codex-auto-review": 1.0,
     "gpt-5.6": 2.0,
     "gpt-5.6-sol": 2.0,
@@ -152,10 +153,22 @@ GROK_4_5_LONG_CONTEXT_INPUT_THRESHOLD = 200_000
 GROK_4_5_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "grok-4.5": {"input": 4.00, "cached_input": 0.60, "output": 12.00},
 }
+# Official launch date: https://developers.openai.com/api/docs/changelog
+# No launch time is published; use the start of September 3 in UTC.
+GPT_6_ASTRA_PRICING_EFFECTIVE_AT = dt.datetime(2026, 9, 3, tzinfo=dt.UTC)
+# https://developers.openai.com/api/docs/models/gpt-6-astra
+GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-6-astra": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 50.00},
+}
+GPT_6_ASTRA_LONG_CONTEXT_INPUT_THRESHOLD = 272_000
+GPT_6_ASTRA_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-6-astra": {"input": 20.00, "cached_input": 2.00, "cache_write_input": 25.00, "output": 75.00},
+}
 MODEL_PRICES_USD_PER_M_TOKENS = {
     **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
     **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
     **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
     **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
 }
 GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS = {
@@ -181,6 +194,13 @@ MODEL_PRICE_SCHEDULES = (
     ),
     (GPT_5_6_PRICING_EFFECTIVE_AT, GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS),
     (GPT_5_6_REPRICING_EFFECTIVE_AT, GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS),
+    (
+        GPT_6_ASTRA_PRICING_EFFECTIVE_AT,
+        {
+            **GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS,
+            **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
+        },
+    ),
     (GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
 )
 
@@ -229,6 +249,9 @@ DASHBOARD_FEATURES = [
     "remote-snapshot-cache-v1",
     "session-inventory-cache-v1",
     "effective-dated-pricing-v1",
+    "gpt-6-astra-pricing-v1",
+    "runtime-log-service-tier-v1",
+    "latest-service-tier-badge-v2",
     "bounded-period-scan-v1",
     "fork-aware-subagent-usage-v1",
     "expandable-agent-task-rollups-v1",
@@ -369,6 +392,102 @@ def service_tier_from_payload(payload: Any) -> str:
             if cleaned:
                 return cleaned
     return ""
+
+
+def service_tier_from_runtime_log(body: str) -> str:
+    """Read a top-level thread setting from Codex's Rust Debug submission log."""
+    if "Submission sub=Submission {" not in body:
+        return ""
+    # Keep quoted strings atomic so user content cannot masquerade as settings.
+    tokens = re.findall(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z_0-9]*|[{}():,]', body)
+    marker = ["thread_settings", ":", "ThreadSettingsOverrides", "{"]
+    for index in range(len(tokens) - len(marker)):
+        if tokens[index:index + len(marker)] != marker:
+            continue
+        depth = 1
+        for cursor in range(index + len(marker), len(tokens)):
+            token = tokens[cursor]
+            if token == "{":
+                depth += 1
+            elif token == "}":
+                depth -= 1
+                if depth == 0:
+                    return ""
+            elif depth == 1 and tokens[cursor:cursor + 2] == ["service_tier", ":"]:
+                value = tokens[cursor + 2:cursor + 9]
+                if value[:4] == ["Some", "(", "None", ")"]:
+                    return "default"
+                if len(value) == 7 and value[:4] == ["Some", "(", "Some", "("] and value[5:] == [")", ")"]:
+                    if value[4] in ('"priority"', '"fast"', '"default"', '"standard"'):
+                        return value[4][1:-1]
+                return ""
+    return ""
+
+
+def runtime_service_tier_events(
+    codex_home: Path, thread_ids: set[str],
+) -> dict[str, list[dict[str, str]]]:
+    """Load per-thread evidence without creating or modifying Codex's log database."""
+    path = codex_home / "logs_2.sqlite"
+    if not thread_ids or not path.is_file():
+        return {}
+    events: dict[str, list[dict[str, str]]] = {}
+    connection = None
+    try:
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.2)
+        ids = sorted(thread_ids)
+        for offset in range(0, len(ids), 400):
+            batch = ids[offset:offset + 400]
+            placeholders = ",".join("?" for _ in batch)
+            rows = connection.execute(
+                f"SELECT thread_id, ts, ts_nanos, feedback_log_body FROM logs "
+                f"WHERE thread_id IN ({placeholders}) "
+                "AND target = 'codex_core::session::handlers' "
+                "AND feedback_log_body LIKE '%thread_settings: ThreadSettingsOverrides%' "
+                "AND feedback_log_body LIKE '%service_tier:%' "
+                "ORDER BY ts, ts_nanos, id",
+                batch,
+            )
+            for thread_id, seconds, nanos, body in rows:
+                tier = service_tier_from_runtime_log(body or "")
+                if not tier:
+                    continue
+                timestamp = dt.datetime.fromtimestamp(seconds, tz=dt.UTC) + dt.timedelta(
+                    microseconds=int(nanos or 0) // 1000,
+                )
+                events.setdefault(thread_id, []).append({
+                    "timestamp": utc_iso(timestamp), "service_tier": tier,
+                })
+    except (sqlite3.Error, OSError, ValueError, OverflowError):
+        return {}
+    finally:
+        if connection is not None:
+            connection.close()
+    return events
+
+
+def apply_runtime_service_tiers(detail: dict[str, Any], events: list[dict[str, str]]) -> None:
+    if not events:
+        return
+    combined = normalize_service_tier_events(events, detail.get("_service_tier_events"))
+    timeline = []
+    event_index = 0
+    active_tier = ""
+    for row in detail.get("timeline") or []:
+        moment = parse_timestamp(row.get("timestamp"))
+        while event_index < len(combined):
+            event = combined[event_index]
+            event_moment = parse_timestamp(event["timestamp"])
+            if moment is None or event_moment is None or event_moment > moment:
+                break
+            active_tier = event["service_tier"]
+            event_index += 1
+        timeline.append({**row, "service_tier": active_tier or row.get("service_tier", "")})
+    detail["timeline"] = timeline
+    detail["_service_tier_events"] = combined
+    if timeline:
+        detail["service_tier"] = timeline[-1].get("service_tier", "")
+    detail["service_tiers"] = unique_service_tiers(timeline, detail.get("service_tier"))
 
 
 def unique_models(*sources: Any) -> list[str]:
@@ -615,6 +734,11 @@ def price_entry_for_model(
                     GPT_5_6_LONG_CONTEXT_PRICE_SCHEDULES,
                 )
                 context_tier = "long"
+    elif canonical_model in GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS:
+        context_tier = "short"
+        if input_tokens is not None and input_tokens > GPT_6_ASTRA_LONG_CONTEXT_INPUT_THRESHOLD:
+            prices = GPT_6_ASTRA_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS[canonical_model]
+            context_tier = "long"
     elif canonical_model in GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS:
         context_tier = "short"
         if input_tokens is not None and input_tokens > GROK_4_5_LONG_CONTEXT_INPUT_THRESHOLD:
@@ -2722,8 +2846,13 @@ class CodexUsageAnalyzer:
             (log_source.id, *path_state_signature(log_source.codex_home / "session_index.jsonl"))
             for log_source in self.codex_sources
         )
+        runtime_log_signature = tuple(
+            (log_source.id, *path_state_signature(log_source.codex_home / name))
+            for log_source in self.codex_sources
+            for name in ("logs_2.sqlite", "logs_2.sqlite-wal")
+        )
         remote_signature = self.remote_store.state_signature() if include_remotes and self.remote_store is not None else ()
-        return (file_signature, title_signature, remote_signature)
+        return (file_signature, title_signature, remote_signature, runtime_log_signature)
 
     def scan(
         self,
@@ -3867,6 +3996,17 @@ class CodexUsageAnalyzer:
             if parsed is not None:
                 parsed_by_index[index] = parsed
 
+        runtime_tiers = {
+            log_source.id: runtime_service_tier_events(
+                log_source.codex_home,
+                {
+                    str(parsed_by_index[index][1].get("session_id") or "")
+                    for index, (file_source, _path, _source) in enumerate(files)
+                    if file_source.id == log_source.id and index in parsed_by_index
+                } - {""},
+            )
+            for log_source in self.codex_sources
+        }
         for index, (log_source, path, source) in enumerate(files):
             parsed = parsed_by_index.get(index)
             if parsed is None:
@@ -3882,6 +4022,14 @@ class CodexUsageAnalyzer:
             )
             summary = dict(cached_summary)
             detail = dict(cached_detail)
+            tier_events = runtime_tiers.get(log_source.id, {}).get(
+                str(detail.get("session_id") or ""), [],
+            )
+            apply_runtime_service_tiers(detail, tier_events)
+            if fragment_signature is not None:
+                fragment_signature = (*fragment_signature, tuple(
+                    (event["timestamp"], event["service_tier"]) for event in tier_events
+                ))
             detail.update(
                 {
                     "source": source,
@@ -6130,6 +6278,7 @@ HTML = r"""<!doctype html>
         reasoningEffort: '推理强度',
         serviceTier: '服务层级',
         fastMode: 'Fast 模式',
+        standardMode: '普通模式',
         conversationDetails: '对话明细',
         loading: '加载中',
         loadingData: '正在加载用量数据',
@@ -6308,6 +6457,7 @@ HTML = r"""<!doctype html>
         reasoningEffort: 'Reasoning',
         serviceTier: 'Service tier',
         fastMode: 'Fast mode',
+        standardMode: 'Standard mode',
         conversationDetails: 'Details',
         loading: 'Loading',
         loadingData: 'Loading usage data',
@@ -6880,18 +7030,23 @@ HTML = r"""<!doctype html>
       return tier === 'priority' || tier === 'fast';
     }
 
+    function serviceTierName(tier) {
+      if (isFastTier(tier)) return t('fastMode');
+      if (tier === 'default' || tier === 'standard') return t('standardMode');
+      return tier;
+    }
+
     function serviceTierLabel(row) {
-      return serviceTiersOf(row)
-        .map(tier => isFastTier(tier) ? t('fastMode') : tier)
-        .join(', ');
+      return serviceTiersOf(row).map(serviceTierName).join(', ');
     }
 
     function modelBadges(row) {
       const models = modelsOf(row)
         .map(model => `<span class="badge">${escapeHtml(model)}</span>`)
         .join('');
-      const fast = serviceTiersOf(row).some(isFastTier)
-        ? `<span class="badge">${escapeHtml(t('fastMode'))}</span>`
+      const latestTier = String(row?.service_tier || '').toLowerCase();
+      const fast = isFastTier(latestTier)
+        ? '<span class="badge">Fast</span>'
         : '';
       return models + fast;
     }

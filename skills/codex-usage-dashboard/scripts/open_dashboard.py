@@ -71,6 +71,9 @@ def health_dashboard_url(port: int, host: str = DEFAULT_HOST) -> str | None:
         and "remote-snapshot-cache-v1" in features
         and "session-inventory-cache-v1" in features
         and "effective-dated-pricing-v1" in features
+        and "gpt-6-astra-pricing-v1" in features
+        and "runtime-log-service-tier-v1" in features
+        and "latest-service-tier-badge-v2" in features
         and "bounded-period-scan-v1" in features
         and "fork-aware-subagent-usage-v1" in features
         and "expandable-agent-task-rollups-v1" in features
