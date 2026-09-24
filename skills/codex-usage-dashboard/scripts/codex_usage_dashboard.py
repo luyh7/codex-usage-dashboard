@@ -50,6 +50,8 @@ TOKEN_KEYS = (
 FAST_MODE_SERVICE_TIERS = {"fast", "priority"}
 FAST_MODE_COST_MULTIPLIERS_BY_MODEL = {
     "gpt-6-astra": 2.0,
+    "gpt-6-sol": 2.0,
+    "gpt-6-luna": 2.0,
     "codex-auto-review": 1.0,
     "gpt-5.6": 2.0,
     "gpt-5.6-sol": 2.0,
@@ -153,22 +155,39 @@ GROK_4_5_LONG_CONTEXT_INPUT_THRESHOLD = 200_000
 GROK_4_5_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "grok-4.5": {"input": 4.00, "cached_input": 0.60, "output": 12.00},
 }
-# Official launch date: https://developers.openai.com/api/docs/changelog
-# No launch time is published; use the start of September 3 in UTC.
+# Official launch dates: https://developers.openai.com/api/docs/changelog
+# No launch time is published; use the start of the release day in UTC.
 GPT_6_ASTRA_PRICING_EFFECTIVE_AT = dt.datetime(2026, 9, 3, tzinfo=dt.UTC)
+GPT_6_SOL_LUNA_PRICING_EFFECTIVE_AT = dt.datetime(2026, 9, 22, tzinfo=dt.UTC)
 # https://developers.openai.com/api/docs/models/gpt-6-astra
 GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-6-astra": {"input": 10.00, "cached_input": 1.00, "cache_write_input": 12.50, "output": 50.00},
 }
-GPT_6_ASTRA_LONG_CONTEXT_INPUT_THRESHOLD = 272_000
-GPT_6_ASTRA_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
-    "gpt-6-astra": {"input": 20.00, "cached_input": 2.00, "cache_write_input": 25.00, "output": 75.00},
+# https://developers.openai.com/api/docs/models/gpt-6-sol
+# https://developers.openai.com/api/docs/models/gpt-6-luna
+GPT_6_SOL_LUNA_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-6-sol": {"input": 2.00, "cached_input": 0.20, "cache_write_input": 2.50, "output": 10.00},
+    "gpt-6-luna": {"input": 0.10, "cached_input": 0.01, "cache_write_input": 0.125, "output": 0.50},
 }
+GPT_6_MODEL_PRICES_USD_PER_M_TOKENS = {
+    **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GPT_6_SOL_LUNA_MODEL_PRICES_USD_PER_M_TOKENS,
+}
+# Prompts with more than 272K input tokens are priced at 2x the input and
+# cache rates and 1.5x the output rate for the full request.
+GPT_6_LONG_CONTEXT_INPUT_THRESHOLD = 272_000
+GPT_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-6-astra": {"input": 20.00, "cached_input": 2.00, "cache_write_input": 25.00, "output": 75.00},
+    "gpt-6-sol": {"input": 4.00, "cached_input": 0.40, "cache_write_input": 5.00, "output": 15.00},
+    "gpt-6-luna": {"input": 0.20, "cached_input": 0.02, "cache_write_input": 0.25, "output": 0.75},
+}
+# Current rates: every model priced as of the GPT-5.6 Sol promotion window
+# plus GPT-6 Sol/Luna, which launched on 2026-09-22.
 MODEL_PRICES_USD_PER_M_TOKENS = {
     **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
     **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
     **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
-    **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GPT_6_MODEL_PRICES_USD_PER_M_TOKENS,
     **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
 }
 GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS = {
@@ -201,15 +220,25 @@ MODEL_PRICE_SCHEDULES = (
             **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
         },
     ),
-    (GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
+    (
+        GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT,
+        {
+            **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
+            **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
+        },
+    ),
+    (GPT_6_SOL_LUNA_PRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
 )
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
 APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
-PARSE_CACHE_VERSION = 6
-COMPONENT_CACHE_VERSION = 1
+PARSE_CACHE_VERSION = 7
+COMPONENT_CACHE_VERSION = 2
 PARSE_CACHE_SAMPLE_BYTES = 4096
 DEFAULT_PARSE_WORKERS = min(4, max(1, os.cpu_count() or 2))
 DEFAULT_PARSE_MIN_FILES = 8
@@ -250,6 +279,7 @@ DASHBOARD_FEATURES = [
     "session-inventory-cache-v1",
     "effective-dated-pricing-v1",
     "gpt-6-astra-pricing-v1",
+    "gpt-6-sol-luna-pricing-v1",
     "runtime-log-service-tier-v1",
     "latest-service-tier-badge-v2",
     "bounded-period-scan-v1",
@@ -734,11 +764,16 @@ def price_entry_for_model(
                     GPT_5_6_LONG_CONTEXT_PRICE_SCHEDULES,
                 )
                 context_tier = "long"
-    elif canonical_model in GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS:
+    elif canonical_model in GPT_6_MODEL_PRICES_USD_PER_M_TOKENS:
         context_tier = "short"
-        if input_tokens is not None and input_tokens > GPT_6_ASTRA_LONG_CONTEXT_INPUT_THRESHOLD:
-            prices = GPT_6_ASTRA_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS[canonical_model]
-            context_tier = "long"
+        if input_tokens is not None and input_tokens > GPT_6_LONG_CONTEXT_INPUT_THRESHOLD:
+            long_entry = rate_entry_for_model(
+                model,
+                GPT_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+            )
+            if long_entry is not None:
+                canonical_model, prices = long_entry
+                context_tier = "long"
     elif canonical_model in GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS:
         context_tier = "short"
         if input_tokens is not None and input_tokens > GROK_4_5_LONG_CONTEXT_INPUT_THRESHOLD:

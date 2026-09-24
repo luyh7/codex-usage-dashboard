@@ -1223,6 +1223,122 @@ for (const service_tier of ['default', 'standard', '']) {
         self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-astra"), 6.1)
         self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-astra", service_tier="priority"), 12.2)
 
+    def test_gpt_6_sol_and_luna_effective_date_context_and_fast_pricing(self) -> None:
+        rates = {
+            "gpt-6-sol": (
+                {"input": 2.0, "cached_input": 0.2, "cache_write_input": 2.5, "output": 10.0},
+                {"input": 4.0, "cached_input": 0.4, "cache_write_input": 5.0, "output": 15.0},
+            ),
+            "gpt-6-luna": (
+                {"input": 0.1, "cached_input": 0.01, "cache_write_input": 0.125, "output": 0.5},
+                {"input": 0.2, "cached_input": 0.02, "cache_write_input": 0.25, "output": 0.75},
+            ),
+        }
+        usage = {"input_tokens": 100_000, "output_tokens": 10_000}
+        for model in rates:
+            self.assertIsNone(dashboard.price_for_model(model, "2026-09-21T23:59:59Z"))
+            self.assertIsNone(dashboard.price_entry_for_model(model, "2026-09-21T23:59:59Z", 100_000))
+            self.assertIsNone(dashboard.estimate_cost_usd(usage, model, "2026-09-21T23:59:59Z"))
+        for timestamp in ("2026-09-22T00:00:00Z", "2026-09-24T00:00:00Z", None):
+            for model, (short, long) in rates.items():
+                for name in (model, f"jws/{model}"):
+                    for tokens, model_rates, tier in ((272_000, short, "short"), (272_001, long, "long")):
+                        for service_tier, multiplier in (("", 1), ("priority", 2), ("fast", 2)):
+                            with self.subTest(timestamp=timestamp, model=name, tokens=tokens, service_tier=service_tier):
+                                entry = dashboard.price_entry_for_model(name, timestamp, tokens, service_tier)
+                                self.assertIsNotNone(entry)
+                                self.assertEqual(entry["prices"], {key: value * multiplier for key, value in model_rates.items()})
+                                self.assertEqual(entry["context_tier"], tier)
+                                self.assertEqual(entry["effective_at"], "2026-09-22T00:00:00Z")
+        usage = {"input_tokens": 200_000, "cached_input_tokens": 50_000, "cache_write_tokens": 50_000, "output_tokens": 10_000}
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-sol"), 0.435)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-sol", service_tier="priority"), 0.87)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-luna"), 0.02175)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-luna", service_tier="fast"), 0.0435)
+        usage["input_tokens"] = 300_000
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-sol"), 1.22)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-sol", service_tier="priority"), 2.44)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-luna"), 0.061)
+        self.assertAlmostEqual(dashboard.estimate_cost_usd(usage, "gpt-6-luna", service_tier="fast"), 0.122)
+
+    def test_gpt_6_cache_write_and_reasoning_tokens_are_priced_once(self) -> None:
+        timestamp = "2026-09-24T00:00:00Z"
+        cases = (
+            (
+                "short",
+                {
+                    "input_tokens": 200_000,
+                    "cached_input_tokens": 80_000,
+                    "cache_write_tokens": 40_000,
+                    "output_tokens": 100_000,
+                    "reasoning_output_tokens": 60_000,
+                    "total_tokens": 440_000,
+                },
+                {"gpt-6-astra": 6.38, "gpt-6-sol": 1.276, "gpt-6-luna": 0.0638},
+            ),
+            (
+                "long",
+                {
+                    "input_tokens": 300_000,
+                    "cached_input_tokens": 120_000,
+                    "cache_write_tokens": 60_000,
+                    "output_tokens": 100_000,
+                    "reasoning_output_tokens": 60_000,
+                    "total_tokens": 580_000,
+                },
+                {"gpt-6-astra": 11.64, "gpt-6-sol": 2.328, "gpt-6-luna": 0.1164},
+            ),
+        )
+        for tier, usage, expected_totals in cases:
+            uncached = (
+                usage["input_tokens"]
+                - usage["cached_input_tokens"]
+                - usage["cache_write_tokens"]
+            )
+            without_reasoning = {
+                key: value for key, value in usage.items() if key != "reasoning_output_tokens"
+            }
+            for model, expected in expected_totals.items():
+                with self.subTest(tier=tier, model=model):
+                    entry = dashboard.price_entry_for_model(
+                        model, timestamp, usage["input_tokens"]
+                    )
+                    self.assertIsNotNone(entry)
+                    self.assertEqual(entry["context_tier"], tier)
+                    price = entry["prices"]
+                    self.assertAlmostEqual(price["cached_input"] * 10, price["input"])
+                    self.assertAlmostEqual(price["cache_write_input"], price["input"] * 1.25)
+                    parts = dashboard.usage_cost_parts(usage, price)
+                    self.assertAlmostEqual(
+                        parts["input_tokens"], uncached * price["input"] / 1_000_000
+                    )
+                    self.assertAlmostEqual(
+                        parts["cached_input_tokens"],
+                        usage["cached_input_tokens"] * price["cached_input"] / 1_000_000,
+                    )
+                    self.assertAlmostEqual(
+                        parts["cache_write_tokens"],
+                        usage["cache_write_tokens"] * price["cache_write_input"] / 1_000_000,
+                    )
+                    self.assertAlmostEqual(
+                        parts["output_tokens"],
+                        usage["output_tokens"] * price["output"] / 1_000_000,
+                    )
+                    # Reasoning tokens are reported for transparency but are already
+                    # part of the billed output tokens, so they are not charged again.
+                    self.assertAlmostEqual(
+                        parts["reasoning_output_tokens"],
+                        usage["reasoning_output_tokens"] * price["output"] / 1_000_000,
+                    )
+                    self.assertAlmostEqual(dashboard.total_cost_from_parts(parts), expected)
+                    self.assertAlmostEqual(
+                        dashboard.estimate_cost_usd(usage, model, timestamp), expected
+                    )
+                    self.assertAlmostEqual(
+                        dashboard.estimate_cost_usd(without_reasoning, model, timestamp),
+                        expected,
+                    )
+
     def test_gpt_5_6_sol_promotion_updates_standard_and_fast_rates(self) -> None:
         before = "2026-09-04T04:39:28.999999Z"
         at_promotion = "2026-09-04T04:39:29Z"
