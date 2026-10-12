@@ -97,6 +97,7 @@ def health_dashboard_url(port: int, host: str = DEFAULT_HOST) -> str | None:
         and "client-detail-cache-v1" in features
         and "component-snapshot-cache-v1" in features
         and "fast-mode-pricing-v1" in features
+        and "ultrafast-mode-pricing-v1" in features
         and "subagent-fast-mode-inheritance-v1" in features
     ):
         return url

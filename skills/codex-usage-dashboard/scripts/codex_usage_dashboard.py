@@ -71,6 +71,10 @@ FAST_MODE_COST_MULTIPLIERS_BY_MODEL = {
     "gpt-5": 2.0,
     "gpt-5-codex": 2.0,
 }
+ULTRAFAST_MODE_COST_MULTIPLIERS_BY_MODEL = {
+    "gpt-6-astra": 6.0,
+    "gpt-6.1-sol": 6.0,
+}
 
 ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS = {
     # Auto-review has no public API list price; show it as zero by dashboard convention.
@@ -100,24 +104,28 @@ GPT_5_6_LAUNCH_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6-terra": {"input": 2.50, "cached_input": 0.25, "output": 15.00},
     "gpt-5.6-luna": {"input": 1.00, "cached_input": 0.10, "output": 6.00},
 }
-# OpenAI's changelog dates the Terra/Luna reduction to July 30. Use the
-# pricing Markdown's Last-Modified time as the exact boundary: 2026-07-31
-# 00:38:10 UTC (2026-07-31 08:38:10 in Asia/Shanghai).
-GPT_5_6_REPRICING_EFFECTIVE_AT = dt.datetime(2026, 7, 31, 0, 38, 10, tzinfo=dt.UTC)
+# OpenAI's changelog dates the Terra/Luna reductions to July 30. No time is
+# published, so use midnight UTC for the effective boundary.
+GPT_5_6_REPRICING_EFFECTIVE_AT = dt.datetime(2026, 7, 30, tzinfo=dt.UTC)
 GPT_5_6_PRE_PROMOTION_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6": {"input": 5.00, "cached_input": 0.50, "output": 30.00},
     "gpt-5.6-sol": {"input": 5.00, "cached_input": 0.50, "output": 30.00},
     "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "output": 12.00},
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "output": 1.20},
 }
-# The pricing page added GPT-5.6 Sol promotional prices on 2026-09-04.
-# Use its Markdown Last-Modified timestamp as the exact boundary.
-GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT = dt.datetime(2026, 9, 4, 4, 39, 29, tzinfo=dt.UTC)
+# OpenAI's changelog dates the GPT-5.6 Sol price reduction to August 21. No
+# time is published, so use midnight UTC for the effective boundary.
+GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT = dt.datetime(2026, 8, 21, tzinfo=dt.UTC)
+GPT_5_6_CYBER_PRICING_EFFECTIVE_AT = dt.datetime(2026, 8, 7, tzinfo=dt.UTC)
+GPT_5_6_CYBER_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6-cyber": {"input": 12.50, "cached_input": 1.25, "output": 75.00},
+}
 GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6": {"input": 4.00, "cached_input": 0.40, "output": 20.00},
     "gpt-5.6-sol": {"input": 4.00, "cached_input": 0.40, "output": 20.00},
     "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "output": 12.00},
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "output": 1.20},
+    **GPT_5_6_CYBER_MODEL_PRICES_USD_PER_M_TOKENS,
 }
 # The long-context tier applies to the full request above 272K input tokens.
 GPT_5_6_LONG_CONTEXT_INPUT_THRESHOLD = 272_000
@@ -133,17 +141,28 @@ GPT_5_6_PRE_PROMOTION_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6-terra": {"input": 4.00, "cached_input": 0.40, "output": 18.00},
     "gpt-5.6-luna": {"input": 0.40, "cached_input": 0.04, "output": 1.80},
 }
+GPT_5_6_CYBER_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-5.6-cyber": {"input": 25.00, "cached_input": 2.50, "output": 112.50},
+}
 GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-5.6": {"input": 8.00, "cached_input": 0.80, "output": 30.00},
     "gpt-5.6-sol": {"input": 8.00, "cached_input": 0.80, "output": 30.00},
     "gpt-5.6-terra": {"input": 4.00, "cached_input": 0.40, "output": 18.00},
     "gpt-5.6-luna": {"input": 0.40, "cached_input": 0.04, "output": 1.80},
+    **GPT_5_6_CYBER_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
 }
 GPT_5_6_LONG_CONTEXT_PRICE_SCHEDULES = (
     (GPT_5_6_PRICING_EFFECTIVE_AT, GPT_5_6_LAUNCH_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS),
     (
         GPT_5_6_REPRICING_EFFECTIVE_AT,
         GPT_5_6_PRE_PROMOTION_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+    ),
+    (
+        GPT_5_6_CYBER_PRICING_EFFECTIVE_AT,
+        {
+            **GPT_5_6_PRE_PROMOTION_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_5_6_CYBER_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS,
+        },
     ),
     (GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT, GPT_5_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS),
 )
@@ -193,12 +212,18 @@ GPT_6_LONG_CONTEXT_MODEL_PRICES_USD_PER_M_TOKENS = {
     "gpt-6-luna": {"input": 0.20, "cached_input": 0.02, "output": 0.75},
     "gpt-6.1-sol": {"input": 4.00, "cached_input": 0.20, "output": 15.00},
 }
+GPT_ROSALIND_PRICING_EFFECTIVE_AT = dt.datetime(2026, 10, 5, tzinfo=dt.UTC)
+GPT_ROSALIND_MODEL_PRICES_USD_PER_M_TOKENS = {
+    "gpt-rosalind-research": {"input": 5.00, "cached_input": 0.50, "output": 25.00},
+    "gpt-rosalind-discovery": {"input": 5.00, "cached_input": 0.50, "output": 25.00},
+}
 MODEL_PRICES_USD_PER_M_TOKENS = {
     **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
     **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
     **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
     **GPT_6_MODEL_PRICES_USD_PER_M_TOKENS,
     **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
+    **GPT_ROSALIND_MODEL_PRICES_USD_PER_M_TOKENS,
 }
 GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS = {
     **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
@@ -212,6 +237,10 @@ GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS = {
     **GPT_5_6_PRE_PROMOTION_MODEL_PRICES_USD_PER_M_TOKENS,
     **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
 }
+GPT_5_6_CYBER_PRICES_USD_PER_M_TOKENS = {
+    **GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS,
+    **GPT_5_6_CYBER_MODEL_PRICES_USD_PER_M_TOKENS,
+}
 MODEL_PRICE_SCHEDULES = (
     (
         None,
@@ -223,15 +252,18 @@ MODEL_PRICE_SCHEDULES = (
     ),
     (GPT_5_6_PRICING_EFFECTIVE_AT, GPT_5_6_LAUNCH_PRICES_USD_PER_M_TOKENS),
     (GPT_5_6_REPRICING_EFFECTIVE_AT, GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS),
+    (GPT_5_6_CYBER_PRICING_EFFECTIVE_AT, GPT_5_6_CYBER_PRICES_USD_PER_M_TOKENS),
     (
-        GPT_6_ASTRA_PRICING_EFFECTIVE_AT,
+        GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT,
         {
-            **GPT_5_6_PRE_PROMOTION_PRICES_USD_PER_M_TOKENS,
-            **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
+            **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
+            **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
         },
     ),
     (
-        GPT_5_6_SOL_PROMOTION_EFFECTIVE_AT,
+        GPT_6_ASTRA_PRICING_EFFECTIVE_AT,
         {
             **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
             **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
@@ -251,7 +283,19 @@ MODEL_PRICE_SCHEDULES = (
             **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
         },
     ),
-    (GPT_6_1_SOL_PRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
+    (
+        GPT_6_1_SOL_PRICING_EFFECTIVE_AT,
+        {
+            **ZERO_COST_MODEL_PRICES_USD_PER_M_TOKENS,
+            **LEGACY_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_5_6_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_6_ASTRA_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_6_SOL_LUNA_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GPT_6_1_SOL_MODEL_PRICES_USD_PER_M_TOKENS,
+            **GROK_4_5_MODEL_PRICES_USD_PER_M_TOKENS,
+        },
+    ),
+    (GPT_ROSALIND_PRICING_EFFECTIVE_AT, MODEL_PRICES_USD_PER_M_TOKENS),
 )
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
@@ -330,6 +374,7 @@ DASHBOARD_FEATURES = [
     "client-detail-cache-v1",
     "component-snapshot-cache-v1",
     "fast-mode-pricing-v1",
+    "ultrafast-mode-pricing-v1",
     "subagent-fast-mode-inheritance-v1",
 ]
 
@@ -473,7 +518,7 @@ def service_tier_from_runtime_log(body: str) -> str:
                 if value[:4] == ["Some", "(", "None", ")"]:
                     return "default"
                 if len(value) == 7 and value[:4] == ["Some", "(", "Some", "("] and value[5:] == [")", ")"]:
-                    if value[4] in ('"priority"', '"fast"', '"default"', '"standard"'):
+                    if value[4] in ('"priority"', '"fast"', '"ultrafast"', '"default"', '"standard"'):
                         return value[4][1:-1]
                 return ""
     return ""
@@ -649,9 +694,12 @@ def service_tier_at_timestamp(detail: Any, timestamp: Any) -> str:
 
 def service_tier_cost_multiplier(model: str, service_tier: Any) -> float | None:
     tier = str(service_tier or "").strip().lower()
-    if tier not in FAST_MODE_SERVICE_TIERS:
-        return 1.0
-    return FAST_MODE_COST_MULTIPLIERS_BY_MODEL.get(pricing_model_key(model))
+    model_key = pricing_model_key(model)
+    if tier in FAST_MODE_SERVICE_TIERS:
+        return FAST_MODE_COST_MULTIPLIERS_BY_MODEL.get(model_key)
+    if tier == "ultrafast":
+        return ULTRAFAST_MODE_COST_MULTIPLIERS_BY_MODEL.get(model_key)
+    return 1.0
 
 
 def normalize_usage(value: Any) -> dict[str, int]:
@@ -684,6 +732,10 @@ def pricing_model_key(model: str) -> str:
     model_key = (model or "").strip().lower()
     if "/" in model_key:
         model_key = model_key.rsplit("/", 1)[-1].strip()
+    model_key = {
+        "gpt-daybreak-blue-latest": "gpt-5.6-sol",
+        "gpt-daybreak-red-latest": "gpt-5.6-cyber",
+    }.get(model_key, model_key)
     return model_key
 
 
@@ -6365,6 +6417,7 @@ HTML = r"""<!doctype html>
         reasoningEffort: '推理强度',
         serviceTier: '服务层级',
         fastMode: 'Fast 模式',
+        ultrafastMode: 'Ultrafast 模式',
         standardMode: '普通模式',
         conversationDetails: '对话明细',
         loading: '加载中',
@@ -6426,6 +6479,7 @@ HTML = r"""<!doctype html>
         priceShortContext: '（短上下文）',
         priceLongContext: '（长上下文）',
         priceFastMode: '（Fast 2×）',
+        priceUltrafastMode: '（Ultrafast 6×）',
         cumulativeChart: '累计曲线',
         metadata: '元数据',
         totalTokens: '总 tokens',
@@ -6544,6 +6598,7 @@ HTML = r"""<!doctype html>
         reasoningEffort: 'Reasoning',
         serviceTier: 'Service tier',
         fastMode: 'Fast mode',
+        ultrafastMode: 'Ultrafast mode',
         standardMode: 'Standard mode',
         conversationDetails: 'Details',
         loading: 'Loading',
@@ -6605,6 +6660,7 @@ HTML = r"""<!doctype html>
         priceShortContext: ' (short context)',
         priceLongContext: ' (long context)',
         priceFastMode: ' (Fast 2x)',
+        priceUltrafastMode: ' (Ultrafast 6x)',
         cumulativeChart: 'Cumulative Chart',
         metadata: 'Metadata',
         totalTokens: 'Total tokens',
@@ -7119,6 +7175,7 @@ HTML = r"""<!doctype html>
 
     function serviceTierName(tier) {
       if (isFastTier(tier)) return t('fastMode');
+      if (tier === 'ultrafast') return t('ultrafastMode');
       if (tier === 'default' || tier === 'standard') return t('standardMode');
       return tier;
     }
@@ -7135,7 +7192,10 @@ HTML = r"""<!doctype html>
       const fast = isFastTier(latestTier)
         ? '<span class="badge">Fast</span>'
         : '';
-      return models + fast;
+      const ultrafast = latestTier === 'ultrafast'
+        ? '<span class="badge">Ultrafast</span>'
+        : '';
+      return models + fast + ultrafast;
     }
 
     function populateModelFilter() {
@@ -8324,9 +8384,11 @@ HTML = r"""<!doctype html>
         const tier = segment.context_tier === 'long'
           ? t('priceLongContext')
           : (segment.context_tier === 'short' ? t('priceShortContext') : '');
-        const fast = Number(segment.cost_multiplier) === 2 ? t('priceFastMode') : '';
+        const tierPrice = segment.service_tier === 'ultrafast'
+          ? t('priceUltrafastMode')
+          : (Number(segment.cost_multiplier) === 2 ? t('priceFastMode') : '');
         return [t('unitPriceSegment', {
-          model: `${segment.model || 'unknown'}${tier}${fast}`,
+          model: `${segment.model || 'unknown'}${tier}${tierPrice}`,
           price: fmtUsdRate(price),
           tokens: fmt(tokens),
         })];

@@ -1031,9 +1031,9 @@ class CodexUsageDashboardTests(unittest.TestCase):
         )
         self.assertIsNone(dashboard.price_for_model("gpt-5.99"))
 
-    def test_gpt_5_6_terra_luna_repricing_uses_docs_update_time(self) -> None:
-        before_update = "2026-07-31T00:38:09.999999Z"
-        at_update = "2026-07-31T00:38:10Z"
+    def test_gpt_5_6_terra_luna_repricing_uses_changelog_date(self) -> None:
+        before_update = "2026-07-29T23:59:59.999999Z"
+        at_update = "2026-07-30T00:00:00Z"
         usage = {
             "input_tokens": 3_000_000,
             "cached_input_tokens": 1_000_000,
@@ -1263,8 +1263,8 @@ for (const service_tier of ['default', 'standard', '']) {
         )
 
     def test_gpt_5_6_sol_promotion_updates_standard_and_fast_rates(self) -> None:
-        before = "2026-09-04T04:39:28.999999Z"
-        at_promotion = "2026-09-04T04:39:29Z"
+        before = "2026-08-20T23:59:59.999999Z"
+        at_promotion = "2026-08-21T00:00:00Z"
 
         self.assertEqual(
             dashboard.price_for_model("gpt-5.6-sol", before, input_tokens=272_000),
@@ -2886,7 +2886,7 @@ for (const service_tier of ['default', 'standard', '']) {
         self.assertEqual(detail["estimated_cost_usd"], 22.0)
         self.assertEqual(
             detail["applied_price_segments"][0]["effective_at"],
-            "2026-07-31T00:38:10Z",
+            "2026-07-30T00:00:00Z",
         )
         self.assertEqual(
             detail["applied_price_segments"][0]["prices"],
