@@ -7,6 +7,8 @@ It reads your local Codex session logs and opens a browser dashboard for per-con
 > Currently only supports OpenAI Codex. It is not a Claude Code, Cursor, Continue, or generic OpenAI API dashboard.
 <img width="1830" height="1041" alt="Codex Usage Dashboard project view" src="assets/codex-usage-dashboard.png" />
 
+The default page uses the original dashboard layout and styling, including with the Rust backend. The Svelte candidate remains available at `/svelte`.
+
 ## Why This Exists
 
 Most usage tools show daily or project-level totals. This dashboard focuses on the thing Codex users often want to know:
@@ -91,6 +93,22 @@ skills/
     scripts/install_desktop_shortcut.py
     assets/codex_usage_dashboard.ico
 ```
+
+## Rust + Svelte Candidate
+
+The repository now includes an independent Rust core, a background HTTP server,
+and a static Svelte frontend. Details render 100 events per page while retaining
+the full chart and v1 export. Search and project/task queries use revision-bound
+pages; updates preserve selection, focus and paging.
+
+Existing skills, npm, Python and desktop launcher entry points remain supported.
+The opener selects a checksum-verified native artifact when installed and otherwise
+uses the bundled Python implementation. Native release acceptance is still partial:
+Linux/WSL integration and Windows GNU core tests have run; complete Windows and macOS
+release gates have not passed. Python remains available for rollback.
+
+See [build, install and rollback instructions](docs/implementation/release-and-rollback.md)
+and the [implementation and acceptance ledger](docs/implementation/progress.md).
 
 ## Manual Launch
 

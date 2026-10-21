@@ -1,0 +1,8 @@
+{
+  "name": "dashboard-frontend-probe",
+  "private": true,
+  "type": "module",
+  "scripts": {"build": "node build.mjs", "bench": "node bench.mjs"},
+  "dependencies": {"svelte": "^5.0.0"},
+  "devDependencies": {"esbuild": "^0.25.0", "playwright": "^1.58.0"}
+}

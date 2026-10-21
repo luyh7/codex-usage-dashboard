@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/usage-core", "crates/usage-server"]
+exclude = ["benchmarks/refactor/rust"]
+resolver = "3"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+
+[profile.release]
+lto = "thin"

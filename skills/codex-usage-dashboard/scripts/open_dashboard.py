@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -15,6 +16,12 @@ import time
 import webbrowser
 from pathlib import Path
 from urllib.request import urlopen
+
+# importlib-based callers need the sibling module without modifying sys.path.
+import importlib.util
+_runtime_spec = importlib.util.spec_from_file_location("dashboard_runtime", Path(__file__).with_name("dashboard_runtime.py"))
+runtime = importlib.util.module_from_spec(_runtime_spec)
+_runtime_spec.loader.exec_module(runtime)
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -48,6 +55,11 @@ def health_dashboard_url(port: int, host: str = DEFAULT_HOST) -> str | None:
             payload = json.loads(response.read().decode("utf-8"))
     except Exception:
         return None
+    if (isinstance(payload, dict) and payload.get("app") == "codex-usage-dashboard"
+        and payload.get("implementation") == "rust" and payload.get("protocol_version") == 1
+        and payload.get("ui") in {"legacy", "svelte"}
+        and {"paged-events-v1", "background-index-v1"}.issubset(payload.get("features", []))):
+        return url
     features = payload.get("features") if isinstance(payload, dict) else None
     if (
         isinstance(payload, dict)
@@ -141,9 +153,11 @@ def wait_for_dashboard_url(
     return dashboard_running_url(host)
 
 
-def start_dashboard(host: str) -> subprocess.Popen[bytes] | None:
+def start_dashboard(host: str, native=None, extra_args=()) -> subprocess.Popen[bytes] | None:
     system = platform.system()
     script = str(dashboard_script())
+    env = runtime.launch_environment() if native else os.environ.copy()
+    command = [str(native[0]), "--host", host, "--port", str(PORT), *extra_args] if native else None
     log_path = dashboard_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -152,47 +166,73 @@ def start_dashboard(host: str) -> subprocess.Popen[bytes] | None:
         for name in ("CREATE_NO_WINDOW", "CREATE_NEW_PROCESS_GROUP", "DETACHED_PROCESS"):
             creationflags |= getattr(subprocess, name, 0)
         with log_path.open("ab") as log_file:
-            return subprocess.Popen(
-                [windows_pythonw(), "-u", script, "--host", host, "--port", str(PORT)],
+            process = subprocess.Popen(
+                command or [windows_pythonw(), "-u", script, "--host", host, "--port", str(PORT), *extra_args],
                 cwd=str(Path(script).parent),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 close_fds=True,
                 creationflags=creationflags,
+                env=env,
             )
+        if native: runtime.write_state({"pid":process.pid,"build_id":native[1]["build_id"],"instance_id":env["COUSASH_INSTANCE_ID"],"shutdown_token":env["COUSASH_SHUTDOWN_TOKEN"]})
+        return process
 
     python = sys.executable or shutil.which("python3") or shutil.which("python")
     if not python:
         raise RuntimeError("Python was not found.")
 
     with log_path.open("ab") as log_file:
-        return subprocess.Popen(
-            [python, "-u", script, "--host", host, "--port", str(PORT)],
+        process = subprocess.Popen(
+            command or [python, "-u", script, "--host", host, "--port", str(PORT), *extra_args],
             cwd=str(Path(script).parent),
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             close_fds=True,
             start_new_session=True,
+            env=env,
         )
+    if native: runtime.write_state({"pid":process.pid,"build_id":native[1]["build_id"],"instance_id":env["COUSASH_INSTANCE_ID"],"shutdown_token":env["COUSASH_SHUTDOWN_TOKEN"]})
+    return process
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Open the bundled Codex Usage Dashboard.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Bind host. Defaults to 127.0.0.1.")
+    parser.add_argument("--backend", choices=["auto","rust","python"], default=os.environ.get("COUSASH_BACKEND","auto"))
+    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--codex-home", action="append", default=[])
+    parser.add_argument("--no-auto-windows", action="store_true")
     args = parser.parse_args()
+    try:
+        native = runtime.native_binary() if args.backend != "python" else None
+        if args.backend == "rust" and native is None:
+            raise RuntimeError("No verified native artifact for this platform. Run install_runtime.py with a release manifest, or use --backend python. Launch never downloads files.")
+        existing = runtime.health(args.host)
+        desired = native[1]["build_id"] if native else hashlib.sha256(dashboard_script().read_bytes()).hexdigest()
+        mismatch = existing.get("build_id") != desired
+        if args.codex_home:
+            mismatch = mismatch or sorted(existing.get("codex_homes", [])) != sorted(str(Path(p).expanduser().resolve()) for p in args.codex_home)
+        if existing and mismatch: runtime.release_owned(args.host, dashboard_script())
+        elif not existing or not health_dashboard_url(PORT,args.host): runtime.release_owned(args.host, dashboard_script())
+    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as error:
+        print(str(error),file=sys.stderr)
+        return 1
 
     running_url = dashboard_running_url(args.host)
     if running_url:
-        open_browser(running_url)
+        if not args.no_browser: open_browser(running_url)
         print(running_url)
         return 0
 
-    process = start_dashboard(args.host)
+    extra = [item for home in args.codex_home for item in ("--codex-home", home)]
+    if args.no_auto_windows: extra.append("--no-auto-windows")
+    process = start_dashboard(args.host, native, extra)
     started_url = wait_for_dashboard_url(process, args.host)
     if started_url:
-        open_browser(started_url)
+        if not args.no_browser: open_browser(started_url)
         print(started_url)
         return 0
 

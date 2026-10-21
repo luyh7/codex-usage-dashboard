@@ -1,0 +1,21 @@
+{
+  "scope": "Run GNU-target Rust unit executables as native Windows processes from WSL.\nOnly temporary synthetic data is used. This does not cover the native browser,\ninstaller, MSVC runtime, or constitute complete Windows release acceptance.\n",
+  "target": "x86_64-pc-windows-gnu",
+  "runs": [
+    {
+      "name": "codex-usage-dashboard",
+      "sha256": "2caa8723b0415347b26504de57145bd8884604a602a807a41bd3ad23cc57196b",
+      "exit_code": 0,
+      "stdout": "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+      "stderr": ""
+    },
+    {
+      "name": "usage_core",
+      "sha256": "ff4256e48c9d39b7ab3b39e6990b7b21b536ba6749ece9460f7263be853269c9",
+      "exit_code": 0,
+      "stdout": "\nrunning 21 tests\ntest index::tests::a_changed_session_reuses_an_independent_component_after_restart ... ok\ntest index::tests::a_complete_non_newline_tail_must_be_reparsed_after_append ... ok\ntest index::tests::append_restart_and_immutable_revision ... ok\ntest index::tests::crash_child ... ok\ntest index::tests::incomplete_line_then_completion_is_consumed_once ... ok\ntest index::tests::process_exit_at_each_write_stage_recovers_committed_state ... ok\ntest index::tests::repricing_does_not_reread_rollouts ... ok\ntest index::tests::rewrite_with_preserved_mtime_and_archive_move ... ok\ntest index::tests::rollback_at_every_commit_stage_does_not_advance_offset ... ok\ntest index::tests::writer_lock_and_corrupt_cache_rebuild_preserve_logs ... ok\ntest inventory::tests::historical_cache_hits_do_not_extend_expiry_and_hints_invalidate ... ok\ntest pricing::tests::costs_unknown_and_reasoning_subset ... ok\ntest project::tests::linked_workspace_keeps_main_project_and_branch ... ok\ntest query::tests::named_zone_bounds_cover_dst_and_midnight ... ok\ntest remote::identity_tests::anonymous_v1_rows_use_stable_python_json_identity ... ok\ntest runtime::tests::quoted_content_cannot_supply_settings ... ok\ntest usage::tests::counter_reset_and_overflow_are_explicit ... ok\ntest usage::tests::input_types_match_legacy ... ok\ntest view::tests::all_events_page_once_with_stable_ties_and_bound_cursors ... ok\ntest view::tests::metrics_cover_whole_filter_and_cross_source_tasks_stay_separate ... ok\ntest view::tests::task_pages_sort_aggregate_usage_without_splitting_children ... ok\n\ntest result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s\n\n",
+      "stderr": ""
+    }
+  ],
+  "passed": true
+}

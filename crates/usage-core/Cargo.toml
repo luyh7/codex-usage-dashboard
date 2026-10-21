@@ -1,0 +1,27 @@
+[package]
+name = "usage-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+regex.workspace = true
+sha1 = "0.10"
+rusqlite = { version = "0.38", features = ["bundled"] }
+chrono-tz = "0.10"
+flate2 = "1"
+sha2 = "0.10"
+fs2 = "0.4"
+wait-timeout = "0.2"
+base64 = "0.22"
+
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"

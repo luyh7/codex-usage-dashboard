@@ -1,0 +1,41 @@
+         8332279 function calls (8332264 primitive calls) in 1.914 seconds
+
+   Ordered by: cumulative time
+   List reduced from 253 to 35 due to restriction <35>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    1.914    1.914 codex_usage_dashboard.py:2982(scan)
+        1    0.000    0.000    1.914    1.914 codex_usage_dashboard.py:2992(_scan_locked)
+        1    0.004    0.004    1.910    1.910 codex_usage_dashboard.py:4086(build_snapshot)
+      320    0.125    0.000    1.074    0.003 codex_usage_dashboard.py:1074(pricing_for_timeline)
+        1    0.002    0.002    0.969    0.969 codex_usage_dashboard.py:3974(normalize_local_components)
+      320    0.002    0.000    0.931    0.003 codex_usage_dashboard.py:4388(parse_file_cached)
+      160    0.063    0.000    0.919    0.006 codex_usage_dashboard.py:4501(parse_file)
+      160    0.014    0.000    0.781    0.005 codex_usage_dashboard.py:3425(normalize_main_session_usage)
+      640    0.057    0.000    0.504    0.001 codex_usage_dashboard.py:967(timeline_rows_with_deltas)
+    25600    0.044    0.000    0.391    0.000 codex_usage_dashboard.py:810(price_entry_for_model)
+  3118459    0.225    0.000    0.225    0.000 {method 'get' of 'dict' objects}
+    78081    0.140    0.000    0.221    0.000 codex_usage_dashboard.py:705(normalize_usage)
+    25600    0.056    0.000    0.220    0.000 codex_usage_dashboard.py:787(model_rate_effective_at)
+    51200    0.027    0.000    0.208    0.000 codex_usage_dashboard.py:955(timeline_usage_delta)
+      160    0.014    0.000    0.182    0.001 codex_usage_dashboard.py:4289(build_daily_usage_static)
+    51840    0.117    0.000    0.178    0.000 codex_usage_dashboard.py:721(subtract_usage)
+   204800    0.039    0.000    0.168    0.000 codex_usage_dashboard.py:742(rate_entry_for_model)
+    52801    0.116    0.000    0.159    0.000 codex_usage_dashboard.py:717(add_usage)
+   230400    0.091    0.000    0.145    0.000 codex_usage_dashboard.py:725(pricing_model_key)
+    76800    0.066    0.000    0.107    0.000 codex_usage_dashboard.py:1204(parse_timestamp)
+    14720    0.023    0.000    0.104    0.000 codex_usage_dashboard.py:1641(read_rollout_jsonl)
+    76960    0.053    0.000    0.086    0.000 codex_usage_dashboard.py:479(service_tier_from_payload)
+  1354817    0.083    0.000    0.083    0.000 {built-in method builtins.isinstance}
+      480    0.014    0.000    0.064    0.000 codex_usage_dashboard.py:618(unique_service_tiers)
+    25600    0.041    0.000    0.063    0.000 codex_usage_dashboard.py:887(usage_cost_parts)
+    25600    0.016    0.000    0.062    0.000 codex_usage_dashboard.py:762(price_schedule_at)
+    12960    0.006    0.000    0.056    0.000 __init__.py:304(loads)
+    25920    0.008    0.000    0.052    0.000 codex_usage_dashboard.py:904(total_cost_from_parts)
+    51840    0.027    0.000    0.048    0.000 codex_usage_dashboard.py:951(usage_has_tokens)
+    12960    0.011    0.000    0.048    0.000 decoder.py:340(decode)
+    26080    0.017    0.000    0.044    0.000 {built-in method builtins.sum}
+   566240    0.042    0.000    0.042    0.000 {method 'strip' of 'str' objects}
+    25760    0.024    0.000    0.040    0.000 codex_usage_dashboard.py:441(model_from_payload)
+    25600    0.014    0.000    0.033    0.000 codex_usage_dashboard.py:695(service_tier_cost_multiplier)
+   439360    0.031    0.000    0.031    0.000 {built-in method builtins.max}

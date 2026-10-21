@@ -1,0 +1,56 @@
+name: Native compatibility and artifacts
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - run: npm ci
+        working-directory: web
+      - run: npm run check
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --examples --bin codex-usage-dashboard --locked
+        env:
+          COUSASH_REQUIRE_WEB: '1'
+      - run: python tools/verify_core.py
+      - run: python tools/package_release.py --skip-build
+      - run: python tools/verify_native.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-${{ matrix.os }}
+          path: |
+            dist/release/
+            benchmarks/implementation/results/native-*.json
+            benchmarks/implementation/results/core-correctness.json
+# Artifacts are review candidates, not an automatic public release. Native
+# acceptance plus documented performance/browser gates must pass before rollout.

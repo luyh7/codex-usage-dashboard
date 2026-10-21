@@ -1,0 +1,699 @@
+{
+  "operation": "scan",
+  "sources": [
+    {
+      "id": "wsl",
+      "label": "WSL"
+    }
+  ],
+  "files": [
+    [
+      {
+        "path": "sessions/rollout-2026-07-10T10-00-00-fast-child.jsonl",
+        "mtime_ns": 1792580999918293722,
+        "bytes_base64": "eyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0yNFQwMDowMDowMloiLCAidHlwZSI6ICJzZXNzaW9uX21ldGEiLCAicGF5bG9hZCI6IHsiaWQiOiAiZmFzdC1jaGlsZCIsICJzZXNzaW9uX2lkIjogImZhc3QtcGFyZW50IiwgInRocmVhZF9zb3VyY2UiOiAic3ViYWdlbnQiLCAic291cmNlIjogeyJzdWJhZ2VudCI6IHsidGhyZWFkX3NwYXduIjogeyJwYXJlbnRfdGhyZWFkX2lkIjogImZhc3QtcGFyZW50IiwgImFnZW50X3BhdGgiOiAiL3Jvb3QvZmFzdC1jaGlsZCJ9fX0sICJjd2QiOiAiL3dvcmsvZmFzdC1zdWJhZ2VudCIsICJtb2RlbCI6ICJncHQtNS40In19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMjRUMDA6MDA6MDNaIiwgInR5cGUiOiAiZXZlbnRfbXNnIiwgInBheWxvYWQiOiB7InR5cGUiOiAidG9rZW5fY291bnQiLCAiaW5mbyI6IHsidG90YWxfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDEwMDAwMDAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogMCwgIm91dHB1dF90b2tlbnMiOiAxMDAwMDAwLCAidG90YWxfdG9rZW5zIjogMjAwMDAwMH0sICJsYXN0X3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiAxMDAwMDAwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDAsICJvdXRwdXRfdG9rZW5zIjogMTAwMDAwMCwgInRvdGFsX3Rva2VucyI6IDIwMDAwMDB9fX19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMjRUMDA6MDA6MDRaIiwgInR5cGUiOiAiZXZlbnRfbXNnIiwgInBheWxvYWQiOiB7InR5cGUiOiAidGhyZWFkX3NldHRpbmdzX2FwcGxpZWQiLCAidGhyZWFkX3NldHRpbmdzIjogeyJzZXJ2aWNlX3RpZXIiOiAiZGVmYXVsdCJ9fX0KeyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0yNFQwMDowMDowNVoiLCAidHlwZSI6ICJldmVudF9tc2ciLCAicGF5bG9hZCI6IHsidHlwZSI6ICJ0b2tlbl9jb3VudCIsICJpbmZvIjogeyJ0b3RhbF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogMjAwMDAwMCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAwLCAib3V0cHV0X3Rva2VucyI6IDIwMDAwMDAsICJ0b3RhbF90b2tlbnMiOiA0MDAwMDAwfSwgImxhc3RfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDEwMDAwMDAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogMCwgIm91dHB1dF90b2tlbnMiOiAxMDAwMDAwLCAidG90YWxfdG9rZW5zIjogMjAwMDAwMH19fX0="
+      },
+      {
+        "path": "sessions/rollout-2026-07-10T10-00-00-fast-parent.jsonl",
+        "mtime_ns": 1792580999918251569,
+        "bytes_base64": "eyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0yNFQwMDowMDowMFoiLCAidHlwZSI6ICJzZXNzaW9uX21ldGEiLCAicGF5bG9hZCI6IHsiaWQiOiAiZmFzdC1wYXJlbnQiLCAic2Vzc2lvbl9pZCI6ICJmYXN0LXBhcmVudCIsICJ0aHJlYWRfc291cmNlIjogInVzZXIiLCAiY3dkIjogIi93b3JrL2Zhc3Qtc3ViYWdlbnQiLCAibW9kZWwiOiAiZ3B0LTUuNCJ9fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTI0VDAwOjAwOjAxWiIsICJ0eXBlIjogImV2ZW50X21zZyIsICJwYXlsb2FkIjogeyJ0eXBlIjogInRocmVhZF9zZXR0aW5nc19hcHBsaWVkIiwgInRocmVhZF9zZXR0aW5ncyI6IHsic2VydmljZV90aWVyIjogInByaW9yaXR5In19fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTI0VDAwOjAwOjEwWiIsICJ0eXBlIjogImV2ZW50X21zZyIsICJwYXlsb2FkIjogeyJ0eXBlIjogInRva2VuX2NvdW50IiwgImluZm8iOiB7InRvdGFsX3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiAxMDAwMDAwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDAsICJvdXRwdXRfdG9rZW5zIjogMTAwMDAwMCwgInRvdGFsX3Rva2VucyI6IDIwMDAwMDB9LCAibGFzdF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogMTAwMDAwMCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAwLCAib3V0cHV0X3Rva2VucyI6IDEwMDAwMDAsICJ0b3RhbF90b2tlbnMiOiAyMDAwMDAwfX19fQ=="
+      }
+    ]
+  ],
+  "args": [],
+  "kwargs": {},
+  "expected": {
+    "generated_at": "<GENERATED_AT>",
+    "codex_home": "<HOME:0>",
+    "codex_sources": [
+      {
+        "id": "wsl",
+        "label": "WSL",
+        "codex_home": "<HOME:0>",
+        "is_remote": false
+      }
+    ],
+    "sessions": [
+      {
+        "uid": "a6cc6f7319c6348a",
+        "session_id": "fast-child",
+        "root_session_id": "fast-parent",
+        "parent_thread_id": "fast-parent",
+        "forked_from_id": "",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/fast-child",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "fast-child",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-fast-child.jsonl",
+        "file_size": 1178,
+        "parse_errors": 0,
+        "created_at": "2026-07-24T00:00:02Z",
+        "start_at": "2026-07-24T00:00:03Z",
+        "end_at": "2026-07-24T00:00:05Z",
+        "updated_at": "2026-10-21T11:09:59.918294Z",
+        "cwd": "/work/fast-subagent",
+        "project": "fast-subagent",
+        "project_root": "/work/fast-subagent",
+        "workspace_root": "/work/fast-subagent",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5.4",
+        "models": [
+          "gpt-5.4"
+        ],
+        "service_tier": "default",
+        "service_tiers": [
+          "priority",
+          "default"
+        ],
+        "effort": "",
+        "total_token_usage": {
+          "input_tokens": 2000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 2000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 4000000
+        },
+        "last_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 2000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 2000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 4000000
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 52.5,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 7.5,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 45.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "cached_input_percent": 0.0,
+        "token_event_count": 2,
+        "turn_count": 2,
+        "completed_turn_count": 0,
+        "duration_ms_total": 0,
+        "time_to_first_token_ms_avg": null
+      },
+      {
+        "uid": "319e3a2d2f665941",
+        "session_id": "fast-parent",
+        "root_session_id": "fast-parent",
+        "parent_thread_id": "",
+        "forked_from_id": "",
+        "thread_source": "user",
+        "is_subagent": false,
+        "agent_path": "",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "fast-subagent",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-fast-parent.jsonl",
+        "file_size": 709,
+        "parse_errors": 0,
+        "created_at": "2026-07-24T00:00:00Z",
+        "start_at": "2026-07-24T00:00:00Z",
+        "end_at": "2026-07-24T00:00:10Z",
+        "updated_at": "2026-10-21T11:09:59.918252Z",
+        "cwd": "/work/fast-subagent",
+        "project": "fast-subagent",
+        "project_root": "/work/fast-subagent",
+        "workspace_root": "/work/fast-subagent",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5.4",
+        "models": [
+          "gpt-5.4"
+        ],
+        "service_tier": "priority",
+        "service_tiers": [
+          "priority"
+        ],
+        "effort": "",
+        "total_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "last_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 35.0,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 5.0,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 30.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "cached_input_percent": 0.0,
+        "token_event_count": 1,
+        "turn_count": 1,
+        "completed_turn_count": 0,
+        "duration_ms_total": 0,
+        "time_to_first_token_ms_avg": null
+      }
+    ],
+    "details_by_uid": {
+      "a6cc6f7319c6348a": {
+        "uid": "a6cc6f7319c6348a",
+        "session_id": "fast-child",
+        "root_session_id": "fast-parent",
+        "parent_thread_id": "fast-parent",
+        "forked_from_id": "",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/fast-child",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "fast-child",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-fast-child.jsonl",
+        "file_size": 1178,
+        "line_count": 4,
+        "parse_errors": 0,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": "2026-07-24T00:00:02Z",
+        "start_at": "2026-07-24T00:00:03Z",
+        "end_at": "2026-07-24T00:00:05Z",
+        "updated_at": "2026-10-21T11:09:59.918294Z",
+        "cwd": "/work/fast-subagent",
+        "project": "fast-subagent",
+        "project_root": "/work/fast-subagent",
+        "workspace_root": "/work/fast-subagent",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5.4",
+        "models": [
+          "gpt-5.4"
+        ],
+        "service_tier": "default",
+        "service_tiers": [
+          "priority",
+          "default"
+        ],
+        "effort": "",
+        "originator": "",
+        "cli_version": "",
+        "total_token_usage": {
+          "input_tokens": 2000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 2000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 4000000
+        },
+        "last_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 2000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 2000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 4000000
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 52.5,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 7.5,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 45.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "applied_price_segments": [
+          {
+            "model": "gpt-5.4",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "priority",
+            "cost_multiplier": 2.0,
+            "prices": {
+              "input": 5.0,
+              "cached_input": 0.5,
+              "output": 30.0
+            },
+            "usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "estimated_cost_usd": 35.0,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 5.0,
+              "cached_input_tokens": 0.0,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 30.0,
+              "reasoning_output_tokens": 0.0
+            }
+          },
+          {
+            "model": "gpt-5.4",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "default",
+            "cost_multiplier": 1.0,
+            "prices": {
+              "input": 2.5,
+              "cached_input": 0.25,
+              "output": 15.0
+            },
+            "usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "estimated_cost_usd": 17.5,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 2.5,
+              "cached_input_tokens": 0.0,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 15.0,
+              "reasoning_output_tokens": 0.0
+            }
+          }
+        ],
+        "cached_input_percent": 0.0,
+        "model_context_window": null,
+        "token_event_count": 2,
+        "turn_count": 2,
+        "completed_turn_count": 0,
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "first_user_prompt": "",
+        "last_agent_preview": "",
+        "latest_rate_limits": null,
+        "latest_plan_type": null,
+        "latest_rate_limit_reached_type": null,
+        "tool_counts": {},
+        "duration_ms_total": 0,
+        "duration_ms_avg": null,
+        "time_to_first_token_ms_avg": null,
+        "timeline": [
+          {
+            "timestamp": "2026-07-24T00:00:03Z",
+            "model": "gpt-5.4",
+            "service_tier": "priority",
+            "total_token_usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "last_token_usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          },
+          {
+            "timestamp": "2026-07-24T00:00:05Z",
+            "model": "gpt-5.4",
+            "service_tier": "default",
+            "total_token_usage": {
+              "input_tokens": 2000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 2000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 4000000
+            },
+            "last_token_usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          }
+        ],
+        "tasks": []
+      },
+      "319e3a2d2f665941": {
+        "uid": "319e3a2d2f665941",
+        "session_id": "fast-parent",
+        "root_session_id": "fast-parent",
+        "parent_thread_id": "",
+        "forked_from_id": "",
+        "thread_source": "user",
+        "is_subagent": false,
+        "agent_path": "",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "fast-subagent",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-fast-parent.jsonl",
+        "file_size": 709,
+        "line_count": 3,
+        "parse_errors": 0,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": "2026-07-24T00:00:00Z",
+        "start_at": "2026-07-24T00:00:00Z",
+        "end_at": "2026-07-24T00:00:10Z",
+        "updated_at": "2026-10-21T11:09:59.918252Z",
+        "cwd": "/work/fast-subagent",
+        "project": "fast-subagent",
+        "project_root": "/work/fast-subagent",
+        "workspace_root": "/work/fast-subagent",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5.4",
+        "models": [
+          "gpt-5.4"
+        ],
+        "service_tier": "priority",
+        "service_tiers": [
+          "priority"
+        ],
+        "effort": "",
+        "originator": "",
+        "cli_version": "",
+        "total_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "last_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 1000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 1000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 2000000
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 35.0,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 5.0,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 30.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "applied_price_segments": [
+          {
+            "model": "gpt-5.4",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "priority",
+            "cost_multiplier": 2.0,
+            "prices": {
+              "input": 5.0,
+              "cached_input": 0.5,
+              "output": 30.0
+            },
+            "usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "estimated_cost_usd": 35.0,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 5.0,
+              "cached_input_tokens": 0.0,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 30.0,
+              "reasoning_output_tokens": 0.0
+            }
+          }
+        ],
+        "cached_input_percent": 0.0,
+        "model_context_window": null,
+        "token_event_count": 1,
+        "turn_count": 1,
+        "completed_turn_count": 0,
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "first_user_prompt": "",
+        "last_agent_preview": "",
+        "latest_rate_limits": null,
+        "latest_plan_type": null,
+        "latest_rate_limit_reached_type": null,
+        "tool_counts": {},
+        "duration_ms_total": 0,
+        "duration_ms_avg": null,
+        "time_to_first_token_ms_avg": null,
+        "timeline": [
+          {
+            "timestamp": "2026-07-24T00:00:10Z",
+            "model": "gpt-5.4",
+            "service_tier": "priority",
+            "total_token_usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "last_token_usage": {
+              "input_tokens": 1000000,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 1000000,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 2000000
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          }
+        ],
+        "tasks": []
+      }
+    },
+    "summary": {
+      "session_count": 2,
+      "active_count": 2,
+      "archived_count": 0,
+      "usage": {
+        "input_tokens": 3000000,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "output_tokens": 3000000,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 6000000
+      },
+      "estimated_cost_usd": 87.5,
+      "estimated_cost_known_count": 2,
+      "by_model": [
+        {
+          "model": "gpt-5.4",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 3000000,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 3000000,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 6000000
+          }
+        }
+      ],
+      "by_project": [
+        {
+          "project": "fast-subagent",
+          "project_root": "/work/fast-subagent",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 3000000,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 3000000,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 6000000
+          }
+        }
+      ],
+      "by_environment": [
+        {
+          "id": "wsl",
+          "label": "WSL",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 3000000,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 3000000,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 6000000
+          }
+        }
+      ],
+      "by_day": [
+        {
+          "date": "2026-07-24",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 3000000,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 3000000,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 6000000
+          }
+        }
+      ],
+      "top_session_uid": "a6cc6f7319c6348a"
+    },
+    "daily_usage": [
+      {
+        "date": "2026-07-24",
+        "usage": {
+          "input_tokens": 3000000,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 3000000,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 6000000
+        }
+      }
+    ],
+    "daily_usage_complete": true,
+    "period": {
+      "key": "all",
+      "start_at": null,
+      "end_at": "<GENERATED_AT>"
+    },
+    "snapshot_token": "<REVISION>"
+  },
+  "origin_test": "test_subagent_inherits_parent_service_tier_at_spawn"
+}

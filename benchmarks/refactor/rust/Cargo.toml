@@ -1,0 +1,16 @@
+[package]
+name = "dashboard-refactor-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = "0.4"
+flate2 = "1"
+regex = "1"
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+[profile.release]
+lto = "thin"

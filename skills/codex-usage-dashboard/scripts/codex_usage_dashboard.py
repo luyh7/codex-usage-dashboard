@@ -12,6 +12,7 @@ It does not modify Codex files. Bind address defaults to 127.0.0.1.
 from __future__ import annotations
 
 import argparse
+import base64
 import concurrent.futures
 import datetime as dt
 import hashlib
@@ -323,6 +324,9 @@ def environment_int(name: str, default: int) -> int:
 
 
 DASHBOARD_FEATURES = [
+    "paged-events-v1",
+    "separate-chart-v1",
+    "indexed-search-v1",
     "periods",
     "period-deltas",
     "period-token-label",
@@ -2749,6 +2753,7 @@ class CodexUsageAnalyzer:
         self._published_lock = threading.Lock()
         self._published_snapshots: dict[str, dict[str, Any]] = {}
         self._session_payload_cache: dict[str, bytes] = {}
+        self._event_order_cache: dict[tuple[str, str], tuple[int, ...]] = {}
 
     def publish_snapshot(
         self,
@@ -2764,6 +2769,7 @@ class CodexUsageAnalyzer:
                 if isinstance(old_token, str):
                     self._published_snapshots.pop(old_token, None)
                     self._session_payload_cache.pop(old_token, None)
+                    self._drop_event_order(old_token)
             self._published_snapshots[published["snapshot_token"]] = published
         return published
 
@@ -2776,6 +2782,60 @@ class CodexUsageAnalyzer:
         with self._published_lock:
             self._published_snapshots.pop(token, None)
             self._session_payload_cache.pop(token, None)
+            self._drop_event_order(token)
+
+    def _drop_event_order(self, token: str) -> None:
+        # Called with _published_lock held. Query indexes live only as long as
+        # their immutable snapshot; event dictionaries are never copied here.
+        for key in tuple(self._event_order_cache):
+            if key[0] == token:
+                del self._event_order_cache[key]
+
+    def query_events(self, uid: str, revision: str, cursor: str = "", limit: int = 100) -> dict[str, Any]:
+        if not revision:
+            raise ValueError("snapshot_token is required")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        offset = 0
+        if cursor:
+            try:
+                if len(cursor) > 2048:
+                    raise ValueError()
+                decoded = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
+                token, session, page_size, offset = decoded
+                if token != revision or session != uid or page_size != limit or type(offset) is not int or offset < 0:
+                    raise ValueError()
+            except (ValueError, TypeError, UnicodeError) as exc:
+                raise ValueError("cursor does not match this query") from exc
+        detail = self.get_detail(uid, snapshot_token=revision)
+        if detail is None:
+            raise KeyError(uid)
+        rows = detail.get("timeline", [])
+        key = (revision, uid)
+        with self._published_lock:
+            order = self._event_order_cache.get(key)
+        if order is None:
+            # Stable ties retain original file order, including duplicate token
+            # events. Date parsing matches the parser instead of lexical order.
+            floor = dt.datetime.min.replace(tzinfo=dt.UTC)
+            order = tuple(sorted(range(len(rows)), key=lambda i: parse_timestamp(rows[i].get("timestamp")) or floor, reverse=True))
+            with self._published_lock:
+                if revision in self._published_snapshots:
+                    order = self._event_order_cache.setdefault(key, order)
+        if offset > len(order):
+            raise ValueError("cursor offset exceeds event count")
+        def encode(position: int) -> str:
+            return base64.urlsafe_b64encode(json.dumps([revision, uid, limit, position], separators=(",", ":")).encode()).decode()
+        return {
+            "revision": revision,
+            "id": uid,
+            "total": len(order),
+            "offset": offset,
+            "limit": limit,
+            "events": [rows[i] for i in order[offset:offset + limit]],
+            "next_cursor": encode(offset + limit) if offset + limit < len(order) else None,
+            "previous_cursor": encode(max(0, offset - limit)) if offset else None,
+        }
 
     def session_payload_bytes(
         self,
@@ -6075,6 +6135,8 @@ HTML = r"""<!doctype html>
       min-width: 0;
       font-size: 12px;
     }
+    .event-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
+    #sessionRows tr:focus-visible { outline:2px solid #0f7b63; outline-offset:-2px; }
     .timeline-table {
       min-width: 680px;
     }
@@ -6508,6 +6570,9 @@ HTML = r"""<!doctype html>
         tool: '工具',
         count: '次数',
         noToolCalls: '没有记录到工具调用。',
+        previousEvents: '较新事件',
+        nextEvents: '较早事件',
+        eventPage: '{start}–{end} / 共 {total} 条',
         timelineDetails: '每次计数明细',
         timelineTime: '时间',
         timelineTotal: '本次总量',
@@ -6689,6 +6754,9 @@ HTML = r"""<!doctype html>
         tool: 'Tool',
         count: 'Count',
         noToolCalls: 'No tool calls recorded.',
+        previousEvents: 'Newer events',
+        nextEvents: 'Older events',
+        eventPage: '{start}–{end} of {total} events',
         timelineDetails: 'Token Count Events',
         timelineTime: 'Time',
         timelineTotal: 'Event total',
@@ -7207,23 +7275,49 @@ HTML = r"""<!doctype html>
       state.model = select.value;
     }
 
+    let indexedSessions = null;
+    let searchIndex = new Map();
+    const derivedCache = new Map();
+    let taskGroupCache = new WeakMap();
+    function indexedSearchText(row) {
+      return [row.title, row.session_id, modelLabel(row), row.project, row.project_root,
+        row.workspace_root, row.project_branch, row.cwd, row.path, row.source, row.environment].join(' ');
+    }
+    function ensureSearchIndex() {
+      if (indexedSessions === state.sessions) return;
+      const next = new Map();
+      for (const row of state.sessions) {
+        const source = indexedSearchText(row);
+        const old = searchIndex.get(row.uid);
+        next.set(row.uid, old?.source === source ? old : {source, text: source.toLowerCase()});
+      }
+      searchIndex = next;
+      indexedSessions = state.sessions;
+      derivedCache.clear();
+      taskGroupCache = new WeakMap();
+    }
+    function derive(name, inputs, calculate) {
+      const old = derivedCache.get(name);
+      if (old && inputs.every((value, i) => value === old.inputs[i])) return old.value;
+      const value = calculate();
+      derivedCache.set(name, {inputs, value});
+      return value;
+    }
+
     function baseFilteredSessions() {
+      ensureSearchIndex();
       const needle = state.search.trim().toLowerCase();
-      return state.sessions.filter(row => {
+      return derive('filtered', [state.sessions, needle, state.environment, state.source, state.model], () => state.sessions.filter(row => {
         if (state.environment !== 'all' && (row.environment_id || row.environment || 'local') !== state.environment) return false;
         if (state.source !== 'all' && row.source !== state.source) return false;
         if (state.model !== 'all' && !modelsOf(row).includes(state.model)) return false;
-        if (!needle) return true;
-        const haystack = [
-          row.title, row.session_id, modelLabel(row), row.project, row.project_root,
-          row.workspace_root, row.project_branch, row.cwd, row.path, row.source, row.environment
-        ].join(' ').toLowerCase();
-        return haystack.includes(needle);
-      });
+        return !needle || searchIndex.get(row.uid).text.includes(needle);
+      }));
     }
 
     function summarizeFilteredSessions() {
       const rows = baseFilteredSessions();
+      return derive('summary', [rows], () => {
       let usage = zeroClientUsage();
       let activeCount = 0;
       let archivedCount = 0;
@@ -7265,6 +7359,7 @@ HTML = r"""<!doctype html>
         by_environment: Array.from(environments.values())
           .sort((left, right) => right.usage.total_tokens - left.usage.total_tokens),
       };
+          });
     }
 
     function sortSessions(rows) {
@@ -7347,6 +7442,9 @@ HTML = r"""<!doctype html>
     }
 
     function taskGroupsForRows(rows) {
+      const sort = `${state.sortKey}|${state.sortDir}|${state.lang}`;
+      const cached = taskGroupCache.get(rows);
+      if (cached?.sort === sort) return cached.groups;
       const groupsByKey = new Map();
       rows.forEach(row => {
         const key = agentTaskKey(row);
@@ -7389,8 +7487,10 @@ HTML = r"""<!doctype html>
       });
 
       const byKey = new Map(groups.map(group => [group.key, group]));
-      return sortSessions(groups.map(group => group.displayRow))
+      const sorted = sortSessions(groups.map(group => group.displayRow))
         .map(row => byKey.get(row.task_group_key));
+      taskGroupCache.set(rows, {sort, groups: sorted});
+      return sorted;
     }
 
     function taskGroups() {
@@ -7486,8 +7586,10 @@ HTML = r"""<!doctype html>
     }
 
     function projectGroups() {
+      const rows = baseFilteredSessions();
+      return derive('projects', [rows, state.lang], () => {
       const groups = new Map();
-      baseFilteredSessions().forEach(row => {
+      rows.forEach(row => {
         const key = projectKey(row);
         if (!groups.has(key)) {
           groups.set(key, {
@@ -7520,6 +7622,7 @@ HTML = r"""<!doctype html>
           return group;
         })
         .sort((a, b) => b.latestTime - a.latestTime || a.label.localeCompare(b.label, locale()));
+      });
     }
 
     function isProjectExpanded(group) {
@@ -8042,6 +8145,45 @@ HTML = r"""<!doctype html>
       `).join('');
     }
 
+    const tableRowCache = new Map();
+    function updateTableRows(markup) {
+      const body = document.getElementById('sessionRows');
+      const template = document.createElement('template');
+      template.innerHTML = `<table><tbody>${markup}</tbody></table>`;
+      const live = new Set();
+      let cursor = body.firstChild;
+      for (const row of template.content.querySelector('tbody').children) {
+        const marker = row.querySelector('[data-project-toggle], [data-project-more]');
+        const key = row.dataset.uid ? `session:${row.dataset.uid}`
+          : row.dataset.taskToggleRow ? `task:${row.dataset.taskToggleRow}`
+          : marker ? `${marker.hasAttribute('data-project-toggle') ? 'project' : 'more'}:${marker.dataset.projectToggle || marker.dataset.projectMore}`
+          : `empty:${live.size}`;
+        live.add(key);
+        const html = row.outerHTML;
+        let entry = tableRowCache.get(key);
+        if (!entry || entry.html !== html) {
+          const focus = entry?.node.contains(document.activeElement) ? document.activeElement : null;
+          const focusIndex = focus ? [...entry.node.querySelectorAll('button, [tabindex]')].indexOf(focus) : -1;
+          const node = row.cloneNode(true);
+          if (entry?.node === cursor) cursor = cursor.nextSibling;
+          entry?.node.remove();
+          entry = {html, node};
+          tableRowCache.set(key, entry);
+          body.insertBefore(node, cursor);
+          if (focusIndex >= 0) node.querySelectorAll('button, [tabindex]')[focusIndex]?.focus({preventScroll:true});
+        } else if (entry.node !== cursor) {
+          body.insertBefore(entry.node, cursor);
+        }
+        cursor = entry.node.nextSibling;
+      }
+      for (const [key, entry] of tableRowCache) {
+        if (!live.has(key)) { entry.node.remove(); tableRowCache.delete(key); }
+      }
+      // Initial/loading/error rows are not in the keyed cache.
+      const nodes = new Set([...tableRowCache.values()].map(entry => entry.node));
+      for (const node of [...body.childNodes]) if (!nodes.has(node)) node.remove();
+    }
+
     function renderTable() {
       if (state.viewMode === 'project') {
         renderProjectTable();
@@ -8058,7 +8200,7 @@ HTML = r"""<!doctype html>
         document.getElementById('sessionRows').innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(t('noMatches'))}</td></tr>`;
         return;
       }
-      document.getElementById('sessionRows').innerHTML = groups.map(group => taskGroupRowsHtml(group)).join('');
+      updateTableRows(groups.map(group => taskGroupRowsHtml(group)).join(''));
       bindTableInteractions();
     }
 
@@ -8075,7 +8217,7 @@ HTML = r"""<!doctype html>
         : '';
       const taskRowToggle = Boolean(task && task.subagentCount && !selectable);
       const rowAttributes = [
-        selectable ? `data-uid="${escapeHtml(row.uid)}"` : '',
+        selectable ? `data-uid="${escapeHtml(row.uid)}" tabindex="0"` : '',
         taskRowToggle
           ? `data-task-toggle-row="${escapeHtml(task.key)}" role="button" tabindex="0" aria-expanded="${task.expanded ? 'true' : 'false'}"`
           : '',
@@ -8158,7 +8300,7 @@ HTML = r"""<!doctype html>
         return;
       }
 
-      document.getElementById('sessionRows').innerHTML = groups.map(group => {
+      updateTableRows(groups.map(group => {
         const expanded = isProjectExpanded(group);
         const showingAll = isProjectShowingAll(group);
         const taskGroups = taskGroupsForRows(group.rows);
@@ -8171,51 +8313,44 @@ HTML = r"""<!doctype html>
           ...visibleGroups.map(taskGroup => taskGroupRowsHtml(taskGroup, 'project-session-row', { compactProject: true })),
           expanded && hiddenCount > 0 ? projectMoreRowHtml(group, hiddenCount) : '',
         ].join('');
-      }).join('');
+      }).join(''));
       bindTableInteractions();
     }
 
     function toggleTaskGroup(key) {
       state.taskExpanded[key] = state.taskExpanded[key] !== true;
-      renderAll();
+      renderTable();
     }
 
     function bindTableInteractions() {
-      document.querySelectorAll('#sessionRows tr[data-uid]').forEach(row => {
-        row.addEventListener('click', () => showDetails(row.dataset.uid));
-      });
-      document.querySelectorAll('[data-task-toggle-row]').forEach(row => {
-        row.addEventListener('click', event => {
-          if (event.target.closest('[data-task-toggle]')) return;
-          toggleTaskGroup(row.dataset.taskToggleRow);
-        });
-        row.addEventListener('keydown', event => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          toggleTaskGroup(row.dataset.taskToggleRow);
-        });
-      });
-      document.querySelectorAll('[data-project-toggle]').forEach(button => {
-        button.addEventListener('click', event => {
-          event.stopPropagation();
-          const key = button.dataset.projectToggle;
+      const body = document.getElementById('sessionRows');
+      if (body.dataset.bound) return;
+      body.dataset.bound = 'true';
+      body.addEventListener('click', event => {
+        const project = event.target.closest('[data-project-toggle]');
+        const more = event.target.closest('[data-project-more]');
+        const task = event.target.closest('[data-task-toggle], [data-task-toggle-row]');
+        if (project) {
+          const key = project.dataset.projectToggle;
           state.projectExpanded[key] = state.projectExpanded[key] === false;
-          renderAll();
-        });
+          renderTable();
+        } else if (more) {
+          state.projectShowAll[more.dataset.projectMore] = more.dataset.projectMoreState === 'more';
+          renderTable();
+        } else if (task) {
+          toggleTaskGroup(task.dataset.taskToggle || task.dataset.taskToggleRow);
+        } else {
+          const row = event.target.closest('[data-uid]');
+          if (row) void showDetails(row.dataset.uid);
+        }
       });
-      document.querySelectorAll('[data-project-more]').forEach(button => {
-        button.addEventListener('click', event => {
-          event.stopPropagation();
-          const key = button.dataset.projectMore;
-          state.projectShowAll[key] = button.dataset.projectMoreState === 'more';
-          renderAll();
-        });
-      });
-      document.querySelectorAll('[data-task-toggle]').forEach(button => {
-        button.addEventListener('click', event => {
-          event.stopPropagation();
-          toggleTaskGroup(button.dataset.taskToggle);
-        });
+      body.addEventListener('keydown', event => {
+        if (event.target.closest('button') || !['Enter', ' '].includes(event.key)) return;
+        const row = event.target.closest('[data-task-toggle-row], [data-uid]');
+        if (!row) return;
+        event.preventDefault();
+        if (row.dataset.taskToggleRow) toggleTaskGroup(row.dataset.taskToggleRow);
+        else void showDetails(row.dataset.uid);
       });
     }
 
@@ -8228,7 +8363,9 @@ HTML = r"""<!doctype html>
       state.selectedUid = uid;
       const requestedToken = state.snapshotToken;
       const cacheKey = `${requestedToken}|${uid}`;
-      if (renderRows) renderTable();
+      if (renderRows) {
+        document.querySelectorAll('#sessionRows tr[data-uid]').forEach(row => row.classList.toggle('selected', row.dataset.uid === uid));
+      }
       const cachedDetail = state.detailCache.get(cacheKey);
       if (cachedDetail) {
         renderDetails(cachedDetail);
@@ -8239,7 +8376,7 @@ HTML = r"""<!doctype html>
         const params = periodParams();
         params.set('id', uid);
         if (requestedToken) params.set('snapshot_token', requestedToken);
-        const res = await fetch('/api/session?' + params.toString(), { cache: 'no-store' });
+        const res = await fetch('/api/v2/session?' + params.toString(), { cache: 'no-store' });
         if (res.status === 409) {
           if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
           const stale = await res.json().catch(() => ({}));
@@ -8251,6 +8388,15 @@ HTML = r"""<!doctype html>
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const detail = await res.json();
+        const [eventsResponse, chartResponse] = await Promise.all([
+          fetch('/api/v2/events?' + params.toString(), {cache: 'no-store'}),
+          fetch('/api/v2/chart?' + params.toString(), {cache: 'no-store'}),
+        ]);
+        if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
+        if (eventsResponse.status === 409 || chartResponse.status === 409) { void loadData(false); return; }
+        if (!eventsResponse.ok || !chartResponse.ok) throw new Error('Detail query failed');
+        detail.eventPage = await eventsResponse.json();
+        detail.timeline = (await chartResponse.json()).timeline;
         if (state.snapshotToken !== requestedToken || state.selectedUid !== uid) return;
         state.detailCache.set(cacheKey, detail);
         renderDetails(detail);
@@ -8259,6 +8405,66 @@ HTML = r"""<!doctype html>
         document.getElementById('detailsBody').innerHTML = `<div class="error">${escapeHtml(t('detailFailed', { message: err.message }))}</div>`;
         document.getElementById('detailStatus').textContent = t('failed');
       }
+    }
+
+    function eventRowsHtml(rows) {
+      return rows.map(row => {
+        const last = row.last_token_usage || {};
+        return `
+          <tr>
+            <td title="${escapeHtml(fmtDate(row.timestamp))}">${escapeHtml(fmtRelativeTime(row.timestamp))}</td>
+            <td>${escapeHtml(serviceTierLabel(row) || 'N/A')}</td>
+            <td class="number">${fmt(last.total_tokens)}</td>
+            <td class="number">${fmt(last.input_tokens)}</td>
+            <td class="number">${fmt(last.cached_input_tokens)}</td>
+            <td class="number">${fmt(last.cache_write_tokens)}</td>
+            <td class="number">${fmt(last.output_tokens)}</td>
+            <td class="number">${fmt(last.reasoning_output_tokens)}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    let eventPageRequest = 0;
+    async function changeEventPage(cursor) {
+      const uid = state.selectedUid;
+      const requestedToken = state.snapshotToken;
+      const detail = state.detailCache.get(`${requestedToken}|${uid}`);
+      if (!detail) return;
+      const request = ++eventPageRequest;
+      const params = new URLSearchParams({id: uid, snapshot_token: requestedToken});
+      if (cursor) params.set('cursor', cursor);
+      const controls = document.getElementById('eventPagination');
+      controls?.setAttribute('aria-busy', 'true');
+      try {
+        const res = await fetch('/api/v2/events?' + params, {cache:'no-store'});
+        if (request !== eventPageRequest || uid !== state.selectedUid || requestedToken !== state.snapshotToken) return;
+        if (res.status === 409) { void loadData(false); return; }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const page = await res.json();
+        if (request !== eventPageRequest || uid !== state.selectedUid || requestedToken !== state.snapshotToken) return;
+        detail.eventPage = page;
+        document.getElementById('eventRows').innerHTML = eventRowsHtml(page.events);
+        updateEventPagination(detail);
+      } catch (error) {
+        if (request !== eventPageRequest || uid !== state.selectedUid || requestedToken !== state.snapshotToken) return;
+        document.getElementById('eventPageStatus').textContent = t('detailFailed', {message:error.message});
+      } finally {
+        controls?.removeAttribute('aria-busy');
+      }
+    }
+
+    function updateEventPagination(detail) {
+      const page = detail.eventPage;
+      const controls = document.getElementById('eventPagination');
+      if (!controls || !page) return;
+      document.getElementById('eventPageStatus').textContent = t('eventPage', {start:page.total ? page.offset + 1 : 0, end:Math.min(page.offset + page.limit, page.total), total:fmt(page.total)});
+      const previous = document.getElementById('previousEvents');
+      const next = document.getElementById('nextEvents');
+      previous.disabled = page.previous_cursor === null;
+      next.disabled = page.next_cursor === null;
+      previous.onclick = () => changeEventPage(page.previous_cursor);
+      next.onclick = () => changeEventPage(page.next_cursor);
     }
 
     function renderDetails(detail) {
@@ -8277,23 +8483,7 @@ HTML = r"""<!doctype html>
       const toolRows = Object.entries(detail.tool_counts || {}).slice(0, 8).map(([name, count]) =>
         `<tr><td>${escapeHtml(name)}</td><td class="number">${fmt(count)}</td></tr>`
       ).join('');
-      const timelineRows = [...(detail.timeline || [])].sort((a, b) => {
-        return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
-      }).map((row) => {
-        const last = row.last_token_usage || {};
-        return `
-          <tr>
-            <td title="${escapeHtml(fmtDate(row.timestamp))}">${escapeHtml(fmtRelativeTime(row.timestamp))}</td>
-            <td>${escapeHtml(serviceTierLabel(row) || 'N/A')}</td>
-            <td class="number">${fmt(last.total_tokens)}</td>
-            <td class="number">${fmt(last.input_tokens)}</td>
-            <td class="number">${fmt(last.cached_input_tokens)}</td>
-            <td class="number">${fmt(last.cache_write_tokens)}</td>
-            <td class="number">${fmt(last.output_tokens)}</td>
-            <td class="number">${fmt(last.reasoning_output_tokens)}</td>
-          </tr>
-        `;
-      }).join('');
+      const timelineRows = eventRowsHtml(detail.eventPage?.events || [...(detail.timeline || [])].sort((a,b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 100));
 
       document.getElementById('detailStatus').textContent = t('countEvents', { count: fmt(detail.token_event_count) });
       document.getElementById('detailsBody').innerHTML = `
@@ -8354,8 +8544,13 @@ HTML = r"""<!doctype html>
         ${toolRows ? `<table class="mini-table"><thead><tr><th>${escapeHtml(t('tool'))}</th><th>${escapeHtml(t('count'))}</th></tr></thead><tbody>${toolRows}</tbody></table>` : `<div class="notice">${escapeHtml(t('noToolCalls'))}</div>`}
 
         <div class="section-label">${escapeHtml(t('timelineDetails'))}</div>
-        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table timeline-table"><thead><tr><th>${escapeHtml(t('timelineTime'))}</th><th>${escapeHtml(t('serviceTier'))}</th><th>${escapeHtml(t('timelineTotal'))}</th><th>${escapeHtml(t('input'))}</th><th>${escapeHtml(t('cached'))}</th><th>${escapeHtml(t('cacheWrite'))}</th><th>${escapeHtml(t('output'))}</th><th>${escapeHtml(t('reasoning'))}</th></tr></thead><tbody>${timelineRows}</tbody></table></div>` : `<div class="notice">${escapeHtml(t('noTimeline'))}</div>`}
+        ${timelineRows ? `<div class="table-wrap" style="max-height:260px"><table class="mini-table timeline-table"><thead><tr><th>${escapeHtml(t('timelineTime'))}</th><th>${escapeHtml(t('serviceTier'))}</th><th>${escapeHtml(t('timelineTotal'))}</th><th>${escapeHtml(t('input'))}</th><th>${escapeHtml(t('cached'))}</th><th>${escapeHtml(t('cacheWrite'))}</th><th>${escapeHtml(t('output'))}</th><th>${escapeHtml(t('reasoning'))}</th></tr></thead><tbody id="eventRows">${timelineRows}</tbody></table></div>` : `<div class="notice">${escapeHtml(t('noTimeline'))}</div>`}
       `;
+      const eventTable = document.getElementById('eventRows');
+      if (eventTable && detail.eventPage) {
+        eventTable.closest('.table-wrap').insertAdjacentHTML('afterend', `<div id="eventPagination" class="event-pagination"><button id="previousEvents" type="button">${escapeHtml(t('previousEvents'))}</button><span id="eventPageStatus" role="status" aria-live="polite"></span><button id="nextEvents" type="button">${escapeHtml(t('nextEvents'))}</button></div>`);
+        updateEventPagination(detail);
+      }
       drawTimeline(detail.timeline || []);
     }
 
@@ -8445,8 +8640,8 @@ HTML = r"""<!doctype html>
         ctx.fillText(t('noCurve'), 14, 24);
         return;
       }
-      const max = Math.max(1, ...points);
-      const min = Math.min(0, ...points);
+      const max = points.reduce((value, point) => Math.max(value, point), 1);
+      const min = points.reduce((value, point) => Math.min(value, point), 0);
       const span = Math.max(1, max - min);
       const left = 12;
       const right = width - 12;
@@ -8720,6 +8915,7 @@ HTML = r"""<!doctype html>
 
 
 def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
+    source_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     class Handler(BaseHTTPRequestHandler):
         server_version = "CodexUsageDashboard/1.0"
 
@@ -8743,6 +8939,12 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                     {
                         "ok": True,
                         "app": "codex-usage-dashboard",
+                        "protocol_version": 1,
+                        "implementation": "python",
+                        "source_sha256": source_sha256,
+                        "pid": os.getpid(),
+                        "codex_homes": [str(source.codex_home) for source in analyzer.codex_sources],
+                        "build_id": source_sha256,
                         "features": DASHBOARD_FEATURES,
                         "device_short_code": analyzer.remote_store.current_device_code if analyzer.remote_store else current_device_short_code(),
                     }
@@ -8786,6 +8988,38 @@ def make_handler(analyzer: CodexUsageAnalyzer) -> type[BaseHTTPRequestHandler]:
                         "daily_usage_complete": snapshot.get("daily_usage_complete", True),
                     }
                 )
+                return
+
+            if path in {"/api/v2/session", "/api/v2/events", "/api/v2/chart"}:
+                uid = query.get("id", [""])[0]
+                revision = query.get("snapshot_token", [""])[0]
+                try:
+                    if not revision:
+                        raise ValueError("snapshot_token is required")
+                    if path == "/api/v2/events":
+                        payload = analyzer.query_events(uid, revision, query.get("cursor", [""])[0], int(query.get("limit", ["100"])[0]))
+                    else:
+                        detail = analyzer.get_detail(uid, snapshot_token=revision)
+                        if detail is None:
+                            raise KeyError(uid)
+                        if path == "/api/v2/session":
+                            payload = {k: v for k, v in detail.items() if k != "timeline"}
+                            payload["revision"] = revision
+                        else:
+                            payload = {"revision": revision, "id": uid, "timeline": [
+                                {"timestamp": row.get("timestamp"), "total_token_usage": {"total_tokens": row.get("total_token_usage", {}).get("total_tokens", 0)}}
+                                for row in detail.get("timeline", [])
+                            ]}
+                except SnapshotStaleError:
+                    self.send_json({"error": "snapshot stale", "code": "snapshot_stale"}, status=409)
+                    return
+                except KeyError:
+                    self.send_json({"error": "session not found"}, status=404)
+                    return
+                except ValueError as exc:
+                    self.send_json({"error": str(exc)}, status=400)
+                    return
+                self.send_json(payload)
                 return
 
             if path == "/api/session":

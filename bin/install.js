@@ -20,7 +20,7 @@ function copyRecursive(src, dest) {
   if (stat.isDirectory()) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src)) {
-      if (entry === "__pycache__" || entry === ".DS_Store") continue;
+      if (entry === "__pycache__" || entry === ".DS_Store" || entry === "runtime") continue;
       copyRecursive(path.join(src, entry), path.join(dest, entry));
     }
     return;
@@ -47,13 +47,15 @@ function findPython() {
   return null;
 }
 
-function runPython(script) {
+function runPython(script, scriptArgs = []) {
   const python = findPython();
   if (!python) {
-    console.warn("Python was not found. The skill is installed, but shortcut/open commands need Python 3.");
+    console.warn("Python was not found. The skill is installed, but shortcut/open/runtime-install commands need Python 3 until all native release gates pass. A verified standalone native binary can run directly.");
+    process.exitCode = 1;
     return;
   }
-  cp.spawnSync(python, [script], { stdio: "inherit" });
+  const result = cp.spawnSync(python, [script, ...scriptArgs], { stdio: "inherit" });
+  if (result.status !== 0) process.exitCode = result.status || 1;
 }
 
 if (!fs.existsSync(sourceSkill)) {
@@ -66,7 +68,10 @@ for (const name of removedAliasSkills) {
   removeIfExists(path.join(targetRoot, name));
 }
 if (args.has("--force") || args.has("-f")) {
-  removeIfExists(targetSkill);
+  // Retain verified native artifacts and their rollback manifest on reinstall.
+  if (fs.existsSync(targetSkill)) for (const entry of fs.readdirSync(targetSkill)) {
+    if (entry !== "runtime") removeIfExists(path.join(targetSkill, entry));
+  }
 }
 copyRecursive(sourceSkill, targetSkill);
 
@@ -85,6 +90,15 @@ console.log(`  python "${path.join(targetSkill, "scripts", "open_dashboard.py")}
 if (args.has("--shortcut")) {
   runPython(path.join(targetSkill, "scripts", "install_desktop_shortcut.py"));
 }
-if (args.has("--open")) {
-  runPython(path.join(targetSkill, "scripts", "open_dashboard.py"));
+
+const manifestFlag = process.argv.indexOf("--runtime-manifest");
+if (manifestFlag >= 0) {
+  const manifest = process.argv[manifestFlag + 1];
+  if (!manifest || manifest.startsWith("--")) throw new Error("--runtime-manifest requires a local release manifest path");
+  runPython(path.join(targetSkill, "scripts", "install_runtime.py"), [manifest, ...(args.has("--offline") ? ["--offline"] : [])]);
 }
+if (args.has("--rollback-native")) {
+  runPython(path.join(targetSkill, "scripts", "install_runtime.py"), ["--rollback"]);
+}
+
+if (args.has("--open") && !process.exitCode) runPython(path.join(targetSkill, "scripts", "open_dashboard.py"));

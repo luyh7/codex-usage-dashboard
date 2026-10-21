@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "build_id": "3f55d218577bfdb8ca299bbd4ee4d23780e8dc5fd55fff454fd5752c970dd18d",
+  "implementation": "rust",
+  "ui": "legacy",
+  "index_phase": "ready",
+  "checks": [
+    "root/index/legacy exactly match original page source",
+    "original CSS unchanged except pagination and keyboard focus additions",
+    "original metrics/search/list and right-hand detail with paged events",
+    "original calendar opens",
+    "reload retains classic page, no browser errors"
+  ]
+}

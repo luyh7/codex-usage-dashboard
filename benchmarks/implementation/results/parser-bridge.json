@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "tests": [
+    "test_append_only_scan_parses_only_the_new_file_tail",
+    "test_append_resume_does_not_treat_mtime_fallback_as_event_time",
+    "test_append_resume_preserves_whether_session_metadata_was_seen",
+    "test_bounded_period_loads_old_fork_parent_dependency",
+    "test_cross_launch_session_is_priced_by_event_model_and_time",
+    "test_gpt_6_to_6_1_session_keeps_each_events_cached_input_price",
+    "test_incomplete_appended_line_resumes_from_last_complete_newline",
+    "test_missing_fork_parent_keeps_branch_total_but_excludes_exact_usage",
+    "test_parent_and_subagent_summary_does_not_double_count_inherited_usage",
+    "test_parse_file_prices_service_tier_changes_per_token_event",
+    "test_parse_file_skips_synthetic_context_for_title",
+    "test_rebuild_invalidates_parent_and_child_as_one_component_only",
+    "test_replaced_file_identity_does_not_use_append_resume",
+    "test_runtime_log_tier_reprices_cached_rollouts",
+    "test_scan_combines_multiple_codex_homes",
+    "test_scan_merges_continued_rollout_files_for_the_same_session",
+    "test_scan_skips_unused_large_payloads_without_changing_session_results",
+    "test_session_models_tracks_all_switched_models",
+    "test_subagent_before_parent_first_token_resolves_zero_baseline",
+    "test_subagent_identity_uses_first_session_meta",
+    "test_subagent_inherits_parent_service_tier_at_spawn",
+    "test_subagent_last_n_slice_with_counter_reset_sums_event_deltas",
+    "test_subagent_usage_excludes_inherited_parent_timeline_prefix",
+    "test_thread_settings_applied_updates_model_without_turn_context",
+    "test_truncated_file_does_not_use_append_resume",
+    "test_windows_cwd_uses_folder_name_for_project"
+  ],
+  "rust_parse_calls": 44,
+  "scope": "Run legacy behavioral tests with only parse_file replaced by the Rust core.\n\nThis is a test adapter, not a runtime fallback. Python still performs indexing,\nparent/continuation normalization and runtime-tier merging in these tests."
+}

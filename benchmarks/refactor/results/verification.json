@@ -1,0 +1,160 @@
+{
+  "status": "passed",
+  "completed_at": "2026-10-21T19:00:55.380960+08:00",
+  "stages": [
+    {
+      "stage": "production-tests",
+      "exit_code": 0,
+      "command": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ]
+    },
+    {
+      "stage": "installer-check",
+      "exit_code": 0,
+      "command": [
+        "npm",
+        "run",
+        "validate"
+      ]
+    },
+    {
+      "stage": "rust-build",
+      "exit_code": 0,
+      "command": [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--manifest-path",
+        "/home/luyh7/skills/codex-usage-dashboard/benchmarks/refactor/rust/Cargo.toml"
+      ]
+    },
+    {
+      "stage": "frontend-install",
+      "exit_code": 0,
+      "command": [
+        "npm",
+        "ci"
+      ]
+    },
+    {
+      "stage": "frontend-build",
+      "exit_code": 0,
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ]
+    },
+    {
+      "stage": "fixtures",
+      "exit_code": 0,
+      "command": [
+        "/usr/bin/python3",
+        "/home/luyh7/skills/codex-usage-dashboard/benchmarks/refactor/backend.py",
+        "generate"
+      ]
+    },
+    {
+      "stage": "backend-bench",
+      "exit_code": 0,
+      "command": [
+        "/usr/bin/python3",
+        "/home/luyh7/skills/codex-usage-dashboard/benchmarks/refactor/backend.py",
+        "run",
+        "--samples",
+        "15"
+      ]
+    },
+    {
+      "stage": "differential-tests",
+      "exit_code": 0,
+      "command": [
+        "/usr/bin/python3",
+        "/home/luyh7/skills/codex-usage-dashboard/benchmarks/refactor/correctness.py"
+      ]
+    },
+    {
+      "stage": "io-query-bench",
+      "exit_code": 0,
+      "command": [
+        "/usr/bin/python3",
+        "/home/luyh7/skills/codex-usage-dashboard/benchmarks/refactor/io_query.py"
+      ]
+    },
+    {
+      "stage": "http-profile",
+      "exit_code": 0,
+      "command": [
+        "/usr/bin/python3",
+        "/home/luyh7/skills/codex-usage-dashboard/benchmarks/refactor/http_profile.py"
+      ]
+    },
+    {
+      "stage": "frontend-bench",
+      "exit_code": 0,
+      "command": [
+        "npm",
+        "run",
+        "bench"
+      ]
+    },
+    {
+      "stage": "report-documentation-update",
+      "exit_code": 0,
+      "command": [
+        "/usr/bin/python3",
+        "benchmarks/refactor/report.py"
+      ]
+    }
+  ],
+  "production_tests": 90,
+  "health": {
+    "health_ok": true,
+    "worktree_html_match": true,
+    "worktree_features_match": true
+  },
+  "cpu_model": "13th Gen Intel(R) Core(TM) i5-13600KF",
+  "cpu_count": 20,
+  "rust_probe_sha256": "87ebc401e0242101116c270246b96978d2d16139668052d229c7fac82c3e379a",
+  "probe_source_sha256": {
+    "benchmarks/refactor/verify_dashboard.py": "147d09278ff67b7e1e6af6ebce474c67399336c3770de7c1e272567e7f1d0f3b",
+    "benchmarks/refactor/run_all.py": "66b236c94516e076ba205bf6d58a7dd9733f99c79a641a804c4070da833a8f38",
+    "benchmarks/refactor/backend.py": "87b0f4ed2936d45ff37bb9e709e58764a078ecc10d83fa5e0db6fec8f2cc364d",
+    "benchmarks/refactor/io_query.py": "febb5d90e4c29f44db838fc25dc9d1e346ea13a27f2136f1ddfd3f60b4cbe5f5",
+    "benchmarks/refactor/report.py": "7ad1669ba18514c65b87e0758df3079691cab42b337f8b7bc441722e882caabc",
+    "benchmarks/refactor/correctness.py": "0d41774d7470eab43b8797a74123cee2423ebf1cc0d57654565b0762f8888ceb",
+    "benchmarks/refactor/http_profile.py": "eae14b4c115a923186d7d6802d5486cd460c88e7212a642084f62ff295550fec",
+    "benchmarks/refactor/rust/Cargo.toml": "ff467acc4d51b0985732fb1a554e416636b0e6965057599d724a6aa975675406",
+    "benchmarks/refactor/rust/Cargo.lock": "7fe383886eb4ca456259c7261c7740519b0c51a291c32bb56c31acf5000a430b",
+    "benchmarks/refactor/frontend/bench.mjs": "20d3071ab1af736cecb4567d75a631ff468bf9ac25e0ffe32813e883ea37192b",
+    "benchmarks/refactor/frontend/package-lock.json": "5b76d48fa8265e3f77a2d5cfe1b3f75fe7920362212b6ff6c924f79b1f8560ed",
+    "benchmarks/refactor/frontend/package.json": "43d33d2c7b131b03e4e8357abee531fa620a5ed6c04ea45bfd344a2e3b4bbdd0",
+    "benchmarks/refactor/frontend/entry.js": "4e1f572f70df770f319ed5a5df394de575972f072c688114324a73031b9fa6ef",
+    "benchmarks/refactor/frontend/Table.svelte": "b22f8705a55b7c497a77f5cd00a75301fd9416c0d3a9102db5e81bfa3d02baa1",
+    "benchmarks/refactor/frontend/build.mjs": "aa057e6fea5f545a3a0f01e9c7a3dfed49b673671e765ba51682c5df0e4b964e",
+    "benchmarks/refactor/rust/src/main.rs": "741a4e14c38addb36da6598a08e9b1c13f4185c3eb5d98ae0b2c47f36c47324f"
+  },
+  "result_sha256": {
+    "correctness.json": "8608e28d7783aa9d2eb0bb36a76ff7bc8c672ecf7495947451f78b08715bd652",
+    "io-query.json": "8b824283fc796addb2f478223fb1ab5a23da4ecd7a441366d8a859259ba51c7c",
+    "backend.json": "32ab6a989c36ba4b5304b8ac89410d0b79638131bf73893d90989f059842bb3b",
+    "http.json": "3075473b79551be67f31368c2f6222784afbf3bc1a1ddadbb2f5072bd127d8e8",
+    "frontend.json": "e5aeaef3b26a0fbd775380270005323589ad5920b0f501dc21739b93a7394bde"
+  },
+  "post_run_updates": [
+    {
+      "file": "benchmarks/refactor/report.py",
+      "previous_sha256": "a69e072ecf7ab9232b202ae5f347ef4ef7316be0b842e6cd7ea9ce237ae774af",
+      "sha256": "7ad1669ba18514c65b87e0758df3079691cab42b337f8b7bc441722e882caabc",
+      "reason": "Report wording clarifies historical metadata benchmark is inside the existing 2-second TTL; benchmark code and raw measurements unchanged."
+    }
+  ]
+}

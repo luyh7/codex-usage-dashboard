@@ -1,0 +1,40 @@
+{
+  "passed": true,
+  "tests": [
+    "test_old_remote_snapshot_preserves_stored_cost_and_normalizes_cache_write_alias",
+    "test_remote_snapshot_reprices_fast_mode_from_timeline",
+    "test_remote_import_merges_by_device_short_code",
+    "test_remote_scan_marks_imported_sessions",
+    "sparse-old-price-segments"
+  ],
+  "checks": [
+    "import/confirmation/merge",
+    "stored-v1-archive",
+    "all-fields-transformed-sparse-v1",
+    "sparse-v1-period",
+    "sparse-v1-period",
+    "import/confirmation/merge",
+    "stored-v1-archive",
+    "all-fields-transformed-sparse-v1",
+    "sparse-v1-period",
+    "sparse-v1-period",
+    "import/confirmation/merge",
+    "stored-v1-archive",
+    "import/confirmation/merge",
+    "stored-v1-archive",
+    "import/confirmation/merge",
+    "stored-v1-archive",
+    "all-fields-transformed-sparse-v1",
+    "sparse-v1-period",
+    "sparse-v1-period",
+    "import/confirmation/merge",
+    "stored-v1-archive",
+    "all-fields-transformed-sparse-v1",
+    "sparse-v1-period",
+    "sparse-v1-period"
+  ],
+  "normalizations": [
+    "only import time; validated ISO timestamp"
+  ],
+  "scope": "Compare v1 import/merge and sparse old archives against existing behavior."
+}
