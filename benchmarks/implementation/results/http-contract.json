@@ -5,12 +5,13 @@
     "protocol_version": 1,
     "implementation": "rust",
     "ui": "legacy",
-    "source_sha256": "3f55d218577bfdb8ca299bbd4ee4d23780e8dc5fd55fff454fd5752c970dd18d",
-    "build_id": "3f55d218577bfdb8ca299bbd4ee4d23780e8dc5fd55fff454fd5752c970dd18d",
+    "timezone": "UTC",
+    "source_sha256": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
+    "build_id": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
     "version": "0.2.0",
-    "pid": 99953,
+    "pid": 106754,
     "codex_homes": [
-      "/tmp/rust-http-contract-sb7av6u1/home"
+      "/tmp/rust-http-contract-xdwxmz7x/home"
     ],
     "instance_id": "",
     "features": [
@@ -36,8 +37,8 @@
         "unchanged_files": 0,
         "normalized_components": 1,
         "component_hits": 0,
-        "transaction_ms": 23.123607,
-        "last_refresh_ms": 58.423517000000004,
+        "transaction_ms": 23.537079,
+        "last_refresh_ms": 57.93575,
         "events_written": 10003
       },
       "watch_roots": 2,

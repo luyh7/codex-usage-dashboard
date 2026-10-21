@@ -1269,8 +1269,10 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "fs2",
  "getrandom",
  "iana-time-zone",
+ "libc",
  "notify",
  "regex",
  "serde",
@@ -1280,6 +1282,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "usage-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 mod config;
 mod http;
+mod launcher;
 mod service;
 use clap::Parser;
 use std::{net::SocketAddr, path::PathBuf};
@@ -19,6 +20,20 @@ struct Args {
     parse_workers: usize,
     #[arg(long)]
     open: bool,
+    /// Run the HTTP server in the foreground (default: launch in background).
+    #[arg(long, conflicts_with_all = ["launch", "stop", "shortcut"])]
+    serve: bool,
+    /// Start or reuse the native dashboard, then open the browser.
+    #[arg(long)]
+    launch: bool,
+    #[arg(long)]
+    no_browser: bool,
+    /// Gracefully stop the authenticated, managed dashboard on port 8765.
+    #[arg(long, conflicts_with_all = ["launch", "once", "export_snapshot", "shortcut"])]
+    stop: bool,
+    /// Install a desktop launcher pointing at this native executable.
+    #[arg(long)]
+    shortcut: bool,
     #[arg(long)]
     once: bool,
     #[arg(long)]
@@ -42,6 +57,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.port != 8765 {
         return Err("this dashboard uses fixed port 8765".into());
+    }
+    if !args.serve && !args.once && args.export_snapshot.is_none() {
+        return launcher::run(&args);
     }
     let zone = args
         .timezone
@@ -119,16 +137,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "port 8765 unavailable; identify and stop the existing dashboard before retrying: {e}"
         )
     })?;
-    if args.open {
+    if args.open && !args.no_browser {
         std::thread::spawn(|| {
-            let url = "http://127.0.0.1:8765/";
-            if cfg!(windows) {
-                usage_core::project::command("cmd", &["/c", "start", "", url]);
-            } else if cfg!(target_os = "macos") {
-                usage_core::project::command("open", &[url]);
-            } else {
-                usage_core::project::command("xdg-open", &[url]);
-            }
+            let _ = launcher::open_browser();
         });
     }
     println!("Codex Usage Dashboard: http://{address}/");

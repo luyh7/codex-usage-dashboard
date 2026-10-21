@@ -7,7 +7,9 @@ It reads your local Codex session logs and opens a browser dashboard for per-con
 > Currently only supports OpenAI Codex. It is not a Claude Code, Cursor, Continue, or generic OpenAI API dashboard.
 <img width="1830" height="1041" alt="Codex Usage Dashboard project view" src="assets/codex-usage-dashboard.png" />
 
-The default page uses the original dashboard layout and styling, including with the Rust backend. The Svelte candidate remains available at `/svelte`.
+The dashboard runs exclusively as a native Rust executable; Python is not required. The default page preserves the original layout and styling. The Svelte candidate remains available at `/svelte`.
+
+Development on `codex/rust-svelte-redesign` contains the Rust migration and Clear Mint Svelte redesign. These changes are not released on `main`. See the [Windows development handoff](docs/development/windows-handoff.md) for checkout, build and verification instructions, and [approved designs](docs/design/README.md) for the UI reference.
 
 ## Why This Exists
 
@@ -25,13 +27,12 @@ Recommended global Codex install:
 npx skills add luyh7/codex-usage-dashboard -g -a codex -y
 ```
 
-Then restart Codex or open a new Codex conversation. Type `/usage`, then select the **Codex Usage Dashboard** skill.
-
-The skill opens the local dashboard in your browser.
+Invoke `$codex-usage-dashboard`, or select **Codex Usage Dashboard** in the skill picker. On first use, the skill installs the matching native release if needed. This installation step requires Node 18+ and a published release; later launches run the Rust executable directly.
 
 ## Install With npx
 
-GitHub installer:
+The installer downloads and verifies the native artifact for your platform, then installs the skill. Node 18+ is needed only for installation:
+
 
 ```bash
 npx github:luyh7/codex-usage-dashboard
@@ -67,81 +68,76 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Reuses unchanged remote snapshots and cached session directory listings. Active logs are checked on every refresh; historical file metadata on Windows drives mounted under WSL is reused for up to two seconds between refreshes. Date filters also check the last event time inside logs whose file modification time is stale. New files, replacements, and archive moves invalidate their directory cache on the next refresh.
 - Manual multi-device snapshots: export `cousash-<device-short-code>.json` from one device and import it into another dashboard as remote data.
 - WSL + Windows support: when running in WSL, automatically merges WSL `~/.codex` with Windows `/mnt/c/Users/<you>/.codex` when present.
-- Cross-platform: works on Windows and macOS with Python 3.
+- Native builds for Linux, Windows and macOS; a matching platform artifact is required.
 - No API key required.
 
-## What Gets Installed
+## Installation and Build
 
-The standard skills CLI installs:
-
-```text
-~/.codex/skills/codex-usage-dashboard
-```
-
-The bundled npm installer copies the same skill to that location.
-
-Repository layout:
+The npm installer uses `~/.agents/skills/codex-usage-dashboard`, or
+`$CODEX_HOME/skills/codex-usage-dashboard` when `CODEX_HOME` is explicitly set.
+The skills CLI may select its own skill location. Inside the installed skill:
 
 ```text
-skills/
-  codex-usage-dashboard/
-    SKILL.md
-    agents/openai.yaml
-    scripts/open_dashboard.py
-    scripts/export_snapshot.py
-    scripts/codex_usage_dashboard.py
-    scripts/install_desktop_shortcut.py
-    assets/codex_usage_dashboard.ico
+SKILL.md
+native.json
+scripts/install_runtime.mjs     # installation only
+runtime/codex-usage-dashboard   # .exe on Windows; sole runtime entry
+runtime/manifest.json
 ```
 
-## Rust + Svelte Candidate
-
-The repository now includes an independent Rust core, a background HTTP server,
-and a static Svelte frontend. Details render 100 events per page while retaining
-the full chart and v1 export. Search and project/task queries use revision-bound
-pages; updates preserve selection, focus and paging.
-
-Existing skills, npm, Python and desktop launcher entry points remain supported.
-The opener selects a checksum-verified native artifact when installed and otherwise
-uses the bundled Python implementation. Native release acceptance is still partial:
-Linux/WSL integration and Windows GNU core tests have run; complete Windows and macOS
-release gates have not passed. Python remains available for rollback.
-
-See [build, install and rollback instructions](docs/implementation/release-and-rollback.md)
-and the [implementation and acceptance ledger](docs/implementation/progress.md).
-
-## Manual Launch
-
-After installation:
+Downloads use the versioned GitHub Release declared in `native.json`, with SHA256
+and build identity verification. Missing, unsupported or invalid artifacts fail
+installation; there is no Python fallback. A repository checkout alone does not
+include generated native artifacts. Until a matching release is published, build
+and install locally:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
+node tools/package_release.mjs
+node bin/install.js --runtime-manifest dist/release/manifest.json --offline
 ```
 
-On macOS you may need:
+Building requires Rust and Node; running the installed binary requires neither.
+The build embeds `web/classic/index.html` and the Svelte assets directly.
+See [release and rollback](docs/implementation/release-and-rollback.md) for
+platform acceptance status and offline distribution.
+
+## Launch and Stop
+
+On Linux/macOS with the default npm installation path:
 
 ```bash
-python3 ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --stop
 ```
 
-The dashboard opens at:
+On Windows, run `runtime/codex-usage-dashboard.exe` from the installed skill.
+The default action starts or reuses the background service and opens
+`http://127.0.0.1:8765/`. Use `--no-browser` to suppress opening the browser,
+`--serve` for a foreground server, or `--shortcut` to create a native desktop entry.
+The launcher authenticates managed processes before replacement; an unrelated or
+unmanaged listener on 8765 is left running and reported as an error.
 
-```text
-http://127.0.0.1:8765/
-```
+## Developer Checks
+
+`cargo test --workspace`, `npm run check --prefix web`, and
+`node tools/verify_native.mjs` cover the native implementation. The native verifier
+uses an empty PATH to prove launch/export/stop do not invoke Python or Node.
+Python is used only by optional historical differential tests under `tools/`,
+`tests/`, and `benchmarks/`; their oracle is read from pinned Git history into a
+temporary directory and is never installed or used as an application backend.
 
 ## Manual Multi-Device Usage
 
 Open the dashboard on the receiving device:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard
 ```
 
 Export a snapshot on another device from the dashboard's **Export Snapshot** button, or run:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/export_snapshot.py
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --export-snapshot
 ```
 
 The export command writes a JSON file named like:
@@ -159,7 +155,7 @@ Imported remote snapshots are stored outside the skill directory in the user's a
 To force specific log roots, pass `--codex-home` one or more times:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py \
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard \
   --codex-home ~/.codex \
   --codex-home /mnt/c/Users/<you>/.codex
 ```

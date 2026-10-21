@@ -24,7 +24,7 @@ def sample(pid):
     stat=Path(f'/proc/{pid}/stat').read_text().split(') ',1)[1].split();memory['cpu_seconds']=(int(stat[11])+int(stat[12]))/os.sysconf('SC_CLK_TCK');memory['fds']=len(list(Path(f'/proc/{pid}/fd').iterdir()));return memory
 
 def start(variant,home,config):
-    command=[sys.executable,str(SCRIPT)] if variant=='python' else [str(BINARY)]
+    command=[sys.executable,str(SCRIPT)] if variant=='python' else [str(BINARY),'--serve']
     command+=['--codex-home',str(home),'--no-auto-windows'];env={**os.environ,'COUSASH_CONFIG_DIR':str(config),'TZ':'UTC'}
     before=time.perf_counter();proc=subprocess.Popen(command,cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     deadline=time.monotonic()+30

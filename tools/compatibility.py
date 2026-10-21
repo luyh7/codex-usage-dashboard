@@ -19,7 +19,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py'
+from reference_dashboard import SOURCE
 FIXTURES = ROOT / 'tests/fixtures/compatibility'
 BASELINE_SHA256 = '20fae68140fa8186ed86728aaac16d8d6688b1218d555e93e1a49e4761319135'
 

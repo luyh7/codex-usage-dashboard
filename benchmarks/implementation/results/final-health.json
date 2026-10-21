@@ -1,15 +1,19 @@
 {
   "url": "http://127.0.0.1:8765",
-  "build_id": "79c6d8a8edcf1d9a81ab810aec29483d5e875eb8467cd4c064af46588a5f0a83",
+  "build_id": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
   "version": "0.2.0",
   "implementation": "rust",
-  "ui": "svelte",
+  "ui": "legacy",
   "index_phase": "ready",
   "health_matches_current_release": true,
-  "html_matches_worktree_dist": true,
-  "assets_verified": [
-    "/assets/index-Dt53QOZG.js",
-    "/assets/index-Cy_O9DPf.css"
-  ],
-  "binary_sha256": "60b1726905082dde3ba854a9f153135418b290e18e1101aba53158a50f7b494e"
+  "html_matches_extracted_original": true,
+  "installed_binary_sha256": "26bf22497eb3e03cde4a153a5bf1170189d0f9fa7c7c7656c2753e4fbc7d8352",
+  "browser_checks": [
+    "original page is byte-identical",
+    "search",
+    "right-hand detail",
+    "paged events",
+    "calendar",
+    "no browser errors"
+  ]
 }

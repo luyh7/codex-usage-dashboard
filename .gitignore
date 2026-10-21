@@ -16,3 +16,6 @@ coverage/
 /web/dist/
 
 /skills/codex-usage-dashboard/runtime/
+
+# Local design explorations and verification captures; approved designs live in docs/design/.
+/output/

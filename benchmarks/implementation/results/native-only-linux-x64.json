@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "platform": "linux-x64",
+  "build_id": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
+  "python_on_path": false,
+  "checks": [
+    "missing offline artifact fails without fallback",
+    "fresh offline install ships no Python backend or launcher",
+    "native launch with empty PATH, correct build and original UI",
+    "same build and source scope reuse",
+    "concurrent launches serialize",
+    "standalone export and once coexist with server without Python",
+    "checksum failure preserves install and running process",
+    "upgrade removes old scripts and preserves external user data",
+    "verified native-only rollback",
+    "source changes replace managed process",
+    "authenticated stop closes SSE and releases writer/port",
+    "foreign port owner remains running"
+  ]
+}

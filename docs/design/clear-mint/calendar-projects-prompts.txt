@@ -1,0 +1,73 @@
+Codex Usage Dashboard — A 方案补充设计稿
+Date: 2026-10-22
+Generation mode: built-in image_gen.imagegen
+Intent: generate new states using A as a style reference
+Reference: ../2026-10-21/a-clear-mint.png
+All UI data is fictional demonstration data; static design concepts.
+
+A — 日历展开
+Output: a-calendar-open.png
+
+Use case: ui-mockup
+Asset type: high-fidelity desktop application design for Codex Usage Dashboard.
+Input image 1: STYLE REFERENCE and shared app chrome reference only. Follow design A, Clear Mint: porcelain white, pale cool-gray canvas, translucent mint selection, deep emerald primary numbers, restrained emerald actions, crisp thin borders, soft elevation, 16px corners, generous whitespace. Retain the narrow left sidebar and the asymmetric summary row with a large mint cost card and three quieter metrics. Render a NEW application state, not a copy of the reference screen.
+Full-frame flat straight-on desktop screenshot, landscape 3:2, sharp and high resolution, no device frame, no perspective, no surrounding presentation board or annotations. Excellent Simplified Chinese sans-serif typography, readable labels and aligned tabular numbers. The product is a local Codex session usage dashboard; API-price estimates are not subscription bills. All names and numbers below are fictional. A SINGLE small "演示数据" badge near the page title suffices.
+Shared sidebar: stacked "Codex Usage Dashboard"; destinations "概览", "项目", "设备数据"; bottom green status dot "本地运行" and a quiet settings icon. Header compact period options "今天", "近 7 天", "本周", "本月", plus a date-range trigger. Keep practical consumer usability and clear hierarchy.
+Constraints: no fake percentage growth or week-over-week claims; no budgets, forecasts, billing controls, cloud sync, avatars, stock art or unrelated decorative charts. No real private project names. No import/export button inside a conversation detail card: snapshot management belongs under "设备数据". Tiny technical metadata should not compete with usage and cost. One coherent polished screen. No watermark.
+
+Primary request: show the Overview page with its date-range calendar OPEN. The calendar is the main focus and must be beautiful, legible, and realistically usable.
+Sidebar "概览" active. Page heading "用量概览". The header has "本周" selected and date trigger "2026年10月19日 – 10月25日"; its calendar icon and chevron show the expanded state. Existing overview remains visible without blur or a heavy dark backdrop. Background summary: "估算费用" "$18.62" on the large mint card, "总用量" "12.84M" tokens, "对话数" "10", "缓存命中率" "89%". Lower left a conversation list "对话用量" with search, filter and descending cost sort; selected "重构登录流程" 4.20M $6.48, other fictional rows "修复移动端布局", "优化数据查询", "补充单元测试". A selected conversation detail exists at lower right but can be partly covered by the calendar.
+
+Calendar composition: a large anchored white popover aligned below the top-right date trigger, approximately 720px wide in a 1536px canvas. Subtle refined shadow and mint-gray border. Keep the overview title and large cost card visible on the left. Calendar is fully inside the viewport and not clipped. Its left slim rail has quick choices "今天", "近 7 天", "本周", "本月", and "自定义" highlighted in pale mint. Its wider right area contains a large clear month grid.
+Popover title "选择日期范围". Month heading "2026年 10月" with small previous/next month arrow buttons, a discreet "回到今天" action. Monday-first weekday labels exactly "一 二 三 四 五 六 日". Accurate October 2026 calendar with FIVE rows, seven equal columns:
+row 1: muted 28, muted 29, muted 30, 1, 2, 3, 4
+row 2: 5, 6, 7, 8, 9, 10, 11
+row 3: 12, 13, 14, 15, 16, 17, 18
+row 4: 19, 20, 21, 22, 23, 24, 25
+row 5: 26, 27, 28, 29, 30, 31, muted 1
+The pending range is October 19–22, four consecutive dates Monday through Thursday. 19 and 22 have emerald endpoint capsules with white numerals; 20 and 21 connect through a pale mint band. Today is October 22, add a small unobtrusive today dot. Under dates 19,20,21,22 show their daily usage respectively "2.14M", "3.46M", "4.21M", "3.03M". Other cells have only dates or a small light usage marker, never invented dollar values. Outside-month dates subdued; future dates without fabricated usage.
+Under grid a delicate caption "每日用量 · tokens", then compact summaries "本月 19.62M" and "本年 128.40M". The calendar's footer spans the popover width: two clearly labelled compact fields "开始日期" with "2026/10/19" and "结束日期" with "2026/10/22", subtle "已选 4 天" text, quiet "取消" and a single emerald primary button "应用日期". The selected range is a pending draft and will be applied only by the primary button. No redundant Save/Confirm buttons.
+Design priority: calendar selection and clear Apply action first, the mint dashboard context second. The calendar should feel like an elegant natural extension of reference A, not a separate theme.
+
+========================================================================
+
+A — 项目页面
+Output: a-projects.png
+
+Use case: ui-mockup
+Asset type: high-fidelity desktop application design for Codex Usage Dashboard.
+Input image 1: STYLE REFERENCE and shared app chrome reference only. Follow design A, Clear Mint: porcelain white, pale cool-gray canvas, translucent mint selection, deep emerald primary numbers, restrained emerald actions, crisp thin borders, soft elevation, 16px corners, generous whitespace. Retain the narrow left sidebar and the asymmetric summary row with a large mint cost card and three quieter metrics. Render a NEW application state, not a copy of the reference screen.
+Full-frame flat straight-on desktop screenshot, landscape 3:2, sharp and high resolution, no device frame, no perspective, no surrounding presentation board or annotations. Excellent Simplified Chinese sans-serif typography, readable labels and aligned tabular numbers. The product is a local Codex session usage dashboard; API-price estimates are not subscription bills. All names and numbers below are fictional. A SINGLE small "演示数据" badge near the page title suffices.
+Shared sidebar: stacked "Codex Usage Dashboard"; destinations "概览", "项目", "设备数据"; bottom green status dot "本地运行" and a quiet settings icon. Header compact period options "今天", "近 7 天", "本周", "本月", plus a date-range trigger. Keep practical consumer usability and clear hierarchy.
+Constraints: no fake percentage growth or week-over-week claims; no budgets, forecasts, billing controls, cloud sync, avatars, stock art or unrelated decorative charts. No real private project names. No import/export button inside a conversation detail card: snapshot management belongs under "设备数据". Tiny technical metadata should not compete with usage and cost. One coherent polished screen. No watermark.
+
+Primary request: show the PROJECTS page with the first project expanded, a parent task expanded into its own conversation and two subagents, and the parent conversation selected. The project hierarchy and how the selected conversation contributes to project totals must be immediately understandable.
+Sidebar "项目" active. Heading "项目用量" with small "演示数据" badge and subtle subtitle "按项目查看用量与费用". Header "本周" selected, date trigger "2026年10月19日 – 10月25日".
+Same asymmetric summary row as A: large mint card "估算费用" "$18.62", three quieter cards "总用量" "12.84M" tokens, "对话数" "10", "缓存命中率" "89%". Do not add unrelated decorative sparklines or a change comparison.
+Below: left project list about 60% of main workspace, right selected-conversation detail about 40%. Comfortable readable row height, align usage and cost columns across every hierarchy level. Project list heading "全部项目" with small "3 个项目"; search placeholder "搜索项目或对话", compact "筛选", sort "费用从高到低". Table numeric columns "用量 (tokens)" and "估算费用"; the name column gets most space.
+
+Three fictional project groups with folder icons and disclosure chevrons:
+1. "web-app", expanded, subtitle "5 段对话", project total "8.40M" and "$12.20". Give this project header mild visual emphasis, not a giant extra hero.
+2. "data-tools", collapsed, "3 段对话", "3.10M", "$4.38".
+3. "docs-site", collapsed, "2 段对话", "1.34M", "$2.04".
+These totals add to the top summary (12.84M, $18.62, 10 conversations).
+
+Inside web-app:
+An expanded grouped task header "重构登录流程", with small badge "任务合计", secondary "主任务 + 2 个子代理", total "5.20M" and "$8.12".
+Indent its THREE child rows using restrained tree connector lines:
+- "主任务自身", small sublabel "重构登录流程", "4.20M", "$6.48". This row is SELECTED with pale mint background and slender emerald selection edge. It alone maps to the detail panel.
+- "检查登录状态", small "子代理" tag, "620K", "$1.02".
+- "补充登录测试", small "子代理" tag, "380K", "$0.62".
+Then two normal standalone task rows within the same web-app project:
+"修复移动端布局" "2.10M" "$2.76";
+"更新组件样式" "1.10M" "$1.32".
+The five conversations above sum exactly to this project's total. Keep group-total and child figures visually distinct so the reader does not double-count. Collapsed data-tools and docs-site headers remain fully visible beneath web-app within the screenshot. No fake nested folder trees unrelated to tasks.
+
+Right detail card:
+Title "重构登录流程" with a small "主任务自身" chip. Secondary project "web-app" and model "GPT-6.1 Sol". Prominent "估算费用" "$6.48"; nearby quiet "总用量 4.20M". One line of microcopy "当前详情仅显示主任务自身用量".
+"用量走势": elegant emerald cumulative line rising from 0 to 4.20M, subtle mint area fill, sparse grid, time labels "09:00", "09:10", "09:20", "09:30". One highlighted final point, no confusing duplicate series.
+"费用构成": a slim stacked bar, three legible aligned items "输入" "$2.10", "缓存输入" "$1.26", "输出" "$3.12", adding to $6.48. Emerald/mint with restrained pale blue and lilac for supporting segments. Small footnote "按 API 单价估算，不代表订阅账单".
+At bottom two quiet collapsed disclosure rows "用量事件" and "更多信息" if space allows.
+Design priority: total estimated cost → expensive project → grouped-task hierarchy and selected own conversation → chart and breakdown. High craft, no dense enterprise-console look. Keep A's luminous simplicity, generous whitespace and restrained mint surfaces.
+
+========================================================================

@@ -7,10 +7,8 @@ import assert from 'node:assert/strict';
 
 const root = new URL('../../../', import.meta.url).pathname;
 const here = new URL('.', import.meta.url).pathname;
-const source = root + 'skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py';
-const html = execFileSync('python3', ['-c', `import ast,pathlib
-for n in ast.parse(pathlib.Path(${JSON.stringify(source)}).read_text()).body:
- if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='HTML' for t in n.targets):print(ast.literal_eval(n.value),end='')`], { maxBuffer: 4e6 }).toString();
+const source = root + 'web/classic/index.html';
+const html = await readFile(source, 'utf8');
 const script = await readFile(here + 'dist/probe.js', 'utf8');
 const hook = `
 window.probe = {

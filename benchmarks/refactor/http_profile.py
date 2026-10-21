@@ -20,7 +20,7 @@ def request(path,body=None):
     return {'ms':(time.perf_counter()-start)*1000,'bytes':len(data),'status':status,'body':json.loads(data) if data else None}
 
 def main():
-    report={'port':8765,'source':'current Python production server','data':'synthetic 160 sessions, isolated config; no user imports modified','requests':{}}
+    report={'port':8765,'source':'current Rust production server','data':'synthetic 160 sessions, isolated config; no user imports modified','requests':{}}
     with tempfile.TemporaryDirectory(prefix='http-config-',dir=WORK) as config:
         try:
             verify(codex_home=WORK/'home',config_home=config)

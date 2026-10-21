@@ -31,18 +31,10 @@ fn main() {
     ] {
         collect(&root.join(path), &mut hash);
     }
-    let legacy = root.join("skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py");
+    let legacy = root.join("web/classic/index.html");
     collect(&legacy, &mut hash);
-    let script = fs::read_to_string(legacy).unwrap();
-    let html = script
-        .split_once("HTML = r\"\"\"")
-        .unwrap()
-        .1
-        .split_once("\"\"\"")
-        .unwrap()
-        .0;
     let out = env::var("OUT_DIR").unwrap();
-    fs::write(Path::new(&out).join("legacy.html"), html).unwrap();
+    fs::copy(legacy, Path::new(&out).join("legacy.html")).unwrap();
     web_assets(root, Path::new(&out), &mut hash);
     println!("cargo:rustc-env=COUSASH_BUILD_ID={:x}", hash.finalize());
 }

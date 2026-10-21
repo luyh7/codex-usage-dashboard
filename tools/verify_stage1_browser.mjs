@@ -9,7 +9,7 @@ const cache = process.env.HOME + '/.cache/ms-playwright';
 const dir = (await readdir(cache)).filter(x => /^chromium-\d+$/.test(x)).sort().at(-1);
 const browser = await chromium.launch({executablePath:`${cache}/${dir}/chrome-linux64/chrome`,headless:true});
 const report = {stage:1, data:'synthetic only', port:8765, browser:await browser.version(), platform:execFileSync('uname',['-sr']).toString().trim(), timezone:'Asia/Shanghai', viewport:{width:1440,height:1000}, samples:15, warmups:2, results:[], checks:[], unavailable:['Windows native','macOS']};
-const source = 'skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py';
+const source = 'web/classic/index.html';
 report.source_sha256 = createHash('sha256').update(await readFile(source)).digest('hex');
 const stats = values => ({p50_ms:[...values].sort((a,b)=>a-b)[Math.floor(values.length/2)],p95_ms:[...values].sort((a,b)=>a-b)[Math.ceil(values.length*.95)-1],samples_ms:values});
 try {
@@ -21,7 +21,7 @@ try {
  await page.locator('#eventRows tr').first().waitFor();
  assert.equal(await page.locator('#eventRows tr').count(),100);
  const health=await (await context.request.get(origin+'/api/health')).json();
- assert.equal(health.source_sha256,report.source_sha256);
+ assert.equal(health.implementation,'rust'); report.build_id=health.build_id;
  const list=await (await context.request.get(origin+'/api/sessions?period=all')).json();
  const uid=list.sessions[0].uid, token=list.snapshot_token;
  const params=new URLSearchParams({id:uid,snapshot_token:token});
@@ -73,11 +73,10 @@ try {
  // Controlled DOM work benchmarks: same synthetic 10k payload, viewport and
  // full chart. Data loading / HTTP are excluded, recorded separately above.
  const fixture=JSON.parse(await readFile('benchmarks/refactor/.work/frontend-10000.json','utf8'));
- const extract=path=>execFileSync('python3',['-c',`import ast,sys
-for n in ast.parse(sys.stdin.read()).body:
- if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='HTML' for t in n.targets):print(ast.literal_eval(n.value),end='')`],{maxBuffer:4e6,input:path==='legacy'?execFileSync('git',['show','c42f0e8ae948d4cde392fafa9894681a1200b17d:'+source]):execFileSync('cat',[path])}).toString();
+ const legacyHtml=execFileSync('git',['show','c42f0e8ae948d4cde392fafa9894681a1200b17d:skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py'],{maxBuffer:4e6}).toString().split('HTML = r"""')[1].split('"""')[0];
+ const currentHtml=await readFile(source,'utf8');
  for(const variant of ['legacy','current']) {
-  const html=extract(variant==='legacy'?'legacy':source);
+  const html=variant==='legacy'?legacyHtml:currentHtml;
   const boot=html.lastIndexOf('    applyStaticText();\n    populateEnvironmentFilter();');
   assert(boot>0);
   const intercepted=html.slice(0,boot)+html.slice(html.indexOf('  </script>',boot));

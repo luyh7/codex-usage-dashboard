@@ -1,3 +1,15 @@
+# 当前状态：Rust 为唯一运行入口
+
+2026-10-21 后续调整已删除生产 Python 后端、启动器、导出、快捷方式和安装脚本。
+原版界面提取至 `web/classic/index.html`，Rust 构建直接嵌入。原生程序负责后台启动、
+同版本复用、配置变更替换、认证退出及桌面入口；Node 仅用于安装/构建。
+首次安装缺少原生制品时返回错误，不再回退 Python。源码安装和离线制品安装均可用；
+默认在线安装需要发布对应版本的 GitHub Release，本次未推送或发布。
+开发差分测试从固定 Git 提交临时载入 Python 参考实现，不随产品分发。
+
+以下保留原重构阶段的验收记录，其中 Python 回退和旧启动器验证是历史记录，
+不再描述当前产品行为。当前启动验收见 `native-only-linux-x64.json`。
+
 # Rust / Svelte 实施与验收记录
 
 阶段 0–6 的实现与本机验收已落地；这是带 Python 回退的候选版本，**完整跨平台发布门禁尚未通过**。
@@ -76,8 +88,8 @@ python3 tools/benchmark_core.py
 python3 tools/benchmark_index.py
 # 可选 COUSASH_WINDOWS_TEMP 指向 /mnt/c/... 下可用的临时目录：
 python3 tools/benchmark_server.py
-python3 tools/package_release.py --skip-build
-python3 tools/verify_native.py --replace-worktree
+node tools/package_release.mjs --skip-build
+node tools/verify_native.mjs --replace-worktree
 ```
 
 Windows 原生核心重放：在 WSL 安装 GNU Windows Rust target 和 MinGW 后，运行
@@ -87,5 +99,5 @@ Windows 原生核心重放：在 WSL 安装 GNU Windows Rust target 和 MinGW �
 ## 发布边界
 
 未验证平台不标完成。CI 原生矩阵已准备但未提交运行；macOS、Windows 原生完整交互/安装及制品验证仍为发布前任务。
-候选版使用保守切换策略，保留旧缓存、v1 快照及 Python 入口。没有实现 Tauri、自动更新器、
-自动同步、遥测或日志上传。当前工作区最终服务和制品的 health/build ID 验证另记录在 `final-health.json`。
+候选版使用保守切换策略，保留旧缓存和 v1 快照；运行入口已统一为 Rust。没有实现 Tauri、自动更新器、
+自动同步、遥测或日志上传。历史构建验证保留在各报告中；Rust 唯一入口的验证见 `native-only-linux-x64.json`。

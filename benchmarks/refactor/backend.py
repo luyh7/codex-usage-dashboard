@@ -25,7 +25,8 @@ import zlib
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 WORK = HERE / '.work'
-SOURCE = ROOT / 'skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py'
+sys.path.insert(0, str(ROOT / 'tools'))
+from reference_dashboard import SOURCE
 os.environ['TZ'] = 'Asia/Shanghai'
 time.tzset()
 spec = importlib.util.spec_from_file_location('dashboard_probe_source', SOURCE)

@@ -139,8 +139,9 @@ instance ID. `implementation=rust`, `ui=legacy`, protocol version 1 and capabili
 flags identify the host. The original UI is served at `/`, `/index.html`, and
 `/legacy`; the Svelte candidate remains at `/svelte`. Rust build ID hashes core/server sources, manifests,
 pricing assets, the bundled legacy UI and Svelte sources/build assets. The binary's
-`--build-info` is compared against both health and the install manifest. Python
-health continues to identify its startup source hash.
+`--build-info` is compared against both health and the install manifest.
+Python is no longer a supported runtime. Optional differential tests load the
+frozen reference from Git history; all installed commands execute Rust.
 
 Native file identity uses Unix device/inode/ctime or Windows volume/file ID plus
 ChangeTime. The latter is separately exposed by the Windows file information API,

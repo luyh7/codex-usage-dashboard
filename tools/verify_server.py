@@ -16,7 +16,8 @@ import urllib.request
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'benchmarks/refactor'))
-from verify_dashboard import verify, SCRIPT
+from verify_dashboard import verify
+from reference_dashboard import SOURCE as SCRIPT
 from compatibility import load_dashboard,compare
 BINARY=ROOT/('target/release/codex-usage-dashboard' if os.environ.get('COUSASH_RELEASE')=='1' else 'target/debug/codex-usage-dashboard')
 BASE='http://127.0.0.1:8765'
@@ -31,6 +32,12 @@ def request(path,body=None):
 
 def stop_owned():
     import re
+    try:
+        status,h=request('/api/health')
+        if h.get('instance_id'):
+            subprocess.run([str(ROOT/'target/release/codex-usage-dashboard'),'--stop'],check=True)
+            return
+    except (OSError,ValueError): pass
     sockets=subprocess.check_output(['ss','-ltnp','sport = :8765'],text=True)
     for pid in set(map(int,re.findall(r'pid=(\d+)',sockets))):
         cmd=Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
@@ -58,7 +65,7 @@ def main():
         try:
             stop_owned()
             with (root/'server.log').open('wb') as log:
-                proc=subprocess.Popen([str(BINARY),'--codex-home',str(home),'--no-auto-windows','--timezone','UTC'],cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log)
+                proc=subprocess.Popen([str(BINARY),'--serve','--codex-home',str(home),'--no-auto-windows','--timezone','UTC'],cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log)
             deadline=time.monotonic()+30
             while True:
                 if proc.poll() is not None:raise RuntimeError((root/'server.log').read_text())

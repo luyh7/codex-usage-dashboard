@@ -15,7 +15,9 @@
   },
   "scripts": {
     "install-skill": "node ./bin/install.js",
-    "validate": "node --check ./bin/install.js"
+    "validate": "node --check ./bin/install.js",
+    "package-native": "node tools/package_release.mjs",
+    "test-native": "node tools/verify_native.mjs"
   },
   "keywords": [
     "codex",
@@ -38,9 +40,11 @@
   },
   "files": [
     "bin/",
-    "skills/",
-    "!skills/**/__pycache__/**",
-    "!skills/**/*.pyc",
+    "skills/**/SKILL.md",
+    "skills/**/native.json",
+    "skills/**/agents/**",
+    "skills/**/assets/**",
+    "skills/**/scripts/*.mjs",
     "!skills/**/runtime/**",
     "README.md",
     "LICENSE"

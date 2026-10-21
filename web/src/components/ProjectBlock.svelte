@@ -3,6 +3,8 @@
   import type { DashboardData, Project, Query, Session, Page, TaskGroup } from '../lib/data/types';
   import { cancelled } from '../lib/data/http';
   import { words, number, money, type Language } from '../lib/domain/ui';
+  import Icon from './Icon.svelte';
+  import { compactNumber, displayMoney } from '../lib/domain/presentation';
   import TaskRows from './TaskRows.svelte';
   import Pager from './Pager.svelte';
   let {
@@ -74,53 +76,53 @@
   });
 </script>
 
-<section class="project-block">
-  <button class="project-heading" aria-expanded={open} onclick={toggle}
-    ><span class="folder-icon">{open ? '▾' : '▸'} ▱</span><span class="project-name"
-      >{project.label || project.key}<small title={project.key}
-        >{project.key} · {project.environments.join(' / ')}</small
+<section class="project-block" class:open>
+  <button class="project-heading project-row" aria-expanded={open} onclick={toggle}>
+    <span class="project-title"
+      ><span class="folder-icon"
+        ><span class:expanded={open}><Icon name="chevron" size={14} /></span><Icon
+          name="folder"
+          size={28}
+        /></span
+      ><span class="project-name"
+        >{project.label || project.key}<small title={project.environments.join(' / ')}
+          >{number(project.session_count, lang)} {t.sessionCount}</small
+        ></span
       ></span
-    ><span class="numeric">{number(project.usage.total_tokens, lang)} <small>tokens</small></span
-    ><span class="numeric project-cost"
+    >
+    <span class="numeric" title={number(project.usage.total_tokens, lang)}
+      >{compactNumber(project.usage.total_tokens)}</span
+    >
+    <span class="numeric project-cost" title={money(project.estimated_cost_usd, lang)}
       >{project.estimated_cost_known_count
-        ? money(project.estimated_cost_usd, lang)
-        : t.unknown}<small>{number(project.session_count, lang)} {t.sessions}</small></span
-    ></button
-  >
+        ? displayMoney(project.estimated_cost_usd)
+        : t.unknown}</span
+    >
+  </button>
   {#if open}<div class="project-content" aria-busy={loading}>
-      {#if error}<p class="error">
-          {error} <button onclick={() => load()}>{t.retry}</button>
-        </p>{/if}{#if loading && !page}<p class="muted" role="status">
-          {t.loading}
-        </p>{/if}{#if page}<div class="table-scroll">
-          <table>
-            <thead
-              ><tr
-                ><th>{t.conversations}</th><th class="numeric">Tokens</th><th class="numeric"
-                  >{t.cost}</th
-                ><th class="numeric">{t.turns}</th></tr
-              ></thead
-            ><tbody
-              >{#each page.items as group (group.identity)}<TaskRows
-                  {group}
-                  {selected}
-                  {select}
-                  {lang}
-                  expanded={agentExpanded.has(group.identity)}
-                  toggle={() => toggleAgent(group.identity)}
-                />{/each}</tbody
-            >
-          </table>
+      {#if error}<p class="error">{error} <button onclick={() => load()}>{t.retry}</button></p>{/if}
+      {#if loading && !page}<p class="muted" role="status">{t.loading}</p>{/if}
+      {#if page}
+        <div class="project-tasks">
+          {#each page.items as group (group.identity)}<TaskRows
+              {group}
+              {selected}
+              {select}
+              {lang}
+              expanded={agentExpanded.has(group.identity)}
+              toggle={() => toggleAgent(group.identity)}
+            />{/each}
         </div>
-        <Pager
-          offset={page.offset}
-          total={page.total}
-          limit={page.limit}
-          next={page.next_cursor}
-          previous={page.previous_cursor}
-          disabled={loading}
-          change={(cursor) => load(cursor)}
-          {lang}
-        />{/if}
+        {#if page.next_cursor || page.previous_cursor}<Pager
+            offset={page.offset}
+            total={page.total}
+            limit={page.limit}
+            next={page.next_cursor}
+            previous={page.previous_cursor}
+            disabled={loading}
+            change={(cursor) => load(cursor)}
+            {lang}
+          />{/if}
+      {/if}
     </div>{/if}
 </section>

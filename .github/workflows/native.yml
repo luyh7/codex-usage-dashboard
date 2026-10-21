@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
 jobs:
   native:
     strategy:
@@ -42,8 +43,8 @@ jobs:
         env:
           COUSASH_REQUIRE_WEB: '1'
       - run: python tools/verify_core.py
-      - run: python tools/package_release.py --skip-build
-      - run: python tools/verify_native.py
+      - run: node tools/package_release.mjs --skip-build
+      - run: node tools/verify_native.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -52,5 +53,25 @@ jobs:
             dist/release/
             benchmarks/implementation/results/native-*.json
             benchmarks/implementation/results/core-correctness.json
-# Artifacts are review candidates, not an automatic public release. Native
-# acceptance plus documented performance/browser gates must pass before rollout.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: downloaded
+      - run: node tools/merge_release.mjs downloaded dist/publish "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+      - run: gh release create "$RELEASE_TAG" dist/publish/* --verify-tag --generate-notes --title "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
