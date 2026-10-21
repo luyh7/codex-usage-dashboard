@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a desktop launcher for the bundled Codex usage dashboard."""
+"""Install a desktop launcher for the bundled Codex Usage Dashboard."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ $shortcut = $ws.CreateShortcut($link)
 $shortcut.TargetPath = $target
 $shortcut.Arguments = '"' + $opener + '"'
 $shortcut.WorkingDirectory = $workdir
-$shortcut.Description = "Open the local Codex usage dashboard"
+$shortcut.Description = "Open Codex Usage Dashboard"
 if (Test-Path $icon) {{
   $shortcut.IconLocation = $icon + ",0"
 }}

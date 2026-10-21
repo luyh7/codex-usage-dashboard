@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open the bundled Codex usage dashboard."""
+"""Open the bundled Codex Usage Dashboard."""
 
 from __future__ import annotations
 
@@ -178,7 +178,7 @@ def start_dashboard(host: str) -> subprocess.Popen[bytes] | None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Open the bundled Codex usage dashboard.")
+    parser = argparse.ArgumentParser(description="Open the bundled Codex Usage Dashboard.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Bind host. Defaults to 127.0.0.1.")
     args = parser.parse_args()
 

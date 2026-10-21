@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export this device's Cousash JSON snapshot."""
+"""Export this device's Codex Usage Dashboard JSON snapshot."""
 
 from __future__ import annotations
 

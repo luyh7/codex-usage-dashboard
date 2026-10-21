@@ -1,6 +1,6 @@
 # Codex Usage Dashboard
 
-Codex-only skill for a local OpenAI Codex usage dashboard.
+Codex Usage Dashboard is a Codex-only skill for viewing local OpenAI Codex usage.
 
 It reads your local Codex session logs and opens a browser dashboard for per-conversation usage: total tokens, output tokens, estimated dollar cost, cache hit rate, turns, model, reasoning effort, tool calls, and token-count timeline. It can also import JSON snapshots exported from other devices, so each machine can show local realtime usage plus manually imported remote usage.
 
@@ -131,6 +131,8 @@ The export command writes a JSON file named like:
 cousash-mac-9f3a72c1.json
 ```
 
+Snapshot filenames retain the legacy `cousash-` prefix for compatibility.
+
 In the dashboard, use **Import Remote Data** to import that JSON file. The device short code is stored inside the file and is used as the stable identity. Re-importing a newer file from the same device updates that remote data incrementally by session id. If there is no matching remote device yet, the dashboard asks for a display name.
 
 Imported remote snapshots are stored outside the skill directory in the user's application config directory, so reinstalling the skill does not remove them. Remote data can be renamed or deleted from **Manage Remote Data**; deletion is permanent.
@@ -174,4 +176,4 @@ This is a local dashboard. It does not upload your Codex logs. It starts a local
 
 ## Keywords
 
-OpenAI Codex usage dashboard, Codex token usage, Codex per conversation usage, Codex session usage, Codex output tokens, Codex cache hit rate, Codex cost estimate, Codex local logs, Codex skill, OpenAI Codex skill.
+Codex Usage Dashboard, Codex token usage, Codex per conversation usage, Codex session usage, Codex output tokens, Codex cache hit rate, Codex cost estimate, Codex local logs, Codex skill, OpenAI Codex skill.

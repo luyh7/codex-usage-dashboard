@@ -1,7 +1,7 @@
 {
   "name": "codex-usage-dashboard-skill",
   "version": "0.1.0",
-  "description": "Codex-only skill for a local per-conversation Codex usage dashboard with tokens, output, cost estimates, cache hit rate, models, and reasoning effort.",
+  "description": "Codex Usage Dashboard is a Codex-only skill for local per-conversation usage, tokens, output, cost estimates, cache hit rate, models, and reasoning effort.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/luyh7/codex-usage-dashboard.git"

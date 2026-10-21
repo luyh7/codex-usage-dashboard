@@ -74,7 +74,7 @@ console.log(`Installed ${SKILL_NAME} to: ${targetSkill}`);
 console.log("");
 console.log("Codex-only: this is a Codex skill and currently only works in OpenAI Codex.");
 console.log("Restart Codex or open a new Codex conversation, then ask:");
-console.log("  Use $codex-usage-dashboard to open my Codex usage dashboard");
+console.log("  Use $codex-usage-dashboard to open Codex Usage Dashboard");
 console.log("");
 console.log("Standard skills CLI install:");
 console.log("  npx skills add luyh7/codex-usage-dashboard -g -a codex -y");

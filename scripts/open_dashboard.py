@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open the bundled Codex usage dashboard from the project root."""
+"""Open the bundled Codex Usage Dashboard from the project root."""
 
 from __future__ import annotations
 

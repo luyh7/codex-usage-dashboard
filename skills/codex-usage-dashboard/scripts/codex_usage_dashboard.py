@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local read-only dashboard for Codex session token usage.
+"""Local read-only Codex Usage Dashboard for session token usage.
 
 The server reads Codex JSONL logs from:
   - ~/.codex/sessions
@@ -255,6 +255,7 @@ MODEL_PRICE_SCHEDULES = (
 )
 
 PERIOD_KEYS = {"today", "7d", "30d", "week", "month", "all"}
+# Keep legacy storage and snapshot identifiers compatible with existing installations.
 APP_NAME = "cousash"
 SNAPSHOT_SCHEMA = "cousash.remote-snapshot"
 SNAPSHOT_VERSION = 1
@@ -6289,11 +6290,11 @@ HTML = r"""<!doctype html>
         manageRemote: '管理远程数据',
         importRemoteTitle: '导入或管理其他设备导出的快照',
         exportSnapshot: '导出快照',
-        exportSnapshotTitle: '导出当前设备的 Cousash JSON 快照',
+        exportSnapshotTitle: '导出当前设备的 Codex Usage Dashboard JSON 快照',
         remoteData: '远程数据',
         close: '关闭',
         remoteEmpty: '还没有导入远程设备数据。',
-        remoteImportHelp: '选择另一台设备导出的 Cousash JSON 快照文件。',
+        remoteImportHelp: '选择另一台设备导出的 Codex Usage Dashboard JSON 快照文件。',
         remoteNeedLabel: '这是新的远程设备，请输入显示名称。',
         remoteCurrentWarning: '这个文件来自当前设备，导入后可能与本机实时统计重复。是否仍然导入为远程数据？',
         remoteDeleteConfirm: '删除后无法恢复。确定删除这台远程设备的数据吗？',
@@ -6468,11 +6469,11 @@ HTML = r"""<!doctype html>
         manageRemote: 'Manage Remote',
         importRemoteTitle: 'Import or manage snapshots exported from other devices',
         exportSnapshot: 'Export Snapshot',
-        exportSnapshotTitle: 'Export this device as a Cousash JSON snapshot',
+        exportSnapshotTitle: 'Export this device as a Codex Usage Dashboard JSON snapshot',
         remoteData: 'Remote Data',
         close: 'Close',
         remoteEmpty: 'No remote device data has been imported.',
-        remoteImportHelp: 'Choose a Cousash JSON snapshot exported on another device.',
+        remoteImportHelp: 'Choose a Codex Usage Dashboard JSON snapshot exported on another device.',
         remoteNeedLabel: 'This is a new remote device. Enter a display name.',
         remoteCurrentWarning: 'This file is from the current device. Importing it may duplicate local realtime data. Import it as remote data anyway?',
         remoteDeleteConfirm: 'This cannot be undone. Delete this remote device data?',
@@ -8972,7 +8973,7 @@ def release_dashboard_port(port: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Local read-only Codex usage dashboard.")
+    parser = argparse.ArgumentParser(description="Local read-only Codex Usage Dashboard.")
     parser.add_argument(
         "--codex-home",
         type=Path,
@@ -9001,7 +9002,7 @@ def parse_args() -> argparse.Namespace:
         nargs="?",
         const="",
         default=None,
-        help="Export this device's full Cousash JSON snapshot. Optionally pass an output path.",
+        help="Export this device's full Codex Usage Dashboard JSON snapshot. Optionally pass an output path.",
     )
     return parser.parse_args()
 
