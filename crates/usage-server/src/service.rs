@@ -43,6 +43,7 @@ pub struct State {
     pub zone: Tz,
     views: Mutex<VecDeque<CachedView>>,
     pub query_slots: Arc<tokio::sync::Semaphore>,
+    pub exports: Mutex<VecDeque<Arc<crate::snapshot::ExportJob>>>,
 }
 impl State {
     pub fn publication(&self) -> Result<Arc<Published>, QueryError> {
@@ -142,6 +143,11 @@ impl State {
         )
     }
 }
+impl State {
+    pub fn export_document<'a>(&self, view: &'a View, progress: Option<&'a std::sync::atomic::AtomicUsize>) -> Result<crate::snapshot::Document<'a>, QueryError> {
+        crate::snapshot::document(view, json!({"short_code":self.device,"label":self.hostname,"platform":config::platform(),"hostname":self.hostname}), &self.sources, progress)
+    }
+}
 fn update_status(state: &State, status: Value, notify: bool) {
     let mut current = state.status.write().unwrap();
     if *current != status {
@@ -175,6 +181,7 @@ pub fn start(
         zone,
         views: Mutex::new(VecDeque::new()),
         query_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+        exports: Mutex::new(VecDeque::new()),
     });
     let shared = state.clone();
     let handle = std::thread::Builder::new()

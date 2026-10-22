@@ -301,21 +301,85 @@ async fn remotes(Extract(state): Extract<Arc<State>>) -> Response {
         Err(e) => error(e),
     }
 }
-async fn mutate(state: Arc<State>, action: &str, body: Bytes) -> Response {
+fn gzip_response(state: &State, bytes: Bytes) -> Response {
+    ([
+        (header::CONTENT_TYPE, "application/gzip".to_owned()),
+        (header::CONTENT_DISPOSITION, format!("attachment; filename=\"cousash-{}.json.gz\"", state.device)),
+        (header::CACHE_CONTROL, "no-store".to_owned()),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+    ], bytes).into_response()
+}
+async fn export_gzip(Extract(state): Extract<Arc<State>>, Query(params): Query<HashMap<String, String>>) -> Response {
+    if let Some(id) = params.get("job") {
+        let jobs = state.exports.lock().unwrap();
+        if let Some(job) = jobs.iter().find(|job| &job.id == id) {
+            if let Some(Ok(bytes)) = job.result.lock().unwrap().as_ref() { return gzip_response(&state, bytes.clone()); }
+            return response(StatusCode::CONFLICT, &json!({"error":"export is not ready"}));
+        }
+        return response(StatusCode::NOT_FOUND, &json!({"error":"export expired; please retry"}));
+    }
+    blocking(state.clone(), move || {
+        let view = state.local_view()?;
+        let bytes = crate::snapshot::gzip(&state.export_document(&view, None)?)?;
+        Ok(gzip_response(&state, bytes.into()))
+    }).await
+}
+async fn start_export(Extract(state): Extract<Arc<State>>) -> Response {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let published = match state.publication() { Ok(p) => p, Err(e) => return error(e) };
+    let mut jobs = state.exports.lock().unwrap();
+    if let Some(job) = jobs.iter().rev().find(|job| {
+        let result = job.result.lock().unwrap();
+        result.is_none() || (job.revision == published.local.revision && matches!(result.as_ref(), Some(Ok(_))))
+    }) { return response(StatusCode::OK, &job.status()); }
+    let job = Arc::new(crate::snapshot::ExportJob {
+        id: format!("{}-{}", published.local.revision, chrono::Utc::now().timestamp_micros()),
+        revision: published.local.revision, percent: AtomicUsize::new(1), result: std::sync::Mutex::new(None),
+    });
+    jobs.push_back(job.clone());
+    while jobs.len() > 3 { jobs.pop_front(); }
+    let status = job.status();
+    drop(jobs);
+    tokio::task::spawn_blocking(move || {
+        let result = (|| -> Result<Bytes, QueryError> {
+            // Capture one publication so concurrent log updates cannot mix export revisions.
+            let period = usage_core::query::Period::bounds("all", None, None, state.zone, usage_core::timestamp::parse(&published.local.generated_at).unwrap_or_else(chrono::Utc::now))?;
+            let view = usage_core::view::View::new(&published.local, period, state.zone, &usage_core::PriceSchedule::bundled())?;
+            Ok(crate::snapshot::gzip(&state.export_document(&view, Some(&job.percent))?)?.into())
+        })();
+        let mut completed = job.result.lock().unwrap();
+        *completed = Some(result.map_err(|e| format!("{e:?}")));
+        job.percent.store(95, Ordering::Relaxed);
+    });
+    response(StatusCode::OK, &status)
+}
+async fn export_progress(Extract(state): Extract<Arc<State>>, Query(params): Query<HashMap<String, String>>) -> Response {
+    let jobs = state.exports.lock().unwrap();
+    match jobs.iter().find(|job| Some(&job.id) == params.get("id")) {
+        Some(job) => response(StatusCode::OK, &job.status()),
+        None => response(StatusCode::NOT_FOUND, &json!({"error":"export expired; please retry"})),
+    }
+}
+async fn mutate(state: Arc<State>, action: &str, body: Bytes, file_options: Option<HashMap<String, String>>) -> Response {
     let Ok(permit) = state.query_slots.clone().acquire_owned().await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let payload: Value = match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        serde_json::from_slice(body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&body))
+        if let Some(options) = file_options {
+            let snapshot = crate::snapshot::decode(&body)?;
+            Ok::<_, Error>(json!({"snapshot": snapshot, "label": options.get("label"), "allow_current_device": options.get("allow_current_device").is_some_and(|s| s == "true")}))
+        } else {
+            Ok(serde_json::from_slice(body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&body))?)
+        }
     })
     .await
     {
         Ok(Ok(value)) => value,
-        _ => {
+        result => {
             return response(
                 StatusCode::BAD_REQUEST,
-                &json!({"ok":false,"error":"invalid JSON body"}),
+                &json!({"ok":false,"error": match result { Ok(Err(e)) => e.to_string(), _ => "invalid snapshot body".into() }}),
             );
         }
     };
@@ -426,23 +490,33 @@ pub fn router(state: Arc<State>) -> Router {
         .route("/api/v2/chart", get(chart))
         .route("/api/revisions", get(subscribe))
         .route("/api/export.json", get(export))
+        .route("/api/export.json.gz", get(export_gzip))
+        .route("/api/export/start", post(start_export))
+        .route("/api/export/progress", get(export_progress))
+        .route("/snapshot-export.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], include_str!("../../../web/shared/snapshot-export.js")) }))
         .route("/api/remotes", get(remotes))
+        .route(
+            "/api/remotes/import-file",
+            post(|Extract(s): Extract<Arc<State>>, Query(options): Query<HashMap<String, String>>, b: Bytes| async {
+                mutate(s, "import", b, Some(options)).await
+            }).layer(DefaultBodyLimit::max(crate::snapshot::MAX_BYTES)),
+        )
         .route(
             "/api/remotes/import",
             post(|Extract(s): Extract<Arc<State>>, b: Bytes| async {
-                mutate(s, "import", b).await
+                mutate(s, "import", b, None).await
             }),
         )
         .route(
             "/api/remotes/rename",
             post(|Extract(s): Extract<Arc<State>>, b: Bytes| async {
-                mutate(s, "rename", b).await
+                mutate(s, "rename", b, None).await
             }),
         )
         .route(
             "/api/remotes/delete",
             post(|Extract(s): Extract<Arc<State>>, b: Bytes| async {
-                mutate(s, "delete", b).await
+                mutate(s, "delete", b, None).await
             }),
         )
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))

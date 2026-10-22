@@ -33,6 +33,7 @@ fn main() {
     }
     let legacy = root.join("web/classic/index.html");
     collect(&legacy, &mut hash);
+    collect(&root.join("web/shared"), &mut hash);
     let out = env::var("OUT_DIR").unwrap();
     fs::copy(legacy, Path::new(&out).join("legacy.html")).unwrap();
     web_assets(root, Path::new(&out), &mut hash);

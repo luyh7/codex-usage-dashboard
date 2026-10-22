@@ -2,6 +2,7 @@ mod config;
 mod http;
 mod launcher;
 mod service;
+mod snapshot;
 use clap::Parser;
 use std::{net::SocketAddr, path::PathBuf};
 #[derive(Parser)]
@@ -38,6 +39,7 @@ struct Args {
     once: bool,
     #[arg(long)]
     json: bool,
+    /// Export lossless .json.gz by default; an explicit .json path writes legacy JSON.
     #[arg(long,num_args=0..=1,default_missing_value="")]
     export_snapshot: Option<String>,
     #[arg(long)]
@@ -90,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(path) = args.export_snapshot {
             let path = if path.is_empty() {
-                std::env::current_dir()?.join(format!("cousash-{}.json", state.device))
+                std::env::current_dir()?.join(format!("cousash-{}.json.gz", state.device))
             } else {
                 usage_core::project::expand_home(&path)
             };
@@ -99,7 +101,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 std::env::current_dir()?.join(path)
             };
-            config::atomic_json(&path, &state.export().map_err(|e| format!("{e:?}"))?)?;
+            if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json")) {
+                config::atomic_json(&path, &state.export().map_err(|e| format!("{e:?}"))?)?;
+            } else {
+                let view = state.local_view().map_err(|e| format!("{e:?}"))?;
+                snapshot::write_gzip(&path, &state.export_document(&view, None).map_err(|e| format!("{e:?}"))?)?;
+            }
             println!("{}", path.display());
         } else {
             let (view, published) = state

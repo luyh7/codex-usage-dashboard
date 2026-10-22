@@ -67,7 +67,7 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Local and read-only: reads Codex session logs from one or more local Codex homes; does not modify Codex logs.
 - Reads both `.jsonl` and Codex's automatically compressed `.jsonl.zst` histories, including archived logs. Compression and resuming a log preserve usage without counting both file representations twice.
 - Reuses unchanged remote snapshots and cached session directory listings. Active logs are checked on every refresh; historical file metadata on Windows drives mounted under WSL is reused for up to two seconds between refreshes. Date filters also check the last event time inside logs whose file modification time is stale. New files, replacements, and archive moves invalidate their directory cache on the next refresh.
-- Manual multi-device snapshots: export `cousash-<device-short-code>.json` from one device and import it into another dashboard as remote data.
+- Manual multi-device snapshots: export `cousash-<device-short-code>.json.gz` from one device and import it into another dashboard as remote data. Legacy `.json` snapshots remain supported.
 - WSL + Windows support: when running in WSL, automatically merges WSL `~/.codex` with Windows `/mnt/c/Users/<you>/.codex` when present.
 - Native builds for Linux, Windows and macOS; a matching platform artifact is required.
 - No API key required.
@@ -141,15 +141,17 @@ Export a snapshot on another device from the dashboard's **Export Snapshot** but
 ~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --export-snapshot
 ```
 
-The export command writes a JSON file named like:
+Dashboard exports display a percentage with preparation, compression and download stages. Percentages follow processed session events and downloaded bytes. Concurrent exports share one job, and an unchanged local snapshot can reuse the completed export.
+
+The export command writes a losslessly compressed JSON file named like:
 
 ```text
-cousash-mac-9f3a72c1.json
+cousash-mac-9f3a72c1.json.gz
 ```
 
-Snapshot filenames retain the legacy `cousash-` prefix for compatibility.
+Snapshot filenames retain the legacy `cousash-` prefix for compatibility. Compression preserves all statistics, session details and token timeline events. To export uncompressed JSON for an older dashboard, specify an explicit `.json` path with `--export-snapshot snapshot.json`; `/api/export.json` also remains available.
 
-In the dashboard, use **Import Remote Data** to import that JSON file. The device short code is stored inside the file and is used as the stable identity. Re-importing a newer file from the same device updates that remote data incrementally by session id. If there is no matching remote device yet, the dashboard asks for a display name.
+In the dashboard, use **Import Remote Data** to import a `.json.gz` or legacy `.json` file. The server automatically decompresses gzip files; both the upload and decompressed JSON are limited to 512 MiB. The device short code is stored inside the file and is used as the stable identity. Re-importing a newer file from the same device updates that remote data incrementally by session id. If there is no matching remote device yet, the dashboard asks for a display name.
 
 Imported remote snapshots are stored outside the skill directory in the user's application config directory, so reinstalling the skill does not remove them. Remote data can be renamed or deleted from **Manage Remote Data**; deletion is permanent.
 

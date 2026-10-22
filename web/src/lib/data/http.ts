@@ -161,6 +161,20 @@ export class HttpDashboard implements DashboardData {
     return value;
   }
   importSnapshot(snapshot: unknown, label?: string, allowCurrent = false) {
+    if (snapshot instanceof Blob) {
+      const params = new URLSearchParams({ allow_current_device: String(allowCurrent) });
+      if (label) params.set('label', label);
+      return this.transport(this.base + '/api/remotes/import-file?' + params, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: snapshot,
+      }).then(async response => {
+        const value = await response.json();
+        if (!response.ok && !(response.status === 409 && (value.needs_label || value.needs_confirmation)))
+          throw new DataError(response.status, value.error || `HTTP ${response.status}`);
+        return value as ImportResult;
+      });
+    }
     return this.post<ImportResult>('/api/remotes/import', {
       snapshot,
       label,
@@ -195,7 +209,7 @@ export class HttpDashboard implements DashboardData {
     return close;
   }
   exportUrl() {
-    return this.base + '/api/export.json';
+    return this.base + '/api/export.json.gz';
   }
   close() {
     this.cancel('');

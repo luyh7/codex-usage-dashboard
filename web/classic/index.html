@@ -1092,6 +1092,15 @@
       .breakdown-value { gap: 5px; }
       .kv { grid-template-columns: 1fr; gap: 2px; }
     }
+    .snapshot-export-progress { flex-basis: 100%; max-width: 320px; margin: 4px 0 0 auto; }
+    .snapshot-export-progress[hidden] { display: none; }
+    .snapshot-export-caption { display: flex; justify-content: space-between; margin-bottom: 7px; font-size: 12px; color: var(--muted); }
+    .snapshot-export-caption strong { font-variant-numeric: tabular-nums; }
+    .snapshot-export-track { height: 6px; overflow: hidden; border-radius: 6px; background: #8899aa24; }
+    .snapshot-export-track span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent, #34b89b); transition: width 180ms ease-out; }
+    #snapshotExportBtn[aria-busy=true]::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 7px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: snapshot-export-spin .8s linear infinite; }
+    @keyframes snapshot-export-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { #snapshotExportBtn[aria-busy=true]::before { animation: none; } .snapshot-export-track span { transition: none; } }
   </style>
 </head>
 <body>
@@ -1127,11 +1136,15 @@
         <button id="refreshBtn" class="primary" title="重新扫描本地日志" data-i18n="refresh" data-i18n-title="refreshTitle">刷新</button>
         <button id="remoteBtn" title="导入远程数据" data-i18n="importRemote" data-i18n-title="importRemoteTitle">导入远程数据</button>
         <button id="snapshotExportBtn" title="导出当前设备快照" data-i18n="exportSnapshot" data-i18n-title="exportSnapshotTitle">导出快照</button>
+        <div id="snapshotExportProgress" class="snapshot-export-progress" hidden aria-live="polite">
+          <div class="snapshot-export-caption"><span id="snapshotExportPhase"></span><strong id="snapshotExportPercent">0%</strong></div>
+          <div class="snapshot-export-track" role="progressbar" aria-label="Snapshot export" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+        </div>
       </div>
     </div>
   </header>
 
-  <input id="remoteFileInput" type="file" accept="application/json,.json" hidden>
+  <input id="remoteFileInput" type="file" accept="application/json,application/gzip,application/x-gzip,.json,.json.gz,.gz" hidden>
   <div class="modal-backdrop" id="remoteModal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="remoteModalTitle">
       <div class="modal-head">
@@ -1176,7 +1189,7 @@
     <div class="layout">
       <section class="panel">
         <div class="panel-title">
-          <h2 data-i18n="conversations">对话</h2>
+          <h2 data-i18n="conversations">会话</h2>
           <div class="count" id="resultCount" data-i18n="loading">加载中</div>
         </div>
         <div class="table-wrap">
@@ -1193,7 +1206,7 @@
             </colgroup>
             <thead>
               <tr>
-                <th data-sort="title" data-i18n="conversation">对话</th>
+                <th data-sort="title" data-i18n="conversation">会话</th>
                 <th data-sort="total_tokens" data-i18n="total">总量</th>
                 <th data-sort="output_tokens" data-i18n="output">输出</th>
                 <th data-sort="estimated_cost_usd" data-i18n="cost">花费</th>
@@ -1212,7 +1225,7 @@
 
       <aside class="panel details">
         <div class="panel-title">
-          <h2 data-i18n="conversationDetails">对话明细</h2>
+          <h2 data-i18n="conversationDetails">会话明细</h2>
           <div class="count" id="detailStatus" data-i18n="notSelected">未选择</div>
         </div>
         <div class="details-body" id="detailsBody">
@@ -1243,6 +1256,7 @@
       environment: 'all',
       source: 'all',
       model: 'all',
+      modelOptions: [],
       limit: '50',
       period: 'today',
       customStartDate: '',
@@ -1278,11 +1292,11 @@
         manageRemote: '管理远程数据',
         importRemoteTitle: '导入或管理其他设备导出的快照',
         exportSnapshot: '导出快照',
-        exportSnapshotTitle: '导出当前设备的 Codex Usage Dashboard JSON 快照',
+        exportSnapshotTitle: '导出当前设备的 Codex Usage Dashboard 压缩快照（.json.gz）',
         remoteData: '远程数据',
         close: '关闭',
         remoteEmpty: '还没有导入远程设备数据。',
-        remoteImportHelp: '选择另一台设备导出的 Codex Usage Dashboard JSON 快照文件。',
+        remoteImportHelp: '选择另一台设备导出的 .json.gz 或 .json 快照文件，压缩文件会自动解压。',
         remoteNeedLabel: '这是新的远程设备，请输入显示名称。',
         remoteCurrentWarning: '这个文件来自当前设备，导入后可能与本机实时统计重复。是否仍然导入为远程数据？',
         remoteDeleteConfirm: '删除后无法恢复。确定删除这台远程设备的数据吗？',
@@ -1344,8 +1358,8 @@
         limit50: '前 50',
         limit100: '前 100',
         limitAll: '全部',
-        conversations: '对话',
-        conversation: '对话',
+        conversations: '会话',
+        conversation: '会话',
         output: '输出',
         cost: '花费',
         cacheHit: '缓存命中',
@@ -1355,7 +1369,7 @@
         fastMode: 'Fast 模式',
         ultrafastMode: 'Ultrafast 模式',
         standardMode: '普通模式',
-        conversationDetails: '对话明细',
+        conversationDetails: '会话明细',
         loading: '加载中',
         loadingData: '正在加载用量数据',
         notSelected: '未选择',
@@ -1364,19 +1378,19 @@
         scanned: '扫描',
         loadFailed: '加载失败：{message}',
         noMatches: '没有匹配的会话',
-        projectRowCount: '{projects} 个工作区 · {sessions} 条对话',
-        projectConversationCount: '{count} 条对话',
+        projectRowCount: '{projects} 个工作区 · {sessions} 个会话',
+        projectConversationCount: '{count} 个会话',
         projectLatest: '最近 {time}',
         showMoreConversations: '展开剩余 {count} 条',
         showFewerConversations: '收起到 5 条',
-        showMoreTasks: '展开剩余 {count} 个任务',
-        showFewerTasks: '收起到 5 个任务',
+        showMoreTasks: '展开剩余 {count} 个会话组',
+        showFewerTasks: '收起到 5 个会话组',
         collapseProject: '收起工作区',
         expandProject: '展开工作区',
         expandTask: '展开子 agent',
         collapseTask: '收起子 agent',
-        taskRowCount: '{tasks} 个任务 · {agents} 个 agent',
-        taskTotal: '任务合计',
+        taskRowCount: '{tasks} 个会话组 · {agents} 个 agent',
+        taskTotal: '会话组合计',
         mixed: '混合',
         priceKnown: '按公开 API 价格估算花费',
         priceUnknown: '没有匹配到公开模型价格',
@@ -1462,11 +1476,11 @@
         manageRemote: 'Manage Remote',
         importRemoteTitle: 'Import or manage snapshots exported from other devices',
         exportSnapshot: 'Export Snapshot',
-        exportSnapshotTitle: 'Export this device as a Codex Usage Dashboard JSON snapshot',
+        exportSnapshotTitle: 'Export this device as a compressed Codex Usage Dashboard snapshot (.json.gz)',
         remoteData: 'Remote Data',
         close: 'Close',
         remoteEmpty: 'No remote device data has been imported.',
-        remoteImportHelp: 'Choose a Codex Usage Dashboard JSON snapshot exported on another device.',
+        remoteImportHelp: 'Choose a .json.gz or .json snapshot exported on another device. Compressed files are decompressed automatically.',
         remoteNeedLabel: 'This is a new remote device. Enter a display name.',
         remoteCurrentWarning: 'This file is from the current device. Importing it may duplicate local realtime data. Import it as remote data anyway?',
         remoteDeleteConfirm: 'This cannot be undone. Delete this remote device data?',
@@ -1528,8 +1542,8 @@
         limit50: 'Top 50',
         limit100: 'Top 100',
         limitAll: 'All',
-        conversations: 'Conversations',
-        conversation: 'Conversation',
+        conversations: 'Sessions',
+        conversation: 'Session',
         output: 'Output',
         cost: 'Cost',
         cacheHit: 'Cache hit',
@@ -1547,20 +1561,20 @@
         scanning: 'Scanning',
         scanned: 'scanned',
         loadFailed: 'Load failed: {message}',
-        noMatches: 'No matching conversations',
-        projectRowCount: '{projects} workspaces · {sessions} conversations',
-        projectConversationCount: '{count} conversations',
+        noMatches: 'No matching sessions',
+        projectRowCount: '{projects} workspaces · {sessions} sessions',
+        projectConversationCount: '{count} sessions',
         projectLatest: 'Latest {time}',
         showMoreConversations: 'Show {count} more',
         showFewerConversations: 'Show first 5',
-        showMoreTasks: 'Show {count} more tasks',
-        showFewerTasks: 'Show first 5 tasks',
+        showMoreTasks: 'Show {count} more session groups',
+        showFewerTasks: 'Show first 5 session groups',
         collapseProject: 'Collapse workspace',
         expandProject: 'Expand workspace',
         expandTask: 'Expand subagents',
         collapseTask: 'Collapse subagents',
-        taskRowCount: '{tasks} tasks · {agents} agents',
-        taskTotal: 'Task total',
+        taskRowCount: '{tasks} session groups · {agents} agents',
+        taskTotal: 'Session group total',
         mixed: 'Mixed',
         priceKnown: 'Estimated from public API prices',
         priceUnknown: 'No matching public model price',
@@ -1634,7 +1648,7 @@
         timelineDetails: 'Token Count Events',
         timelineTime: 'Time',
         timelineTotal: 'Event total',
-        noTimeline: 'This conversation has no token_count.info records.',
+        noTimeline: 'This session has no token_count.info records.',
         noCurve: 'No chart data',
         countPoints: '{count} counts',
       },
@@ -1852,7 +1866,7 @@
     }
 
     function rowTime(row) {
-      const date = new Date(row.end_at || row.updated_at || row.start_at || 0);
+      const date = new Date(row.last_usage_at || 0);
       const value = date.getTime();
       return Number.isFinite(value) ? value : 0;
     }
@@ -1917,6 +1931,7 @@
 
     function periodParams(period = state.period) {
       const params = new URLSearchParams({ period });
+      if (state.model !== 'all') params.set('model', state.model);
       if (period === 'custom') {
         if (state.customStartDate) params.set('start', state.customStartDate);
         if (state.customEndDate) params.set('end', state.customEndDate);
@@ -1925,7 +1940,7 @@
     }
 
     function periodCacheKey(period = state.period, startDate = state.customStartDate, endDate = state.customEndDate) {
-      return `${period}|${startDate || ''}|${endDate || ''}`;
+      return `${period}|${startDate || ''}|${endDate || ''}|${state.model}`;
     }
 
     function mergeDailyUsage(currentRows, incomingRows) {
@@ -1996,8 +2011,11 @@
       state.snapshotToken = nextSnapshotToken;
       state.sessions = data.sessions || [];
       state.summary = data.summary || null;
+      state.modelOptions = (data.facets?.by_model || []).map(row => row.model);
       const incomingDailyUsage = data.daily_usage || [];
-      if (data.daily_usage_complete) {
+      if (state.model !== 'all') {
+        // The date picker keeps its unfiltered activity calendar.
+      } else if (data.daily_usage_complete) {
         state.dailyUsage = incomingDailyUsage;
         state.dailyUsageComplete = true;
         state.dailyUsageLoadedDates.clear();
@@ -2057,6 +2075,7 @@
       const requestedPeriod = state.period;
       const requestedStart = state.customStartDate;
       const requestedEnd = state.customEndDate;
+      const requestedModel = state.model;
       const cacheKey = periodCacheKey(requestedPeriod, requestedStart, requestedEnd);
       const refreshBtn = document.getElementById('refreshBtn');
       refreshBtn.disabled = true;
@@ -2072,6 +2091,7 @@
           state.period !== requestedPeriod
           || state.customStartDate !== requestedStart
           || state.customEndDate !== requestedEnd
+          || state.model !== requestedModel
         ) {
           state.reloadAfterLoad = true;
           return;
@@ -2143,7 +2163,7 @@
     function populateModelFilter() {
       const select = document.getElementById('modelFilter');
       const oldValue = select.value;
-      const models = Array.from(new Set(state.sessions.flatMap(row => modelsOf(row)))).sort();
+      const models = Array.from(new Set([...state.modelOptions, ...state.sessions.flatMap(row => modelsOf(row)), ...(state.model === 'all' ? [] : [state.model])])).sort();
       select.innerHTML = `<option value="all">${escapeHtml(t('allModels'))}</option>` + models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
       select.value = models.includes(oldValue) ? oldValue : 'all';
       state.model = select.value;
@@ -2243,6 +2263,9 @@
         if (tokenKeys.includes(state.sortKey)) {
           av = tokenValue(a, state.sortKey);
           bv = tokenValue(b, state.sortKey);
+        } else if (state.sortKey === 'end_at') {
+          av = rowTime(a);
+          bv = rowTime(b);
         } else if (state.sortKey === 'estimated_cost_usd') {
           av = Number(a.estimated_cost_usd ?? -1);
           bv = Number(b.estimated_cost_usd ?? -1);
@@ -2311,6 +2334,7 @@
         completed_turn_count: completedTurnCount,
         start_at: earliestRow.start_at || earliestRow.created_at || root.start_at,
         end_at: latestRow.end_at || latestRow.updated_at || latestRow.start_at || root.end_at,
+        last_usage_at: latestRow.last_usage_at,
         task_group_key: key,
       };
     }
@@ -3083,7 +3107,7 @@
       const selectable = options.selectable !== false;
       const selected = selectable && row.uid === state.selectedUid ? 'selected' : '';
       const classes = [selected, extraClass].filter(Boolean).join(' ');
-      const timeValue = row.end_at || row.updated_at || row.start_at;
+      const timeValue = row.last_usage_at;
       const compactProject = options.compactProject === true;
       const task = options.task || null;
       const taskToggle = task && task.subagentCount
@@ -3124,7 +3148,7 @@
 
     function projectHeaderHtml(group) {
       const expanded = isProjectExpanded(group);
-      const latest = group.rows[0]?.end_at || group.rows[0]?.updated_at || group.rows[0]?.start_at || '';
+      const latest = group.rows[0]?.last_usage_at || '';
       const effortLabel = projectEffortLabel(group);
       const modelLabelText = modelLabel(group);
       return `
@@ -3625,16 +3649,12 @@
       input.click();
     }
 
-    async function readJsonFile(file) {
-      const text = await file.text();
-      return JSON.parse(text);
-    }
-
     async function importRemoteSnapshot(snapshot, options = {}) {
-      const res = await fetch('/api/remotes/import', {
+      if (snapshot.size > 512 * 1024 * 1024) throw new Error('Snapshot exceeds 512 MiB');
+      const res = await fetch('/api/remotes/import-file?' + new URLSearchParams(options), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshot, ...options }),
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: snapshot,
       });
       const data = await res.json();
       if (res.ok && data.ok) {
@@ -3668,8 +3688,7 @@
       if (!file) return;
       try {
         remoteStatus(t('loading'));
-        const snapshot = await readJsonFile(file);
-        await importRemoteSnapshot(snapshot);
+        await importRemoteSnapshot(file);
       } catch (err) {
         remoteStatus(t('remoteImportFailed', { message: err.message }), true);
       }
@@ -3727,11 +3746,32 @@
     document.getElementById('remoteFileInput').addEventListener('change', event => {
       handleRemoteFile(event.target.files && event.target.files[0]);
     });
-    document.getElementById('snapshotExportBtn').addEventListener('click', () => { window.location.href = '/api/export.json'; });
+    document.getElementById('snapshotExportBtn').addEventListener('click', async () => {
+      const button = document.getElementById('snapshotExportBtn');
+      if (button.disabled) return;
+      button.disabled = true; button.setAttribute('aria-busy', 'true');
+      const progress = document.getElementById('snapshotExportProgress');
+      progress.hidden = false;
+      document.getElementById('snapshotExportPercent').textContent = '0%';
+      document.getElementById('snapshotExportPhase').textContent = state.lang === 'en' ? 'Preparing snapshot' : '准备快照';
+      progress.querySelector('[role=progressbar]').setAttribute('aria-valuenow', '0');
+      progress.querySelector('.snapshot-export-track span').style.width = '0%';
+      try {
+        const { downloadSnapshot } = await import('/snapshot-export.js');
+        await downloadSnapshot('/api/export.json.gz', (percent, phase) => {
+          const labels = state.lang === 'en' ? { preparing: 'Preparing snapshot', compressing: 'Compressing', downloading: 'Downloading', complete: 'Exported' } : { preparing: '准备快照', compressing: '正在压缩', downloading: '正在下载', complete: '已导出' };
+          document.getElementById('snapshotExportPhase').textContent = labels[phase] || phase;
+          document.getElementById('snapshotExportPercent').textContent = percent + '%';
+          progress.querySelector('[role=progressbar]').setAttribute('aria-valuenow', percent);
+          progress.querySelector('.snapshot-export-track span').style.width = percent + '%';
+        });
+      } catch (error) { document.getElementById('snapshotExportPhase').textContent = String(error); }
+      finally { button.disabled = false; button.setAttribute('aria-busy', 'false'); }
+    });
     document.getElementById('searchInput').addEventListener('input', event => { state.search = event.target.value; renderAll(); });
     document.getElementById('environmentFilter').addEventListener('change', event => { state.environment = event.target.value; renderAll(); });
     document.getElementById('sourceFilter').addEventListener('change', event => { state.source = event.target.value; renderAll(); });
-    document.getElementById('modelFilter').addEventListener('change', event => { state.model = event.target.value; renderAll(); });
+    document.getElementById('modelFilter').addEventListener('change', event => { state.model = event.target.value; void loadData(false); });
     document.querySelectorAll('[data-lang-button]').forEach(button => {
       button.addEventListener('click', () => setLanguage(button.dataset.langButton));
     });

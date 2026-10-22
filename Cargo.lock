@@ -1282,6 +1282,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "flate2",
  "fs2",
  "getrandom",
  "iana-time-zone",

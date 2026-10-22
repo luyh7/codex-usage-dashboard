@@ -26,6 +26,7 @@ getrandom = "0.4"
 fs2 = "0.4"
 tempfile = "3"
 iana-time-zone = "0.1"
+flate2 = "1"
 
 [build-dependencies]
 sha2 = "0.10"
