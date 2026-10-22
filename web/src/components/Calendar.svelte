@@ -13,6 +13,9 @@
     dayKey,
   } from '../lib/domain/calendar';
   import Icon from './Icon.svelte';
+  import AnimatedValue from './AnimatedValue.svelte';
+  import Dropdown from './Dropdown.svelte';
+  import { dismissBackdrop } from '../lib/domain/dismiss';
   let {
     daily,
     loading,
@@ -54,9 +57,11 @@
   let month = $state(initial.from.slice(0, 7));
   let focusDay = $state(initial.from);
   let choosingEnd = $state(false);
-  let panel: HTMLElement;
+  let panel: HTMLDialogElement;
   let mobile = $state(false);
   let availableHeight = $state(600);
+  let panelTop = $state(72),
+    panelLeft = $state(12);
   let values = $derived(
     new Map((daily?.daily_usage || []).map((d) => [d.date, d.usage.total_tokens])),
   );
@@ -75,6 +80,13 @@
       timeZone: 'UTC',
     }).format(parseDay(month + '-01')!),
   );
+  let monthOptions = $derived(
+    Array.from({ length: 12 }, (_, index): [string, string] => [
+      String(index + 1).padStart(2, '0'),
+      new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', timeZone: 'UTC' })
+        .format(new Date(Date.UTC(2000, index, 1))),
+    ]),
+  );
   let presets = $derived([
     ['today', t.today],
     ['7d', t.days7],
@@ -87,17 +99,25 @@
     const media = matchMedia('(max-width: 760px)');
     const update = () => {
       mobile = media.matches;
-      availableHeight = Math.max(
-        80,
-        innerHeight - (trigger?.getBoundingClientRect().bottom ?? 76) - 12,
+      const anchor = trigger?.getBoundingClientRect();
+      const width = Math.min(712, innerWidth - 32);
+      panelTop = Math.min((anchor?.bottom ?? 64) + 8, Math.max(12, innerHeight - 560));
+      panelLeft = Math.max(
+        12,
+        Math.min((anchor?.right ?? innerWidth - 12) - width, innerWidth - width - 12),
       );
+      availableHeight = Math.max(80, innerHeight - panelTop - 12);
     };
     update();
+    panel.showModal();
     window.addEventListener('resize', update);
     void tick().then(() =>
       panel.querySelector<HTMLElement>(`[data-date="${focusDay}"]`)?.focus({ preventScroll: true }),
     );
-    return () => window.removeEventListener('resize', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      panel.close();
+    };
   });
   $effect(() => {
     if (!mobile) return;
@@ -116,14 +136,6 @@
       viewport = body.getBoundingClientRect();
     if (target.bottom > viewport.bottom) body.scrollTop += target.bottom - viewport.bottom + 8;
     else if (target.top < viewport.top) body.scrollTop -= viewport.top - target.top + 8;
-  }
-  function outside(event: PointerEvent) {
-    if (
-      event.target instanceof Node &&
-      !panel?.contains(event.target) &&
-      !trigger?.contains(event.target)
-    )
-      close(false);
   }
   function keyboard(event: KeyboardEvent) {
     if (event.key === 'Escape') {
@@ -204,14 +216,20 @@
   }
 </script>
 
-<svelte:window onpointerdown={outside} onkeydown={keyboard} />
-<div
+<svelte:window onkeydown={keyboard} />
+<dialog
   bind:this={panel!}
+  use:dismissBackdrop={() => close()}
+  oncancel={(event) => {
+    event.preventDefault();
+    close();
+  }}
   id="date-picker"
   class="calendar-panel"
   style:--calendar-available-height={availableHeight + 'px'}
-  role="dialog"
-  aria-modal={mobile ? true : undefined}
+  style:--calendar-top={panelTop + 'px'}
+  style:--calendar-left={panelLeft + 'px'}
+  aria-modal="true"
   aria-labelledby="calendar-title"
   tabindex="-1"
 >
@@ -228,37 +246,23 @@
           aria-pressed={draftPeriod === value}
           onclick={() => preset(value)}>{label}</button
         >{/each}
-      <details class="calendar-more">
-        <summary>{t.more}<Icon name="down" size={13} /></summary>
-        <div>
-          <button class:chosen={draftPeriod === '30d'} onclick={() => preset('30d')}
-            >{t.days30}</button
-          ><button class:chosen={draftPeriod === 'all'} onclick={() => preset('all')}
-            >{t.all}</button
-          >
-        </div>
-      </details>
+      <div class="calendar-extra"><Dropdown variant="text" label={t.more} display={t.more} value={draftPeriod} options={[["30d", t.days30], ["all", t.all]]} change={preset} /></div>
     </nav>
     <div class="calendar-month">
       <div class="calendar-nav">
         <button class="month-previous" aria-label={t.previousMonth} onclick={() => move(-1)}
           ><Icon name="chevron" size={16} /></button
         >
-        <label class="month-picker"
-          ><span>{monthLabel}</span><input
-            aria-label={t.monthPicker}
-            type="month"
-            min="1970-01"
-            max="9999-12"
-            value={month}
-            onchange={(e) => {
-              if (parseDay(e.currentTarget.value + '-01')) {
-                month = e.currentTarget.value;
-                focusDay = month + '-01';
-              }
-            }}
-          /></label
-        >
+        <div class="calendar-month-selectors">
+          <input class="calendar-year-input" aria-label={t.year} inputmode="numeric" maxlength="4" value={month.slice(0, 4)} onchange={(event) => {
+            const year = event.currentTarget.value;
+            if (/^\d{4}$/.test(year) && Number(year) >= 1970 && parseDay(`${year}-${month.slice(5)}-01`)) {
+              month = `${year}-${month.slice(5)}`;
+              focusDay = month + '-01';
+            } else event.currentTarget.value = month.slice(0, 4);
+          }} />
+          <div class="calendar-month-dropdown"><Dropdown label={t.monthPicker} value={month.slice(5)} options={monthOptions} change={(value) => { month = `${month.slice(0, 4)}-${value}`; focusDay = month + '-01'; }} /></div>
+        </div>
         <button aria-label={t.nextMonth} onclick={() => move(1)}
           ><Icon name="chevron" size={16} /></button
         >
@@ -276,9 +280,11 @@
           >{/each}
       </div>
       <div class="calendar-grid" aria-label={monthLabel}>
-        {#each days as date (date)}{@const inRange = !!validDays && date >= from && date <= to}
+        {#each days as date, index (date)}{@const inRange =
+            !!validDays && date >= from && date <= to}
           <button
             data-date={date}
+            style:--range-column={index % 7}
             class:outside={!date.startsWith(month)}
             class:in-range={inRange}
             class:range-start={date === from}
@@ -293,7 +299,10 @@
             onclick={() => choose(date)}
           >
             <span class="date-number">{Number(date.slice(8))}</span><small
-              >{loading ? '…' : values.get(date) ? compactNumber(values.get(date)) : ''}</small
+              >{#if loading}…{:else}<AnimatedValue
+                  value={values.get(date) ?? 0}
+                  format={(value) => (value ? compactNumber(value) : '')}
+                />{/if}</small
             >
           </button>
         {/each}
@@ -301,9 +310,15 @@
       <div class="calendar-totals">
         <span>{t.dailyUsage} · tokens</span><span
           >{t.month}
-          <b title={number(monthTotal, lang)}>{loading ? '—' : compactNumber(monthTotal)}</b><i
-          ></i>{t.thisYear}
-          <b title={number(yearTotal, lang)}>{loading ? '—' : compactNumber(yearTotal)}</b></span
+          <b data-tooltip={number(monthTotal, lang)}
+            >{#if loading}—{:else}<AnimatedValue
+                value={monthTotal}
+                format={compactNumber}
+              />{/if}</b
+          ><i></i>{t.thisYear}
+          <b data-tooltip={number(yearTotal, lang)}
+            >{#if loading}—{:else}<AnimatedValue value={yearTotal} format={compactNumber} />{/if}</b
+          ></span
         >
       </div>
     </div>
@@ -364,4 +379,4 @@
       disabled={!validDays}>{t.apply}</button
     >
   </form>
-</div>
+</dialog>

@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import type { DashboardData, Project, Query, Session, Page, TaskGroup } from '../lib/data/types';
   import { cancelled } from '../lib/data/http';
   import { words, number, money, type Language } from '../lib/domain/ui';
   import Icon from './Icon.svelte';
+  import AnimatedValue from './AnimatedValue.svelte';
   import { compactNumber, displayMoney } from '../lib/domain/presentation';
   import TaskRows from './TaskRows.svelte';
-  import Pager from './Pager.svelte';
+  import RelativeTime from './RelativeTime.svelte';
+  import CacheHit from './CacheHit.svelte';
   let {
     project,
     query,
@@ -36,22 +38,33 @@
   } = $props();
   let t = $derived(words(lang));
   let page = $state.raw<Page<TaskGroup> | null>(null);
+  const previewLimit = 5;
+  let showAll = $state(false);
+  let heading: HTMLButtonElement;
+  let visibleTasks = $derived(showAll ? page?.items : page?.items.slice(0, previewLimit));
   let loading = $state(false);
   let error = $state('');
   let loaded = '';
   let loadedQuery = '';
   let sequence = 0;
   let alive = true;
-  async function load(cursor = '', q = query, r = revision, offset = 0) {
+  async function load(q = query, r = revision, all = showAll) {
     const seq = ++sequence;
     loading = true;
     error = '';
     try {
-      const result = await data.projectTasks({ ...q, offset }, project.key, r, cursor);
+      let result = await data.projectTasks({ ...q, offset: 0 }, project.key, r, '', all ? 100 : previewLimit);
+      const items = [...result.items];
+      while (all && result.next_cursor) {
+        if (seq !== sequence || !alive) return;
+        result = await data.projectTasks({ ...q, offset: 0 }, project.key, r, result.next_cursor, 100);
+        items.push(...result.items);
+      }
       if (seq === sequence && alive) {
-        page = result;
+        page = { ...result, items, offset: 0, previous_cursor: null };
         loaded = JSON.stringify([q, r]);
         loadedQuery = JSON.stringify(q);
+        return true;
       }
     } catch (e) {
       if (!cancelled(e) && seq === sequence && alive) {
@@ -67,9 +80,29 @@
     if (open && key !== loaded) {
       const q = query,
         r = revision;
-      untrack(() => void load('', q, r, JSON.stringify(q) === loadedQuery ? page?.offset || 0 : 0));
+      untrack(() => {
+        if (JSON.stringify(q) !== loadedQuery) showAll = false;
+        void load(q, r);
+      });
     }
   });
+  async function toggleTasks() {
+    if (!showAll) {
+      if (page && page.items.length < page.total) {
+        if (!(await load(query, revision, true))) return;
+      }
+      showAll = true;
+    } else {
+      showAll = false;
+      await tick();
+      const scroller = heading.closest('.browser-scroll');
+      if (scroller) {
+        const top = scroller.getBoundingClientRect().top + 31;
+        const delta = heading.getBoundingClientRect().top - top;
+        if (delta < 0) scroller.scrollBy({ top: delta, behavior: 'instant' });
+      }
+    }
+  }
   onDestroy(() => {
     alive = false;
     sequence++;
@@ -77,7 +110,7 @@
 </script>
 
 <section class="project-block" class:open>
-  <button class="project-heading project-row" aria-expanded={open} onclick={toggle}>
+  <button bind:this={heading} class="project-heading project-row" aria-expanded={open} onclick={toggle}>
     <span class="project-title"
       ><span class="folder-icon"
         ><span class:expanded={open}><Icon name="chevron" size={14} /></span><Icon
@@ -85,26 +118,33 @@
           size={28}
         /></span
       ><span class="project-name"
-        >{project.label || project.key}<small title={project.environments.join(' / ')}
-          >{number(project.session_count, lang)} {t.sessionCount}</small
+        ><span class="conversation-title-line"><span class="title-text" data-tooltip={project.label || project.key} data-tooltip-overflow>{project.label || project.key}</span><span class="project-environments">{#each project.environments as environment}<span class="environment-badge" data-environment={environment}>{environment}</span>{/each}</span></span><small class="project-meta"
+          ><AnimatedValue
+            value={project.session_count}
+            format={(value) => number(Math.round(value), lang)}
+          />
+          {t.sessionCount}<span><RelativeTime value={project.updated_at} {lang} zone={query.timezone} /></span></small
         ></span
       ></span
     >
-    <span class="numeric" title={number(project.usage.total_tokens, lang)}
-      >{compactNumber(project.usage.total_tokens)}</span
+    <span class="numeric" data-tooltip={number(project.usage.total_tokens, lang)}
+      ><AnimatedValue value={project.usage.total_tokens} format={compactNumber} /></span
     >
-    <span class="numeric project-cost" title={money(project.estimated_cost_usd, lang)}
-      >{project.estimated_cost_known_count
-        ? displayMoney(project.estimated_cost_usd)
-        : t.unknown}</span
+    <span class="numeric project-cost" data-tooltip={money(project.estimated_cost_usd, lang)}
+      >{#if project.estimated_cost_known_count}<AnimatedValue
+          value={project.estimated_cost_usd}
+          format={displayMoney}
+        />{:else}{t.unknown}{/if}</span
     >
+    <span class="numeric cache-cell"><CacheHit usage={project.usage} {lang} /></span>
   </button>
   {#if open}<div class="project-content" aria-busy={loading}>
       {#if error}<p class="error">{error} <button onclick={() => load()}>{t.retry}</button></p>{/if}
       {#if loading && !page}<p class="muted" role="status">{t.loading}</p>{/if}
       {#if page}
         <div class="project-tasks">
-          {#each page.items as group (group.identity)}<TaskRows
+          {#each visibleTasks ?? [] as group (group.identity)}<TaskRows
+              zone={query.timezone}
               {group}
               {selected}
               {select}
@@ -113,16 +153,12 @@
               toggle={() => toggleAgent(group.identity)}
             />{/each}
         </div>
-        {#if page.next_cursor || page.previous_cursor}<Pager
-            offset={page.offset}
-            total={page.total}
-            limit={page.limit}
-            next={page.next_cursor}
-            previous={page.previous_cursor}
+        {#if page.total > previewLimit}<button
+            class="project-more"
+            aria-expanded={showAll}
             disabled={loading}
-            change={(cursor) => load(cursor)}
-            {lang}
-          />{/if}
+            onclick={toggleTasks}
+          >{#if loading}{t.loading}{:else if showAll}{t.collapseProjectTasks}{:else}{t.expandProjectTasks.replace('{count}', number(page.total - previewLimit, lang))}{/if}</button>{/if}
       {/if}
     </div>{/if}
 </section>

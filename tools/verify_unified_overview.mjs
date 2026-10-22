@@ -1,0 +1,107 @@
+import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { installMintFixture } from './fixtures/clear_mint.mjs';
+
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || '../benchmarks/refactor/frontend/node_modules/playwright/index.mjs');
+const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined, headless: true });
+const output = 'output/verification/unified-overview';
+await mkdir(output, { recursive: true });
+const context = await browser.newContext({ viewport: { width: 1536, height: 1024 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai', reducedMotion: 'reduce' });
+await installMintFixture(context);
+const page = await context.newPage();
+page.setDefaultTimeout(10000);
+await page.clock.setFixedTime(new Date('2026-10-22T01:07:00Z'));
+const errors = [], requests = [], checks = [];
+page.on('pageerror', error => errors.push(String(error)));
+page.on('request', request => { if (request.url().includes('/api/v2/')) requests.push(new URL(request.url())); });
+const check = message => { checks.push(message); console.log(message); };
+const shot = name => page.screenshot({ path: `${output}/${name}.png` });
+const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight);
+try {
+  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+  await page.locator('.task-row').first().waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  assert.equal(await page.locator('h1').innerText(), '用量概览');
+  assert.equal(await page.locator('.main-nav button').count(), 2);
+  assert.equal(await page.locator('.main-nav [aria-current="page"]').innerText(), '概览');
+  assert.equal(await page.getByRole('button', { name: '按项目', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(requests.find(url => url.pathname.endsWith('/projects')).searchParams.get('sort'), 'updated');
+  assert.equal(await page.locator('.sort-menu summary').innerText(), '最近更新');
+  assert.equal(await page.locator('.project-heading .environment-badge').first().innerText(), 'Local');
+  assert.match(await page.locator('.project-meta').first().innerText(), /最近 7 分钟/);
+  assert.equal(await page.locator('.task-row .relative-time').first().innerText(), '7 分钟');
+  await shot('projects');
+  check('One overview page, project grouping and recent-update sort by default, project badges/latest activity and task times');
+
+  const sort = page.locator('.sort-menu summary');
+  await sort.click();
+  await page.getByRole('menu').waitFor();
+  assert.equal(await page.getByRole('menuitemradio').count(), 4);
+  assert.equal(await page.getByRole('menuitemradio', { name: '最近更新', exact: true }).getAttribute('aria-checked'), 'true');
+  await shot('sort-menu');
+  await page.getByRole('menuitemradio', { name: '总用量', exact: true }).click();
+  assert.equal(new URL(page.url()).searchParams.get('sort'), 'tokens');
+  assert.equal(await page.locator('.sort-menu').evaluate(el => el.open), false);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => new URL(location.href).searchParams.get('sort') === 'updated');
+  await sort.click();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.sort-menu').evaluate(el => el.open), false);
+  assert.equal(await sort.evaluate(el => el === document.activeElement), true);
+  await sort.click();
+  await page.locator('h1').click();
+  assert.equal(await page.locator('.sort-menu').evaluate(el => el.open), false);
+  check('Styled sort menu supports selection, checked state, keyboard navigation, Escape/focus restore and outside dismissal');
+
+  await page.getByRole('button', { name: '按会话', exact: true }).click();
+  await page.locator('.sessions-table').waitFor();
+  assert.equal(await page.locator('h1').innerText(), '用量概览');
+  assert.equal(await page.locator('.main-nav [aria-current="page"]').innerText(), '概览');
+  assert.equal(new URL(page.url()).searchParams.get('view'), 'sessions');
+  assert.equal(requests.filter(url => url.pathname.endsWith('/sessions')).at(-1).searchParams.get('sort'), 'updated');
+  assert.equal(await page.locator('.sessions-table th').count(), 4);
+  assert.equal(await page.locator('.conversation-meta .environment-badge').count(), 10);
+  assert.equal(await page.locator('.sessions-table .relative-time').first().innerText(), '7 分钟');
+  await shot('conversations');
+  await page.locator('.sessions-table .session-title').first().click();
+  await page.locator('.detail-panel').waitFor();
+  const selected = new URL(page.url()).searchParams.get('session');
+  await page.getByRole('button', { name: '按项目', exact: true }).click();
+  await page.locator('.project-heading').first().waitFor();
+  assert.equal(new URL(page.url()).searchParams.get('session'), selected);
+  await page.goBack();
+  await page.locator('.sessions-table').waitFor();
+  assert.equal(await page.getByRole('button', { name: '按会话', exact: true }).getAttribute('aria-pressed'), 'true');
+  await page.reload();
+  await page.locator('.sessions-table').waitFor();
+  assert.equal(await page.getByRole('button', { name: '按会话', exact: true }).getAttribute('aria-pressed'), 'true');
+  await page.locator('.detail-panel').getByRole('button', { name: '关闭', exact: true }).click();
+  check('Conversation rows show title/time plus environment/project beneath; switching preserves selection, query and browser history');
+
+  for (const [width, height] of [[1920,1080], [1366,768], [1101,700], [800,600], [390,844], [320,640]]) {
+    await page.setViewportSize({ width, height });
+    await page.getByRole('button', { name: '按项目', exact: true }).click();
+    await page.locator('.task-row').first().waitFor();
+    assert.equal(await noOverflow(), true, `Project layout fits ${width}x${height}`);
+    await page.locator('.browser-scroll').evaluate(el => el.scrollTop = 70);
+    const delta = await page.locator('.project-heading').first().evaluate(el => el.getBoundingClientRect().top - el.closest('.browser-scroll').getBoundingClientRect().top - 31);
+    assert.ok(Math.abs(delta) < 2, `Sticky project heading at ${width}: ${delta}`);
+    await sort.click();
+    const box = await page.getByRole('menu').boundingBox();
+    assert.ok(box.x >= 0 && box.x + box.width <= width && box.y + box.height <= height, `Sort menu stays on screen at ${width}`);
+    await page.keyboard.press('Escape');
+    if (width === 390) await shot('mobile-projects');
+    await page.getByRole('button', { name: '按会话', exact: true }).click();
+    await page.locator('.sessions-table').waitFor();
+    assert.equal(await noOverflow(), true, `Conversation layout fits ${width}x${height}`);
+    assert.equal(await page.locator('.conversation-meta .environment-badge').first().isVisible(), true);
+    if (width === 390) await shot('mobile-conversations');
+  }
+  check('Desktop/tablet/mobile grouping, sticky project headings and custom sort menu fit 1920/1366/1101/800/390/320px screens');
+  assert.deepEqual(errors, []);
+  await writeFile(`${output}/checks.json`, JSON.stringify({ passed: true, checks, errors }, null, 2));
+} catch (error) {
+  await shot('failure');
+  throw error;
+} finally { await browser.close(); }

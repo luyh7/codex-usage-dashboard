@@ -1,8 +1,13 @@
 <script lang="ts">
   import type { Session, TaskGroup } from '../lib/data/types';
-  import { words, number, money, models, type Language } from '../lib/domain/ui';
+  import { words, number, money, type Language } from '../lib/domain/ui';
   import Icon from './Icon.svelte';
-  import { compactNumber, displayMoney } from '../lib/domain/presentation';
+  import AnimatedValue from './AnimatedValue.svelte';
+  import { compactNumber, displayMoney, activityTime, latestActivityTime } from '../lib/domain/presentation';
+  import RelativeTime from './RelativeTime.svelte';
+  import ArchiveTag from './ArchiveTag.svelte';
+  import SessionMetadata from './SessionMetadata.svelte';
+  import CacheHit from './CacheHit.svelte';
   let {
     group,
     selected,
@@ -10,6 +15,7 @@
     toggle,
     select,
     lang,
+    zone,
   }: {
     group: TaskGroup;
     selected: string;
@@ -17,6 +23,7 @@
     toggle: () => void;
     select: (row: Session) => void;
     lang: Language;
+    zone: string;
   } = $props();
   let t = $derived(words(lang));
   let root = $derived(
@@ -53,28 +60,36 @@
       aria-pressed={children.length ? undefined : selected === root.uid}
       onclick={() => (children.length ? toggle() : select(root))}
     >
+      <span class="tree-link" aria-hidden="true"></span>
       <span class="task-name"
         ><span class="gutter"
           >{#if children.length}<span class:expanded><Icon name="chevron" size={14} /></span
             >{/if}</span
         ><Icon name="message" size={24} /><span class="session-title"
           ><span class="task-title-line"
-            ><span class="title-text" title={root.title}>{root.title || root.session_id}</span
-            >{#if children.length}<span class="role-tag">{t.taskTotal}</span>{/if}</span
-          >{#if children.length}<small>{t.mainTask} + {children.length} {t.subagents}</small
-            >{/if}</span
+            ><ArchiveTag source={root.source} {lang} /><span class="title-text" data-tooltip={root.title} data-tooltip-overflow>{root.title || root.session_id}</span
+            ><RelativeTime value={latestActivityTime(group.sessions)} {lang} {zone} /></span
+          >{#if children.length}<small
+              >{t.mainThread} + <AnimatedValue
+                value={children.length}
+                format={(value) => number(Math.round(value), lang)}
+              />
+              {t.subagents}</small
+            >{/if}<SessionMetadata sessions={group.sessions} {lang} /></span
         ></span
       >
-      <span class="numeric" title={number(group.summary.usage.total_tokens, lang)}
-        >{compactNumber(group.summary.usage.total_tokens)}</span
+      <span class="numeric" data-tooltip={number(group.summary.usage.total_tokens, lang)}
+        ><AnimatedValue value={group.summary.usage.total_tokens} format={compactNumber} /></span
       >
       <span class="numeric cost-cell"
-        >{group.summary.estimated_cost_known_count
-          ? displayMoney(group.summary.estimated_cost_usd)
-          : t.unknown}{#if group.summary.estimated_cost_known_count < group.sessions.length}<span
-            title={t.unknownHint}>*</span
+        >{#if group.summary.estimated_cost_known_count}<AnimatedValue
+            value={group.summary.estimated_cost_usd}
+            format={displayMoney}
+          />{:else}{t.unknown}{/if}{#if group.summary.estimated_cost_known_count < group.sessions.length}<span
+            data-tooltip={t.unknownHint}>*</span
           >{/if}</span
       >
+      <span class="numeric cache-cell"><CacheHit usage={group.summary.usage} {lang} /></span>
     </button>
     {#if expanded && children.length}
       <div class="agent-children">
@@ -85,20 +100,24 @@
           aria-pressed={selected === root.uid}
           onclick={() => select(root)}
         >
+          <span class="tree-link" aria-hidden="true"></span>
           <span class="task-name"
             ><Icon name="message" size={24} /><span class="session-title"
-              ><span class="title-text">{t.ownUsage}</span><small title={root.title}
-                >{root.title || root.session_id}</small
-              ></span
+              ><span class="task-title-line"><ArchiveTag source={root.source} {lang} /><span class="title-text" data-tooltip={root.title} data-tooltip-overflow>{root.title || root.session_id}</span><span class="role-tag main-role-tag">{t.mainThread}</span><RelativeTime value={activityTime(root)} {lang} {zone} /></span><SessionMetadata sessions={[root]} {lang} /></span
             ></span
           >
-          <span class="numeric" title={number(root.total_token_usage?.total_tokens, lang)}
-            >{compactNumber(root.total_token_usage?.total_tokens)}</span
-          ><span class="numeric cost-cell" title={money(root.estimated_cost_usd, lang)}
-            >{root.estimated_cost_usd == null
-              ? t.unknown
-              : displayMoney(root.estimated_cost_usd)}</span
+          <span class="numeric" data-tooltip={number(root.total_token_usage?.total_tokens, lang)}
+            ><AnimatedValue
+              value={root.total_token_usage?.total_tokens ?? 0}
+              format={compactNumber}
+            /></span
+          ><span class="numeric cost-cell" data-tooltip={money(root.estimated_cost_usd, lang)}
+            >{#if root.estimated_cost_usd == null}{t.unknown}{:else}<AnimatedValue
+                value={root.estimated_cost_usd}
+                format={displayMoney}
+              />{/if}</span
           >
+          <span class="numeric cache-cell"><CacheHit usage={root.total_token_usage} {lang} /></span>
         </button>
         {#each children as row (row.uid)}<button
             class="project-row agent-row"
@@ -107,22 +126,28 @@
             aria-pressed={selected === row.uid}
             onclick={() => select(row)}
           >
+            <span class="tree-link" aria-hidden="true"></span>
             <span class="task-name" style:--agent-depth={Math.max(0, depth(row) - 1)}
               ><Icon name="message" size={24} /><span class="session-title"
                 ><span class="task-title-line"
-                  ><span class="title-text" title={row.title}
+                  ><ArchiveTag source={row.source} {lang} /><span class="title-text" data-tooltip={row.title} data-tooltip-overflow
                     >{row.agent_nickname || row.agent_role || row.title || row.session_id}</span
-                  ><span class="role-tag">{t.agentLabel}</span></span
-                ></span
+                  ><span class="role-tag">{t.agentLabel}</span><RelativeTime value={activityTime(row)} {lang} {zone} /></span
+                ><SessionMetadata sessions={[row]} {lang} /></span
               ></span
             >
-            <span class="numeric" title={number(row.total_token_usage?.total_tokens, lang)}
-              >{compactNumber(row.total_token_usage?.total_tokens)}</span
-            ><span class="numeric cost-cell" title={money(row.estimated_cost_usd, lang)}
-              >{row.estimated_cost_usd == null
-                ? t.unknown
-                : displayMoney(row.estimated_cost_usd)}</span
+            <span class="numeric" data-tooltip={number(row.total_token_usage?.total_tokens, lang)}
+              ><AnimatedValue
+                value={row.total_token_usage?.total_tokens ?? 0}
+                format={compactNumber}
+              /></span
+            ><span class="numeric cost-cell" data-tooltip={money(row.estimated_cost_usd, lang)}
+              >{#if row.estimated_cost_usd == null}{t.unknown}{:else}<AnimatedValue
+                  value={row.estimated_cost_usd}
+                  format={displayMoney}
+                />{/if}</span
             >
+            <span class="numeric cache-cell"><CacheHit usage={row.total_token_usage} {lang} /></span>
           </button>{/each}
       </div>
     {/if}
