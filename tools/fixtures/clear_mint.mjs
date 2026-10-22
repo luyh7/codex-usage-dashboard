@@ -1,5 +1,9 @@
 // Fictional data from docs/design/clear-mint/projects.png. Never writes user data.
 export const stamp = '2026-10-22T01:00:00Z';
+export const localDeviceInfo = {
+  device_short_code: 'this-device', label: 'Local workstation', session_count: 123,
+  sources: [{ id: 'windows', label: 'Windows', session_count: 23 }, { id: 'wsl', label: 'WSL', session_count: 100 }],
+};
 export const usage = (n = 4200000) => ({ total_tokens: n, input_tokens: n * .95, cached_input_tokens: n * .95 * .89, output_tokens: n * .05, reasoning_output_tokens: n * .02, cache_write_tokens: 0 });
 export const session = (uid, title, tokens, cost, project = 'web-app', parent = '') => ({
   uid, session_id: uid, root_session_id: parent || uid, parent_thread_id: parent,
@@ -28,7 +32,7 @@ export const sessions = [
 export const unknown = session('unknown', '未知模型费用', 4200000, null);
 export const summary = rows => {
   const tokens = rows.reduce((n, r) => n + r.total_token_usage.total_tokens, 0);
-  return { session_count: rows.length, active_count: rows.filter(r => r.source === 'active').length, archived_count: rows.filter(r => r.source === 'archived').length, usage: usage(tokens), estimated_cost_known_count: rows.filter(r => r.estimated_cost_usd != null).length, estimated_cost_usd: rows.reduce((n, r) => n + (r.estimated_cost_usd || 0), 0), by_model: [{ model: 'GPT-6.1 Sol', sessions: rows.length, usage: usage(tokens) }], by_environment: [] };
+  return { session_count: rows.length, main_count: rows.filter(r => !r.is_subagent).length, agent_count: rows.filter(r => r.is_subagent).length, active_count: rows.filter(r => r.source === 'active').length, archived_count: rows.filter(r => r.source === 'archived').length, usage: usage(tokens), estimated_cost_known_count: rows.filter(r => r.estimated_cost_usd != null).length, estimated_cost_usd: rows.reduce((n, r) => n + (r.estimated_cost_usd || 0), 0), by_model: [{ model: 'GPT-6.1 Sol', sessions: rows.length, usage: usage(tokens) }], by_environment: [] };
 };
 export async function installMintFixture(context, { language = 'zh', storedTheme = 'dark' } = {}) {
   let remotes = [], writes = 0;
@@ -46,13 +50,16 @@ export async function installMintFixture(context, { language = 'zh', storedTheme
     const rows = sessions.filter(row => (!p.get('search') || (row.title + row.project + row.model).includes(p.get('search'))) && (!p.get('source') || p.get('source') === row.source) && (!p.get('model') || p.get('model') === row.model) && !(p.get('period') === 'custom' && p.get('start')?.startsWith('2010')));
     const s = summary(rows), revision = 'clear-mint-design-v2';
     const page = items => ({ query_token: 'query', revision, items, summary: s, total: items.length, offset: 0, limit: 100, next_cursor: null, previous_cursor: null });
-    const listing = items => ({ page: page(items), facets: summary(sessions), period: { key: p.get('period'), start_date: p.get('period') === 'custom' ? p.get('start') : '2026-10-19', end_date: p.get('period') === 'custom' ? p.get('end') : '2026-10-25' }, generated_at: stamp, codex_sources: [{ id: 'local', label: 'Local', codex_home: '/demo' }], remotes, current_device_short_code: 'this-device' });
-    if (path === '/api/v2/projects') return json(listing(['web-app', 'data-tools', 'docs-site'].filter(key => rows.some(r => r.project === key)).map(key => ({ key, label: key, ...summary(rows.filter(r => r.project === key)), environments: ['Local'] }))));
-    if (path === '/api/v2/sessions') return json(listing([...rows].sort((a,b) => p.get('sort') === 'title' ? a.title.localeCompare(b.title) : p.get('sort') === 'tokens' ? b.total_token_usage.total_tokens - a.total_token_usage.total_tokens : (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))));
+    const metricTrend = { complete: true, points: rows.length ? [1, 2, 3, 4].map((weight, i) => ({ date: '2026-10-' + (19 + i), usage: usage(s.usage.total_tokens * weight / 10), session_count: rows.length, estimated_cost_usd: s.estimated_cost_known_count === rows.length ? s.estimated_cost_usd * weight / 10 : null })) : [] };
+    const listing = items => ({ metric_trend: metricTrend, page: page(items), facets: summary(sessions), period: { key: p.get('period'), start_date: p.get('period') === 'custom' ? p.get('start') : '2026-10-19', end_date: p.get('period') === 'custom' ? p.get('end') : '2026-10-25' }, generated_at: stamp, codex_sources: [{ id: 'local', label: 'Local', codex_home: '/demo' }], remotes, current_device_short_code: 'this-device' });
+    if (path === '/api/v2/projects') return json({ ...listing(['web-app', 'data-tools', 'docs-site'].filter(key => rows.some(r => r.project === key)).map(key => ({ key, label: key, ...summary(rows.filter(r => r.project === key)), environments: ['Local'], updated_at: stamp }))), current_device: localDeviceInfo });
+    if (path === '/api/v2/sessions') return json({ ...listing([...rows].sort((a,b) => p.get('sort') === 'title' ? a.title.localeCompare(b.title) : p.get('sort') === 'tokens' ? b.total_token_usage.total_tokens - a.total_token_usage.total_tokens : (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))), current_device: localDeviceInfo });
     if (path === '/api/v2/project-tasks') return json(page(rows.filter(r => !r.is_subagent && r.project === p.get('project')).map(root => { const group = rows.filter(r => r.uid === root.uid || r.parent_thread_id === root.uid); return { identity: root.uid, sessions: group, summary: summary(group) }; })));
+    if (path === '/api/v2/session' && p.get('check_filters') === 'true' && !rows.some(row => row.uid === p.get('id')) && p.get('id') !== 'unknown')
+      return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'session excluded by filters', code: 'session_filtered_out' }) });
     const row = sessions.find(r => r.uid === p.get('id')) || unknown;
     const timeline = Array.from({ length: 135 }, (_, i) => ({ timestamp: new Date(Date.parse(stamp) + i * 1800000 / 134).toISOString(), model: row.model, total_token_usage: usage(Math.round(row.total_token_usage.total_tokens * i / 134)) }));
-    if (path === '/api/v2/session') return json({ ...row, revision });
+    if (path === '/api/v2/session') return json({ ...row, revision, has_subagents: sessions.some(child => child.is_subagent && child.environment_id === row.environment_id && child.root_session_id === row.session_id) });
     if (path === '/api/v2/chart') return json({ id: row.uid, revision, timeline: row.uid === 'unknown' ? [] : timeline });
     if (path === '/api/v2/events') {
       const all = row.uid === 'unknown' ? [] : [...timeline].reverse();

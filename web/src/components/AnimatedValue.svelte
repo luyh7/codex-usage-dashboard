@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   let { value, format }: { value: number | null; format: (value: number) => string } = $props();
   let shown = $state<number | null>(null);
   let mounted = $state(false);
   let reduced = $state(false);
-  let previous: number | null = null;
   onMount(() => {
     const preference = matchMedia('(prefers-reduced-motion: reduce)');
     const update = () => {
@@ -18,12 +17,18 @@
   $effect(() => {
     const target = value;
     if (!mounted) return;
-    if (target === null || previous === null || reduced || target === previous) {
-      shown = previous = target;
+    // Read the currently displayed number without making animation frames restart this effect.
+    const from = untrack(() => shown);
+    if (
+      target === null ||
+      from === null ||
+      reduced ||
+      target === from ||
+      untrack(() => format(target) === format(from))
+    ) {
+      shown = target;
       return;
     }
-    const from = previous;
-    previous = target;
     const start = performance.now();
     let frame = 0;
     const draw = (now: number) => {
