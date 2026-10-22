@@ -1,4 +1,4 @@
-import { chromium } from '../benchmarks/refactor/frontend/node_modules/playwright/index.mjs';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || '../benchmarks/refactor/frontend/node_modules/playwright/index.mjs');
 import { readdir, mkdir, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { installMintFixture } from './fixtures/clear_mint.mjs';
@@ -32,7 +32,7 @@ try {
   await page.goto(origin + '/svelte?period=week&session=main&timezone=Asia%2FShanghai');
   await own().waitFor(); await page.locator('.cost-bar').waitFor();
   await page.evaluate(() => document.fonts.ready);
-  assert.equal(await page.locator('h1').innerText(), '项目用量');
+  assert.equal(await page.locator('h1').innerText(), '用量概览');
   assert.equal(await page.locator('.project-heading').count(), 3);
   assert.equal(await page.locator('.metrics article').count(), 4);
   assert.equal((await page.locator('.cost-card strong').innerText()).trim(), '$18.62');
@@ -101,7 +101,7 @@ try {
   await page.locator('.more-information > summary').click();
   check('complete chart keyboard inspection, 100-event pagination and retained advanced information');
 
-  await page.locator('.main-nav').getByRole('button',{name:'概览',exact:true}).click();
+  await page.getByRole('button',{name:'按会话',exact:true}).click();
   await page.locator('.sessions-table').waitFor();
   assert.equal(new URL(page.url()).searchParams.get('view'),'sessions');
   await page.getByRole('searchbox').fill('no-such-title');
@@ -109,12 +109,15 @@ try {
   assert.equal(await page.getByRole('searchbox').evaluate(el=>el===document.activeElement),true);
   await page.getByRole('searchbox').fill(''); await page.locator('.sessions-table').waitFor();
   await page.getByRole('button',{name:'筛选',exact:true}).click();
-  await page.getByLabel('状态',{exact:true}).selectOption('archived');
+  await page.locator('.dropdown > summary[aria-label="状态"]').click();
+  await page.getByRole('option',{name:'已归档',exact:true}).click();
   await page.getByRole('button',{name:'清除筛选',exact:true}).click();
   await page.getByRole('button',{name:'筛选',exact:true}).click();
-  await page.getByLabel('排序',{exact:true}).selectOption('tokens');
+  await page.locator('.sort-menu summary').click();
+  await page.getByRole('menuitemradio',{name:'总用量',exact:true}).click();
   assert.equal(new URL(page.url()).searchParams.get('sort'),'tokens');
-  await page.getByLabel('排序',{exact:true}).selectOption('cost');
+  await page.locator('.sort-menu summary').click();
+  await page.getByRole('menuitemradio',{name:'费用',exact:true}).click();
   await page.locator('.sessions-table .session-title').first().click();
   await page.locator('.cost-bar').waitFor();
   await screenshot('overview');
@@ -155,14 +158,17 @@ try {
   await page.keyboard.press('Escape'); await cal.waitFor({state:'detached'});
   assert.equal(await page.locator('.detail-panel').count(),1);
   await page.locator('.calendar-trigger').click();
-  await page.locator('h1').click(); await cal.waitFor({state:'detached'});
+  await page.mouse.click(10,10); await cal.waitFor({state:'detached'});
   await page.locator('.calendar-trigger').click();
   await cal.locator('[data-date="2026-10-22"]').focus();
   await page.keyboard.press('ArrowRight');
   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-date')),'2026-10-23');
   await page.keyboard.press('PageDown');
   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-date')),'2026-11-01');
-  await page.getByLabel('月',{exact:true}).fill('2024-02');
+  await page.getByLabel('年',{exact:true}).fill('2024');
+  await page.getByLabel('年',{exact:true}).press('Tab');
+  await page.locator('.dropdown > summary[aria-label="月"]').click();
+  await page.getByRole('option',{name:'2月',exact:true}).click();
   assert.equal(await cal.locator('[data-date="2024-02-29"]').count(),1);
   await cal.getByRole('button',{name:'本周',exact:true}).click();
   assert.equal(await page.getByLabel('开始日期',{exact:true}).inputValue(),'2026/10/19');
@@ -188,7 +194,7 @@ try {
   await screenshot('mobile-detail');
   await page.keyboard.press('Escape'); await page.locator('.detail-panel').waitFor({state:'detached'});
   assert.equal(await page.locator('body').evaluate(el=>el.style.overflow),'');
-  await page.locator('.main-nav').getByRole('button',{name:'项目',exact:true}).click();
+  await page.getByRole('button',{name:'按项目',exact:true}).click();
   await page.locator('.project-heading').first().waitFor();
   await screenshot('mobile-projects');
   await page.locator('.calendar-trigger').click();
@@ -199,7 +205,8 @@ try {
   await page.keyboard.press('Escape'); await cal.waitFor({state:'detached'});
   assert.equal(await page.locator('body').evaluate(el=>el.style.overflow),'');
   await page.locator('.preferences > summary').click();
-  await page.getByLabel('语言',{exact:true}).selectOption('en');
+  await page.locator('.dropdown > summary[aria-label="语言"]').click();
+  await page.getByRole('option',{name:'English',exact:true}).click();
   await page.locator('.preferences > summary').click();
   await page.setViewportSize({width:320,height:800});
   await noOverflow();

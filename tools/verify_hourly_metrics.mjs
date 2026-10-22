@@ -61,11 +61,11 @@ try {
   await page.locator('.daily-column').nth(7).focus();
   assert.match(await page.getByRole('tooltip').innerText(), /07:00 – 08:00/);
   assert.match(await page.getByRole('tooltip').innerText(), /0 tokens/);
+  assert.equal(await page.locator('.cost-spark').evaluate(el => el.inert), true);
   await page.locator('.cost-point rect').nth(9).focus();
-  assert.match(await page.getByRole('tooltip').innerText(), /08:00 – 09:00/);
-  assert.match(await page.getByRole('tooltip').innerText(), /\$0.40/);
-  assert.match(await page.getByRole('tooltip').innerText(), /\$0.30/);
-  report.checks.push('A historical day shows 24 hourly bars, cumulative cost and accurate zero/nonzero hour tooltips for pointer and keyboard');
+  assert.equal(await page.locator('.daily-column').nth(7).evaluate(el => el === document.activeElement), true);
+  assert.equal(await page.locator('.cost-point rect').nth(9).getAttribute('data-cost'), '0.4');
+  report.checks.push('A historical day shows 24 hourly bars with accurate pointer and keyboard tooltips; the cumulative cost curve stays inert behind the model toggle');
   await page.goto(`${origin}/svelte?period=week&timezone=Asia%2FShanghai`);
   await page.locator('.daily-bar').first().waitFor();
   assert.equal(await page.locator('.daily-bar').count(), 7);
@@ -79,7 +79,7 @@ try {
       const view = svg.viewBox.baseVal;
       return Math.abs(view.width - box.width) < 1.1 && Math.abs(view.height - box.height) < 1.1;
     });
-    assert.equal(await page.locator('.cost-spark circle').count(), 0, 'Cost curve has no point markers');
+    assert.equal(await page.locator('.cost-spark .cost-marker').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).opacity === '0')), true, 'Cost curve has no visible point markers');
     const geometry = await page.evaluate(() => {
       const svg = document.querySelector('.cost-spark svg');
       const paths = svg.querySelectorAll('path');

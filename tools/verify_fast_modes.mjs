@@ -50,10 +50,12 @@ try {
   await main.click();
   const detail = page.locator('.detail-panel');
   await page.waitForFunction(() => document.querySelector('.detail-panel')?.getAttribute('aria-busy') === 'false');
-  assert.deepEqual(await modes(detail), ['fast']);
-  assert.equal(await detail.locator('.session-metadata [data-icon="lightning"]').count(), 1);
+  assert.deepEqual(await modes(detail.locator('.detail-tags')), ['fast']);
+  assert.equal(await detail.locator('.detail-tags .session-metadata [data-icon="lightning"]').count(), 1);
+  await detail.locator('.events-section > summary').click();
   await detail.locator('.event-scroll tbody tr').first().waitFor({ state: 'attached' });
-  assert.deepEqual(await detail.locator('.event-scroll [data-service-tier]').evaluateAll(nodes => nodes.map(node => node.textContent.trim())), ['Fast', 'standard', 'Ultrafast']);
+  assert.deepEqual(await detail.locator('.event-scroll [data-service-tier]').evaluateAll(nodes => nodes.map(node => node.textContent.trim())), ['Fast', 'Ultrafast']);
+  assert.equal(await detail.locator('.event-scroll tbody tr').nth(1).locator('[data-service-tier]').count(), 0);
   assert.equal(await detail.locator('.event-scroll [data-icon="lightning"]').count(), 2);
   await page.screenshot({ path: `${output}/detail.png` });
   await detail.getByRole('button', { name: '关闭', exact: true }).click();

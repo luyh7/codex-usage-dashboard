@@ -10,7 +10,7 @@ export const session = (uid, title, tokens, cost, project = 'web-app', parent = 
   is_subagent: !!parent, title, agent_nickname: parent ? title : '', source: uid === 'docs-guide' ? 'archived' : 'active',
   environment: 'Local', environment_id: 'local', project, project_root: '/demo/' + project, cwd: '/demo/' + project,
   model: 'GPT-6.1 Sol', models: ['GPT-6.1 Sol'], service_tier: 'standard', effort: 'high',
-  created_at: stamp, updated_at: stamp, end_at: stamp, total_token_usage: usage(tokens),
+  created_at: stamp, updated_at: stamp, end_at: stamp, last_usage_at: stamp, total_token_usage: usage(tokens),
   estimated_cost_usd: cost, price_model_known: cost !== null, turn_count: 6, completed_turn_count: 6, duration_ms_total: 1800000,
   inherited_token_event_count: 0, inherited_token_usage: usage(0), fork_usage_resolved: true,
   estimated_cost_breakdown_usd: cost === null ? null : uid === 'main' ? { input_tokens: 2.10, cached_input_tokens: 1.26, output_tokens: 3.12, reasoning_output_tokens: 0 } : { input_tokens: cost / 3, cached_input_tokens: cost / 6, output_tokens: cost / 2, reasoning_output_tokens: cost / 4 },
