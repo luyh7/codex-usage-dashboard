@@ -1,0 +1,388 @@
+{
+  "source": "http://127.0.0.1:8765/api/v2/sessions?timezone=Asia%2FShanghai&period=week&limit=100",
+  "captured_at": "2026-10-22T02:45:57.8085819Z",
+  "timezone": "Asia/Shanghai",
+  "revision": "d2bb996066992dee98a76a31b0647eb6b35a9af9565919a9d5a0ea905bd458c5",
+  "generated_at": "2026-10-22T02:45:51.191638Z",
+  "period": {
+    "key": "week",
+    "start_at": "2026-10-18T16:00:00Z",
+    "end_at": "2026-10-22T02:45:57.722997Z",
+    "start_date": "2026-10-19",
+    "end_date": "2026-10-22"
+  },
+  "summary": {
+    "session_count": 60,
+    "active_count": 60,
+    "archived_count": 0,
+    "usage": {
+      "input_tokens": 368025833,
+      "cached_input_tokens": 356009984,
+      "cache_write_tokens": 0,
+      "output_tokens": 1916932,
+      "reasoning_output_tokens": 708093,
+      "total_tokens": 369942765
+    },
+    "estimated_cost_usd": 226.56657,
+    "estimated_cost_known_count": 60,
+    "by_model": [
+      {
+        "model": "gpt-6.1-sol",
+        "sessions": 37,
+        "usage": {
+          "input_tokens": 289718985,
+          "cached_input_tokens": 280139392,
+          "cache_write_tokens": 0,
+          "output_tokens": 1242693,
+          "reasoning_output_tokens": 507379,
+          "total_tokens": 290961678
+        }
+      },
+      {
+        "model": "gpt-6-astra",
+        "sessions": 10,
+        "usage": {
+          "input_tokens": 77228224,
+          "cached_input_tokens": 75243648,
+          "cache_write_tokens": 0,
+          "output_tokens": 607395,
+          "reasoning_output_tokens": 187535,
+          "total_tokens": 77835619
+        }
+      },
+      {
+        "model": "gpt-6-luna",
+        "sessions": 7,
+        "usage": {
+          "input_tokens": 625185,
+          "cached_input_tokens": 256000,
+          "cache_write_tokens": 0,
+          "output_tokens": 14255,
+          "reasoning_output_tokens": 3132,
+          "total_tokens": 639440
+        }
+      },
+      {
+        "model": "gpt-6-sol",
+        "sessions": 2,
+        "usage": {
+          "input_tokens": 205512,
+          "cached_input_tokens": 175872,
+          "cache_write_tokens": 0,
+          "output_tokens": 23350,
+          "reasoning_output_tokens": 6350,
+          "total_tokens": 228862
+        }
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "sessions": 2,
+        "usage": {
+          "input_tokens": 130348,
+          "cached_input_tokens": 98688,
+          "cache_write_tokens": 0,
+          "output_tokens": 15634,
+          "reasoning_output_tokens": 855,
+          "total_tokens": 145982
+        }
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "sessions": 2,
+        "usage": {
+          "input_tokens": 117579,
+          "cached_input_tokens": 96384,
+          "cache_write_tokens": 0,
+          "output_tokens": 13605,
+          "reasoning_output_tokens": 2842,
+          "total_tokens": 131184
+        }
+      }
+    ],
+    "by_project": [
+      {
+        "project": "immortal-advanture",
+        "project_root": "/mnt/i/game/immortal-advanture",
+        "sessions": 18,
+        "usage": {
+          "input_tokens": 240506136,
+          "cached_input_tokens": 233431680,
+          "cache_write_tokens": 0,
+          "output_tokens": 920792,
+          "reasoning_output_tokens": 380518,
+          "total_tokens": 241426928
+        }
+      },
+      {
+        "project": "codex-usage-dashboard",
+        "project_root": "/home/luyh7/skills/codex-usage-dashboard",
+        "sessions": 14,
+        "usage": {
+          "input_tokens": 75465271,
+          "cached_input_tokens": 73183744,
+          "cache_write_tokens": 0,
+          "output_tokens": 615646,
+          "reasoning_output_tokens": 195893,
+          "total_tokens": 76080917
+        }
+      },
+      {
+        "project": "codex-usage-dashboard",
+        "project_root": "/mnt/i/life/codex-usage-dashboard",
+        "sessions": 3,
+        "usage": {
+          "input_tokens": 36586083,
+          "cached_input_tokens": 35072384,
+          "cache_write_tokens": 0,
+          "output_tokens": 212026,
+          "reasoning_output_tokens": 102696,
+          "total_tokens": 36798109
+        }
+      },
+      {
+        "project": "jian",
+        "project_root": "/mnt/c/Users/luyh7/Documents/Codex/2026-10-22/jian",
+        "sessions": 1,
+        "usage": {
+          "input_tokens": 7902199,
+          "cached_input_tokens": 7582976,
+          "cache_write_tokens": 0,
+          "output_tokens": 18906,
+          "reasoning_output_tokens": 3139,
+          "total_tokens": 7921105
+        }
+      },
+      {
+        "project": "zhe",
+        "project_root": "/mnt/c/Users/luyh7/Documents/Codex/2026-10-21/zhe",
+        "sessions": 1,
+        "usage": {
+          "input_tokens": 3556280,
+          "cached_input_tokens": 3391872,
+          "cache_write_tokens": 0,
+          "output_tokens": 29779,
+          "reasoning_output_tokens": 9331,
+          "total_tokens": 3586059
+        }
+      },
+      {
+        "project": "tmp",
+        "project_root": "/home/luyh7/tmp",
+        "sessions": 19,
+        "usage": {
+          "input_tokens": 2797614,
+          "cached_input_tokens": 2472448,
+          "cache_write_tokens": 0,
+          "output_tokens": 114331,
+          "reasoning_output_tokens": 14590,
+          "total_tokens": 2911945
+        }
+      },
+      {
+        "project": "zen",
+        "project_root": "/mnt/c/Users/luyh7/Documents/Codex/2026-10-21/zen",
+        "sessions": 1,
+        "usage": {
+          "input_tokens": 936263,
+          "cached_input_tokens": 862848,
+          "cache_write_tokens": 0,
+          "output_tokens": 5285,
+          "reasoning_output_tokens": 1833,
+          "total_tokens": 941548
+        }
+      },
+      {
+        "project": "new-chat",
+        "project_root": "/mnt/c/Users/luyh7/Documents/Codex/2026-10-12/new-chat",
+        "sessions": 1,
+        "usage": {
+          "input_tokens": 138619,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 30,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 138649
+        }
+      },
+      {
+        "project": "new-chat",
+        "project_root": "/mnt/c/Users/luyh7/Documents/Codex/2026-10-15/new-chat",
+        "sessions": 1,
+        "usage": {
+          "input_tokens": 120376,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 24,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 120400
+        }
+      },
+      {
+        "project": "luyh7",
+        "project_root": "/home/luyh7",
+        "sessions": 1,
+        "usage": {
+          "input_tokens": 16992,
+          "cached_input_tokens": 12032,
+          "cache_write_tokens": 0,
+          "output_tokens": 113,
+          "reasoning_output_tokens": 93,
+          "total_tokens": 17105
+        }
+      }
+    ],
+    "by_environment": [
+      {
+        "id": "windows",
+        "label": "Windows",
+        "sessions": 26,
+        "usage": {
+          "input_tokens": 289745956,
+          "cached_input_tokens": 280341760,
+          "cache_write_tokens": 0,
+          "output_tokens": 1186842,
+          "reasoning_output_tokens": 497517,
+          "total_tokens": 290932798
+        }
+      },
+      {
+        "id": "wsl",
+        "label": "WSL",
+        "sessions": 34,
+        "usage": {
+          "input_tokens": 78279877,
+          "cached_input_tokens": 75668224,
+          "cache_write_tokens": 0,
+          "output_tokens": 730090,
+          "reasoning_output_tokens": 210576,
+          "total_tokens": 79009967
+        }
+      }
+    ],
+    "by_day": [
+      {
+        "date": "2026-10-18",
+        "sessions": 1,
+        "usage": {
+          "input_tokens": 259180,
+          "cached_input_tokens": 226304,
+          "cache_write_tokens": 0,
+          "output_tokens": 2571,
+          "reasoning_output_tokens": 577,
+          "total_tokens": 261751
+        }
+      },
+      {
+        "date": "2026-10-19",
+        "sessions": 3,
+        "usage": {
+          "input_tokens": 70955231,
+          "cached_input_tokens": 68437248,
+          "cache_write_tokens": 0,
+          "output_tokens": 243849,
+          "reasoning_output_tokens": 88676,
+          "total_tokens": 71199080
+        }
+      },
+      {
+        "date": "2026-10-20",
+        "sessions": 9,
+        "usage": {
+          "input_tokens": 106145093,
+          "cached_input_tokens": 103566464,
+          "cache_write_tokens": 0,
+          "output_tokens": 425496,
+          "reasoning_output_tokens": 196797,
+          "total_tokens": 106570589
+        }
+      },
+      {
+        "date": "2026-10-21",
+        "sessions": 44,
+        "usage": {
+          "input_tokens": 153933754,
+          "cached_input_tokens": 148568960,
+          "cache_write_tokens": 0,
+          "output_tokens": 1031285,
+          "reasoning_output_tokens": 318856,
+          "total_tokens": 154965039
+        }
+      },
+      {
+        "date": "2026-10-22",
+        "sessions": 3,
+        "usage": {
+          "input_tokens": 36732575,
+          "cached_input_tokens": 35211008,
+          "cache_write_tokens": 0,
+          "output_tokens": 213731,
+          "reasoning_output_tokens": 103187,
+          "total_tokens": 36946306
+        }
+      }
+    ],
+    "top_session_uid": "27a57b3729edda94"
+  },
+  "metric_trend": {
+    "points": [
+      {
+        "date": "2026-10-19",
+        "usage": {
+          "input_tokens": 95517696,
+          "cached_input_tokens": 92324096,
+          "cache_write_tokens": 0,
+          "output_tokens": 317311,
+          "reasoning_output_tokens": 113306,
+          "total_tokens": 95835007
+        },
+        "session_count": 7,
+        "estimated_cost_usd": 24.589713
+      },
+      {
+        "date": "2026-10-20",
+        "usage": {
+          "input_tokens": 87842680,
+          "cached_input_tokens": 85655936,
+          "cache_write_tokens": 0,
+          "output_tokens": 386430,
+          "reasoning_output_tokens": 181396,
+          "total_tokens": 88229110
+        },
+        "session_count": 11,
+        "estimated_cost_usd": 21.695869
+      },
+      {
+        "date": "2026-10-21",
+        "usage": {
+          "input_tokens": 127191085,
+          "cached_input_tokens": 122854784,
+          "cache_write_tokens": 0,
+          "output_tokens": 850081,
+          "reasoning_output_tokens": 265742,
+          "total_tokens": 128041166
+        },
+        "session_count": 42,
+        "estimated_cost_usd": 119.705246
+      },
+      {
+        "date": "2026-10-22",
+        "usage": {
+          "input_tokens": 57474372,
+          "cached_input_tokens": 55175168,
+          "cache_write_tokens": 0,
+          "output_tokens": 363110,
+          "reasoning_output_tokens": 147649,
+          "total_tokens": 57837482
+        },
+        "session_count": 8,
+        "estimated_cost_usd": 60.575744
+      }
+    ],
+    "complete": true
+  },
+  "roles": {
+    "main": 59,
+    "agents": 1
+  },
+  "project_count": 8
+}

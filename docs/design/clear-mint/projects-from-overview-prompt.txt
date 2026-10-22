@@ -1,0 +1,36 @@
+Codex Usage Dashboard — 项目页重新生成
+Date: 2026-10-22
+Generation mode: built-in image_gen.imagegen
+Reference: overview.png (sole visual baseline)
+Output: projects-from-overview.png
+User correction: 项目页必须从概览稿派生，不能反过来将旧项目稿作为共同样式基准。
+
+Use case: ui-mockup
+Asset type: revised high-fidelity PROJECTS page design for Codex Usage Dashboard, 1536 × 1024 desktop screenshot.
+
+Input image 1 is the ONLY visual source of truth: the approved OVERVIEW design. Generate the Projects state as a close sibling of this exact screen. Preserve the reference's visual identity and geometry very faithfully. This is a deliberate correction of a previous project design that drifted away from the overview.
+
+INVARIANTS FROM THE REFERENCE:
+Keep the 160px sidebar, porcelain/cool-white background, luminous mint surfaces, subtle borders and shadows, rounded 16px cards, spacious padding, dark blue-black Chinese sans-serif typography, and heavy deep-emerald currency figures. Keep the main area's x positions, header height, asymmetric four-card summary row, and two lower cards aligned with the reference.
+The summary cards MUST retain the reference's approximately 192px HEIGHT and visual richness. The large mint cost card includes the elegant green sparkline with soft area fill on its right; token and conversation cards include the reference's delicate mint mini bar charts along the bottom; cache card includes the same large dimensional green ring. Do not replace these with short plain statistic boxes. Preserve the reference's scale, density, spacing, font sizes, currency treatment and ample whitespace.
+Keep the top date controls in the exact reference arrangement: 今天 / 近 7 天 / 本周 / 本月, 本周 selected; calendar trigger and date range. Keep the right detail card like the overview: a prominent COST standing alone, spacious chart and cost composition beneath. Do NOT introduce a second large total-token metric beside its cost, and do not pack extra disclosure sections underneath.
+
+CHANGE ONLY THE PAGE STATE AND THE LOWER LEFT CONTENT:
+Sidebar 项目 becomes selected; 概览 becomes unselected. Heading becomes 项目用量 with the same small 演示数据 badge. No extra subtitle that shifts the cards down.
+All figures are fictional demonstration data. Top metrics: 估算费用 $18.62; 总用量 12.84M tokens; 对话数 10; 缓存命中率 89%. Keep the sparkline and mini bar charts as specified above. Keep the reference's small sample comparison caption below the cost. Date range may read 2026年10月19日 – 10月25日, retaining the reference control width and position.
+
+Lower left white card stays in the overview card's exact location and width, with title 全部项目 and quiet 3 个项目. Search field 搜索项目或对话, filter 筛选, sort 费用从高到低, styled exactly like the reference overview toolbar. Columns 名称, 用量 (tokens), 估算费用 with descending arrow. Numeric columns align across all levels.
+Render a polished, readable project tree with restrained curved connecting lines and comfortable hierarchy. The first expanded project is web-app, folder icon and down chevron, subtitle 5 段对话, total 8.40M and $12.20. Its expanded task group 重构登录流程 has a small 任务合计 chip, subtitle 主任务 + 2 个子代理, total 5.20M and $8.12.
+Inside that group:
+• SELECTED 主任务自身, small subtitle 重构登录流程, 4.20M, $6.48. Use the reference selected row's pale mint wash and slender emerald left selection stripe; indent appropriately.
+• 检查登录状态, tiny 子代理 chip, 620K, $1.02.
+• 补充登录测试, tiny 子代理 chip, 380K, $0.62.
+Then standalone rows within web-app: 修复移动端布局 2.10M $2.76, and 更新组件样式 1.10M $1.32.
+Below, two collapsed projects remain fully visible: data-tools, 3 段对话, 3.10M, $4.38; docs-site, 2 段对话, 1.34M, $2.04.
+Use a compact yet uncramped row rhythm to fit the hierarchy inside the lower card. Never shrink the top metric cards or crowd the right detail to fit this tree.
+
+Lower right: preserve the overview detail card's layout nearly unchanged. Title 重构登录流程, subtle 主任务自身 chip. Metadata 项目: web-app | 模型: GPT-6.1 Sol | 10月19日 09:00 – 09:34. Keep the reference's outlined 导入 / 导出 button in the same top-right place.
+Label 估算费用, large $6.48 in the same position and size as the overview. Section 用量走势, elegant emerald cumulative line and mint area rising to 4.20M, pale small event bars, restrained legend, ticks 09:00 / 09:10 / 09:20 / 09:30, final tooltip 4.20M tokens, 09:34. Same chart dimensions and whitespace as reference.
+费用构成, same slim rounded stacked mint/blue/lilac bar and aligned legend values 输入 $2.10 32%, 缓存输入 $1.26 19%, 输出 $3.12 48%. Footer info icon and 按 API 单价估算，不代表订阅账单。 Keep the whole right card airy, with the reference's footer position and whitespace.
+
+Output one flat, straight-on finished application mockup, no device frame, no perspective, no annotations, no moodboard, no watermark. Use exact readable Simplified Chinese. It must immediately look like the Projects tab of the supplied Overview screen, with its tall expressive metric cards and calm consumer productivity aesthetic.
