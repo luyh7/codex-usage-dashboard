@@ -28,6 +28,8 @@ impl Prices {
 pub struct PriceEntry {
     pub model: String,
     pub effective_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_until: Option<String>,
     pub context_tier: Option<String>,
     #[serde(default)]
     pub service_tier: String,
@@ -222,6 +224,17 @@ fn effective(
     }
     result
 }
+fn expires(
+    model: &str,
+    selected: Option<DateTime<Utc>>,
+    prices: Prices,
+    schedules: &[Schedule],
+) -> Option<String> {
+    schedules
+        .iter()
+        .find(|s| s.moment > selected && lookup(model, &s.rates).map(|(_, p)| p) != Some(prices))
+        .and_then(|s| s.effective_at.clone())
+}
 impl PriceSchedule {
     pub fn bundled() -> Self {
         Self::from_json(include_str!("../data/prices-v1.json")).expect("validated bundled pricing")
@@ -279,6 +292,7 @@ impl PriceSchedule {
             &self.schedules,
         );
         let mut context_tier = None;
+        let mut effective_until = expires(model, schedule.moment, prices, &self.schedules);
         if let Some(family) = self
             .families
             .iter()
@@ -291,6 +305,7 @@ impl PriceSchedule {
                         canonical = key;
                         prices = price;
                         context_tier = Some("long".into());
+                        effective_until = None;
                     }
                 } else {
                     let long = family
@@ -305,10 +320,11 @@ impl PriceSchedule {
                         context_tier = Some("long".into());
                         effective_at = effective(
                             model,
-                            schedule.effective_at.as_deref(),
+                            long.effective_at.as_deref(),
                             prices,
                             &family.schedules,
                         );
+                        effective_until = expires(model, long.moment, prices, &family.schedules);
                     }
                 }
             }
@@ -322,6 +338,7 @@ impl PriceSchedule {
         Some(PriceEntry {
             model: canonical.into(),
             effective_at,
+            effective_until,
             context_tier,
             service_tier,
             cost_multiplier,
@@ -435,6 +452,47 @@ impl PriceSchedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn price_validity_tracks_changes_for_each_context_and_model() {
+        let schedule = PriceSchedule::bundled();
+        for input in [100_000, 300_000] {
+            let before = schedule
+                .quote("gpt-5.6-sol", Some("2026-08-20T23:59:59Z"), Some(input), "")
+                .unwrap();
+            assert_eq!(before.effective_at.as_deref(), Some("2026-07-09T17:00:00Z"));
+            assert_eq!(
+                before.effective_until.as_deref(),
+                Some("2026-08-21T00:00:00Z")
+            );
+            let after = schedule
+                .quote(
+                    "gpt-5.6-sol",
+                    Some("2026-08-21T00:00:00Z"),
+                    Some(input),
+                    "priority",
+                )
+                .unwrap();
+            assert_eq!(after.effective_at.as_deref(), Some("2026-08-21T00:00:00Z"));
+            assert_eq!(after.effective_until, None);
+        }
+        let terra = schedule
+            .quote(
+                "gpt-5.6-terra",
+                Some("2026-07-29T12:00:00Z"),
+                Some(100_000),
+                "",
+            )
+            .unwrap();
+        assert_eq!(
+            terra.effective_until.as_deref(),
+            Some("2026-07-30T00:00:00Z")
+        );
+        let unchanged = schedule
+            .quote("gpt-5.4", Some("2026-07-01T00:00:00Z"), None, "")
+            .unwrap();
+        assert_eq!(unchanged.effective_at, None);
+        assert_eq!(unchanged.effective_until, None);
+    }
     #[test]
     fn costs_unknown_and_reasoning_subset() {
         let schedule = PriceSchedule::bundled();

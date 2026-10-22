@@ -304,7 +304,7 @@ impl Index {
         }
         let pricing = PriceSchedule::bundled();
         let pricing_fingerprint = format!(
-            "{:x}",
+            "validity-v2:{:x}",
             Sha256::digest(include_bytes!("../data/prices-v1.json"))
         );
         let mut files = BTreeMap::new();
@@ -403,7 +403,7 @@ impl Index {
     }
     pub fn replace_pricing(&mut self, json: &str) -> Result<(), Error> {
         self.pricing = PriceSchedule::from_json(json)?;
-        self.pricing_fingerprint = format!("{:x}", Sha256::digest(json.as_bytes()));
+        self.pricing_fingerprint = format!("validity-v2:{:x}", Sha256::digest(json.as_bytes()));
         self.auxiliary.clear();
         Ok(())
     }
