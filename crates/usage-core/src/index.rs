@@ -23,7 +23,7 @@ use std::{
 };
 
 const SCHEMA_VERSION: &str = "1";
-const PARSER_VERSION: &str = "1";
+const PARSER_VERSION: &str = "2";
 const MARKER_BYTES: u64 = 4096;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventIndex {
@@ -173,6 +173,16 @@ fn read_hash(file: &mut File, start: u64, len: u64) -> Result<String, Error> {
     Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 fn markers(path: &Path, consumed: u64) -> Result<Markers, Error> {
+    // Decoded offsets must never be used to seek within a Zstandard file.
+    // Unchanged archives use their physical FileStamp and persistent cache.
+    if crate::reader::is_compressed(path) {
+        return Ok(Markers {
+            append_safe: false,
+            prefix_len: 0,
+            prefix: String::new(),
+            tail: String::new(),
+        });
+    }
     let mut file = File::open(path)?;
     let len = consumed.min(MARKER_BYTES);
     let append_safe = if consumed == 0 {
@@ -459,7 +469,8 @@ impl Index {
                 revision: self.snapshot.revision,
             });
             let append = cached.filter(|cached| {
-                cached.stamp.same_identity(&file.stamp)
+                !crate::reader::is_compressed(&file.path)
+                    && cached.stamp.same_identity(&file.stamp)
                     && file.stamp.size > cached.stamp.size
                     && matches_prefix(&file.path, cached)
             });
@@ -474,7 +485,9 @@ impl Index {
             )?;
             let after = FileStamp::read(&file.path)?;
             if after != file.stamp
-                && (!after.same_identity(&file.stamp) || after.size <= file.stamp.size)
+                && (crate::reader::is_compressed(&file.path)
+                    || !after.same_identity(&file.stamp)
+                    || after.size <= file.stamp.size)
             {
                 self.inventory.invalidate(&file.path);
                 return Err(Error::InvalidData(
@@ -854,6 +867,136 @@ mod tests {
         assert_eq!(restarted.snapshot.revision, generation);
         assert_eq!(restarted.metrics.full_parses, 0);
         assert_eq!(restarted.metrics.persistent_hits, 1);
+    }
+    #[test]
+    fn compression_resume_archive_and_restart_preserve_usage() {
+        let f = Fixture::new();
+        f.append(20, 2);
+        let mut index = Index::open(f.config.clone()).unwrap();
+        index.refresh(|_| {}).unwrap();
+        let uid = index.snapshot.sessions[0].detail.identity.uid.clone();
+        let compressed = f.path.with_extension("jsonl.zst");
+        let bytes = fs::read(&f.path).unwrap();
+        fs::write(
+            &compressed,
+            zstd::stream::encode_all(bytes.as_slice(), 1).unwrap(),
+        )
+        .unwrap();
+        // Both files coexist during publication; count only one copy.
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 20);
+        assert_eq!(index.files.len(), 1);
+        fs::remove_file(&f.path).unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 20);
+        assert_eq!(index.snapshot.sessions[0].detail.identity.uid, uid);
+        assert_eq!(
+            index.snapshot.sessions[0].detail.file_size,
+            fs::metadata(&compressed).unwrap().len() as i64
+        );
+        assert_eq!(index.snapshot.sessions[0].detail.token_event_count, 2);
+        let days = crate::query::daily_usage(
+            index.snapshot.sessions.iter().map(|s| s.detail.as_ref()),
+            chrono_tz::Asia::Shanghai,
+        )
+        .unwrap();
+        assert_eq!(days[0].usage.total_tokens, 20);
+        // A changed compressed stream is fully decoded, never byte-appended.
+        let frame = zstd::stream::encode_all(format!("{}\n", event(30, 3)).as_bytes(), 1).unwrap();
+        OpenOptions::new()
+            .append(true)
+            .open(&compressed)
+            .unwrap()
+            .write_all(&frame)
+            .unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 30);
+        assert_eq!(index.metrics.incremental_parses, 0);
+        // Resuming restores a plain log, which can then use incremental reads.
+        let decoded = zstd::stream::decode_all(File::open(&compressed).unwrap()).unwrap();
+        fs::write(&f.path, decoded).unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 30);
+        fs::remove_file(&compressed).unwrap();
+        f.append(40, 4);
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 40);
+        assert_eq!(index.metrics.incremental_parses, 1);
+        assert_eq!(index.snapshot.sessions[0].detail.identity.uid, uid);
+        let archive = f.config.sources[0].home.join("archived_sessions");
+        fs::create_dir_all(&archive).unwrap();
+        let archived = archive.join("rollout-synthetic.jsonl.zst");
+        fs::write(
+            &archived,
+            zstd::stream::encode_all(fs::read(&f.path).unwrap().as_slice(), 1).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(&f.path).unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 40);
+        assert_eq!(index.snapshot.sessions[0].detail.source, "archived");
+        drop(index);
+        let mut index = Index::open(f.config).unwrap();
+        assert_eq!(total(&index), 40);
+        assert!(index.refresh(|_| {}).unwrap().is_none());
+        assert_eq!(index.metrics.full_parses, 0);
+        assert_eq!(index.metrics.persistent_hits, 1);
+    }
+    #[test]
+    fn migrated_compressed_children_match_raw_parent_history() {
+        let f = Fixture::new();
+        let mut first = event(100, 1);
+        first["payload"]["info"]["last_token_usage"] =
+            json!({"input_tokens":100,"total_tokens":100});
+        let mut second = event(200, 2);
+        // Codex's recorded request usage need not equal the cumulative delta.
+        second["payload"]["info"]["last_token_usage"] =
+            json!({"input_tokens":70,"total_tokens":70});
+        let parent = format!(
+            "{}\n{}\n{}\n",
+            json!({"timestamp":"2026-10-01T00:00:00Z","type":"session_meta","payload":{"id":"synthetic"}}),
+            first,
+            second
+        );
+        let mut inherited_first = first.clone();
+        let mut inherited_second = second.clone();
+        // Paginated migration can assign copied events the child's timestamp.
+        inherited_first["timestamp"] = json!("2026-10-01T00:00:04Z");
+        inherited_second["timestamp"] = json!("2026-10-01T00:00:04Z");
+        let mut own = event(250, 5);
+        own["payload"]["info"]["last_token_usage"] = json!({"input_tokens":50,"total_tokens":50});
+        let child = format!(
+            "{}\n{}\n{}\n{}\n",
+            json!({"timestamp":"2026-10-01T00:00:03Z","type":"session_meta","payload":{"id":"child","forked_from_id":"synthetic","parent_thread_id":"synthetic"}}),
+            inherited_first,
+            inherited_second,
+            own
+        );
+        fs::write(
+            f.path.with_extension("jsonl.zst"),
+            zstd::stream::encode_all(parent.as_bytes(), 1).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(&f.path).unwrap();
+        fs::write(
+            f.path.with_file_name("child.jsonl.zst"),
+            zstd::stream::encode_all(child.as_bytes(), 1).unwrap(),
+        )
+        .unwrap();
+        let mut index = Index::open(f.config).unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 250);
+        let child = &index
+            .snapshot
+            .sessions
+            .iter()
+            .find(|s| s.detail.identity.session_id == "child")
+            .unwrap()
+            .detail;
+        assert!(child.fork_usage_resolved);
+        assert_eq!(child.inherited_token_event_count, 2);
+        assert_eq!(child.inherited_token_usage.total_tokens, 200);
+        assert_eq!(child.total_token_usage.total_tokens, 50);
     }
     #[test]
     fn rollback_at_every_commit_stage_does_not_advance_offset() {

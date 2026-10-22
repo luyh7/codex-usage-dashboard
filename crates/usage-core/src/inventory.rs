@@ -176,11 +176,22 @@ impl Inventory {
             let kind = entry.file_type()?;
             if kind.is_dir() {
                 children.push(path);
-            } else if path.extension().is_some_and(|e| e == "jsonl") {
+            } else if path.extension().is_some_and(|e| e == "jsonl")
+                || crate::reader::is_compressed(&path)
+            {
                 self.metadata.remove(&path);
                 files.push(path);
             }
         }
+        // Codex briefly keeps both representations while publishing a
+        // compressed or resumed log. Prefer the plain file, as Codex does.
+        let plain: HashSet<_> = files
+            .iter()
+            .filter(|p| !crate::reader::is_compressed(p))
+            .cloned()
+            .collect();
+        files
+            .retain(|p| !crate::reader::is_compressed(p) || !plain.contains(&p.with_extension("")));
         self.directories.insert(
             path.into(),
             Directory {

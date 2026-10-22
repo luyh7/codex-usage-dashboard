@@ -13,6 +13,15 @@ static HEADER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^\{"timestamp":"([0-9T:.+Z-]+)","type":"(response_item|event_msg)","payload":\{"type":"([a-zA-Z0-9_-]+)"(?:,|\})"#).unwrap()
 });
 
+pub fn is_compressed(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "zst")
+        && path.file_stem().is_some_and(|stem| {
+            Path::new(stem)
+                .extension()
+                .is_some_and(|ext| ext == "jsonl")
+        })
+}
+
 #[derive(Debug, Default, Serialize)]
 pub struct ReadStats {
     pub bytes_read: u64,
@@ -57,8 +66,17 @@ pub fn read_rollout(
 ) -> Result<ReadStats, Error> {
     let mut file = File::open(path)?;
     let end = end.unwrap_or(file.metadata()?.len());
-    file.seek(SeekFrom::Start(start))?;
-    let mut reader = BufReader::with_capacity(128 * 1024, file.take(end.saturating_sub(start)));
+    // `end` bounds physical bytes, whereas `start` and ReadStats use decoded
+    // JSONL offsets. Compressed files are reparsed on change by the index.
+    let input: Box<dyn Read> = if is_compressed(path) {
+        let mut decoded = zstd::stream::read::Decoder::new(file.take(end))?;
+        std::io::copy(&mut decoded.by_ref().take(start), &mut std::io::sink())?;
+        Box::new(decoded)
+    } else {
+        file.seek(SeekFrom::Start(start))?;
+        Box::new(file.take(end.saturating_sub(start)))
+    };
+    let mut reader = BufReader::with_capacity(128 * 1024, input);
     let mut first = start == 0;
     let mut stats = ReadStats::default();
     let mut line = Vec::new();
@@ -105,4 +123,42 @@ pub fn read_rollout(
         }
     }
     Ok(stats)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compressed_frames_respect_physical_bounds_and_decoded_offsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl.zst");
+        let first = b"\xef\xbb\xbf{\"n\":1}\n";
+        let second = b"{\"n\":2}\n";
+        let mut bytes = zstd::stream::encode_all(first.as_slice(), 1).unwrap();
+        let bound = bytes.len() as u64;
+        bytes.extend(zstd::stream::encode_all(second.as_slice(), 1).unwrap());
+        let complete = bytes.len() as u64;
+        bytes.extend(b"unpublished trailing bytes");
+        std::fs::write(&path, bytes).unwrap();
+        let mut rows = Vec::new();
+        let stats = read_rollout(&path, 0, Some(bound), |r| {
+            rows.push(r);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(rows, vec![json!({"n":1})]);
+        assert_eq!(stats.bytes_read, first.len() as u64);
+        rows.clear();
+        read_rollout(&path, stats.bytes_read, Some(complete), |r| {
+            rows.push(r);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(rows, vec![json!({"n":2})]);
+        assert!(read_rollout(&path, 0, None, |_| Ok(())).is_err());
+        let truncated = zstd::stream::encode_all(second.as_slice(), 1).unwrap();
+        std::fs::write(&path, &truncated[..truncated.len() - 1]).unwrap();
+        assert!(read_rollout(&path, 0, None, |_| Ok(())).is_err());
+    }
 }

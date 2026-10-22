@@ -704,9 +704,6 @@ pub fn normalize_sessions(
     pricing: &PriceSchedule,
 ) -> Result<Vec<ParsedFile>, Error> {
     let mut files = merge(files)?;
-    for file in &mut files {
-        normalize_main(file, pricing)?;
-    }
     let by_id: HashMap<_, _> = files
         .iter()
         .enumerate()
@@ -723,6 +720,12 @@ pub fn normalize_sessions(
             }
         })
         .collect::<Result<_, Error>>()?;
+    // Match inherited history against raw parent counters. Normalizing a
+    // parent's resets or request deltas first breaks equality with the copied
+    // history in its children, including histories rewritten by Codex migration.
+    for file in &mut files {
+        normalize_main(file, pricing)?;
+    }
     for (file, spec) in files.iter_mut().zip(specs) {
         if let Some(spec) = spec {
             normalize_child(file, spec, pricing)?;

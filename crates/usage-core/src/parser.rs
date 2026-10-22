@@ -479,7 +479,7 @@ impl ParsedFile {
     }
 }
 static FALLBACK_ID: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"rollout-[^-]+-[^-]+-(.+?)\.jsonl$").unwrap());
+    LazyLock::new(|| Regex::new(r"rollout-[^-]+-[^-]+-(.+?)\.jsonl(?:\.zst)?$").unwrap());
 
 /// Passing an owned previous result resumes from its committed byte offset.
 /// File identity/prefix validation is the index writer's responsibility.
@@ -492,9 +492,15 @@ pub fn parse_file(
     end: Option<u64>,
 ) -> Result<ParsedFile, Error> {
     let path = path.canonicalize()?;
+    // Compression changes the representation, not the conversation identity.
+    let identity_path = if reader::is_compressed(&path) {
+        path.with_extension("")
+    } else {
+        path.clone()
+    };
     let uid = format!(
         "{:x}",
-        Sha1::digest(format!("{}:{}", source.id, path.display()).as_bytes())
+        Sha1::digest(format!("{}:{}", source.id, identity_path.display()).as_bytes())
     )[..16]
         .to_owned();
     let mut parsed = base.unwrap_or_else(|| ParsedFile {
@@ -511,8 +517,12 @@ pub fn parse_file(
     let stats = reader::read_rollout(&path, offset, end, |item| parsed.consume(item))?;
     parsed.state.parsed_end_offset = offset + stats.bytes_read;
     let detail = &mut parsed.detail;
-    detail.file_size =
-        i64::try_from(parsed.state.parsed_end_offset).map_err(|_| Error::CounterOverflow)?;
+    detail.file_size = i64::try_from(if reader::is_compressed(&path) {
+        end.unwrap_or(std::fs::metadata(&path)?.len())
+    } else {
+        parsed.state.parsed_end_offset
+    })
+    .map_err(|_| Error::CounterOverflow)?;
     detail.fast_skipped_line_count += stats.fast_skipped_line_count as i64;
     detail.fast_skipped_bytes += stats.fast_skipped_bytes as i64;
     detail.source = kind.into();

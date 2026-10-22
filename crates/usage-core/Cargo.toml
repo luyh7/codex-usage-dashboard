@@ -13,6 +13,7 @@ sha1 = "0.10"
 rusqlite = { version = "0.38", features = ["bundled"] }
 chrono-tz = "0.10"
 flate2 = "1"
+zstd = { version = "0.13", default-features = false }
 sha2 = "0.10"
 fs2 = "0.4"
 wait-timeout = "0.2"
