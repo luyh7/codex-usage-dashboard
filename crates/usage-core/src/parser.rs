@@ -146,9 +146,32 @@ pub(crate) fn clean(text: &str, limit: usize) -> String {
         )
     }
 }
-fn synthetic(text: &str) -> bool {
-    let text = text.trim();
-    text.starts_with("# AGENTS.md instructions for ") || text.starts_with("<environment_context>")
+fn user_prompt(message: &str) -> String {
+    let mut message = message.trim();
+    let mut stripped = false;
+    loop {
+        if message.starts_with("# AGENTS.md instructions for ") {
+            return String::new();
+        }
+        let Some((opening, body)) = message.strip_prefix('<').and_then(|s| s.split_once('>')) else {
+            break;
+        };
+        let name = opening.split_whitespace().next().unwrap_or_default();
+        if !matches!(name, "external_codex_apps_open_page" | "in-app-browser-context" | "environment_context") {
+            break;
+        }
+        let Some((_, rest)) = body.split_once(&format!("</{name}>")) else {
+            break;
+        };
+        message = rest.trim_start();
+        stripped = true;
+    }
+    if stripped {
+        message = message.strip_prefix("## My request:").unwrap_or(message).trim_start();
+    }
+    // Filter complete, known context blocks before truncation, preserving any
+    // actual request that follows them. Authored markup is otherwise untouched.
+    clean(message, 260)
 }
 fn text(value: &Value) -> &str {
     value.as_str().unwrap_or("")
@@ -348,21 +371,18 @@ impl ParsedFile {
             }
             "response_item" => match text(&payload["type"]) {
                 "message" => {
-                    let message = clean(&content(&payload["content"]), 260);
+                    let message = content(&payload["content"]);
                     match text(&payload["role"]) {
                         "user" => {
                             self.detail.user_message_count += 1;
-                            if !message.is_empty()
-                                && self.detail.first_user_prompt.is_empty()
-                                && !synthetic(&message)
-                            {
-                                self.detail.first_user_prompt = message;
+                            if self.detail.first_user_prompt.is_empty() {
+                                self.detail.first_user_prompt = user_prompt(&message);
                             }
                         }
                         "assistant" => {
                             self.detail.assistant_message_count += 1;
                             if !message.is_empty() {
-                                self.detail.last_agent_preview = message;
+                                self.detail.last_agent_preview = clean(&message, 260);
                             }
                         }
                         _ => {}
@@ -467,8 +487,8 @@ impl ParsedFile {
                     self.detail.user_message_count += 1;
                     let message =
                         first(&[&payload["message"], &payload["text"], &payload["content"]]);
-                    if self.detail.first_user_prompt.is_empty() && !synthetic(message) {
-                        self.detail.first_user_prompt = clean(message, 260);
+                    if self.detail.first_user_prompt.is_empty() {
+                        self.detail.first_user_prompt = user_prompt(message);
                     }
                 }
                 _ => {}
@@ -683,4 +703,74 @@ pub fn parse_file(
         )
     };
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn parsed() -> ParsedFile {
+        ParsedFile { detail: SessionDetail::default(), state: ParserState::default() }
+    }
+
+    fn message(kind: &str, value: &str) -> Value {
+        if kind == "response_item" {
+            json!({"type": kind, "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": value}]}})
+        } else {
+            json!({"type": "event_msg", "payload": {"type": kind, "message": value}})
+        }
+    }
+
+    #[test]
+    fn first_user_prompt_skips_injected_context_in_all_message_formats() {
+        for kind in ["response_item", "user_message", "user_input", "human_message"] {
+            let mut parsed = parsed();
+            for context in [
+                "# AGENTS.md instructions for /demo\n<INSTRUCTIONS>project rules</INSTRUCTIONS>",
+                "<environment_context>\n<cwd>/demo</cwd>\n</environment_context>",
+                "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>",
+                "<external_codex_apps_open_page>{\"page_id\":\"example\"}</external_codex_apps_open_page>",
+                "<in-app-browser-context source=\"ambient-ui-state\">Current URL: http://localhost/</in-app-browser-context>",
+            ] {
+                parsed.consume(message(kind, context)).unwrap();
+                assert!(parsed.detail.first_user_prompt.is_empty(), "{kind}: {context}");
+            }
+            parsed.consume(message(kind, "修复登录流程，并保留错误提示。")).unwrap();
+            parsed.consume(message(kind, "这是一条后续请求。")).unwrap();
+            assert_eq!(parsed.detail.first_user_prompt, "修复登录流程，并保留错误提示。", "{kind}");
+        }
+    }
+
+    #[test]
+    fn first_user_prompt_preserves_request_after_long_context_before_truncation() {
+        let context = format!(
+            "<external_codex_apps_open_page>{{\"page_id\":null}}</external_codex_apps_open_page>\n<in-app-browser-context source=\"ambient-ui-state\">{}</in-app-browser-context>\n<environment_context><cwd>/demo</cwd></environment_context>\n\n## My request:\n",
+            "自动附带的浏览器上下文。".repeat(100)
+        );
+        let request = "调整事件列表的布局，保留完整值提示。";
+        for kind in ["response_item", "user_message", "user_input", "human_message"] {
+            let mut parsed = parsed();
+            parsed.consume(message(kind, &format!("{context}{request}"))).unwrap();
+            assert_eq!(parsed.detail.first_user_prompt, request, "{kind}");
+        }
+        let mut parsed = parsed();
+        parsed.consume(json!({"type":"response_item","payload":{"type":"message","role":"user","content":[
+            {"type":"input_text","text":context}, {"type":"input_text","text":request}
+        ]}})).unwrap();
+        assert_eq!(parsed.detail.first_user_prompt, request);
+    }
+
+    #[test]
+    fn first_user_prompt_keeps_authored_markup_and_quoted_context() {
+        for request in [
+            "<request>请修复布局</request>",
+            "<environment_contextual>这是用户正文</environment_contextual>",
+            "解释 <external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page> 的含义。",
+            "```xml\n<environment_context>example</environment_context>\n```",
+            "<in-app-browser-context>尚未闭合的示例，请解释这段文本。",
+        ] {
+            assert_eq!(user_prompt(request), clean(request, 260));
+        }
+    }
 }

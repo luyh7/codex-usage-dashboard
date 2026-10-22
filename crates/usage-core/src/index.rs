@@ -23,7 +23,7 @@ use std::{
 };
 
 const SCHEMA_VERSION: &str = "1";
-const PARSER_VERSION: &str = "2";
+const PARSER_VERSION: &str = "3";
 const MARKER_BYTES: u64 = 4096;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventIndex {
@@ -867,6 +867,39 @@ mod tests {
         assert_eq!(restarted.snapshot.revision, generation);
         assert_eq!(restarted.metrics.full_parses, 0);
         assert_eq!(restarted.metrics.persistent_hits, 1);
+    }
+    #[test]
+    fn parser_upgrade_reextracts_cached_prompts_without_changing_logs() {
+        let f = Fixture::new();
+        let context = "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>";
+        let request = "修复登录流程。";
+        let mut file = OpenOptions::new().append(true).open(&f.path).unwrap();
+        for message in [context, request] {
+            writeln!(file, "{}", json!({"type":"event_msg","payload":{"type":"user_message","message":message}})).unwrap();
+        }
+        let bytes = fs::read(&f.path).unwrap();
+        let mut index = Index::open(f.config.clone()).unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(index.snapshot.sessions[0].detail.first_user_prompt, request);
+
+        // Emulate a persisted v2 extraction of this unchanged source file.
+        let mut cached = index.files.values().next().unwrap().clone();
+        Arc::make_mut(&mut cached.parsed).detail.first_user_prompt = context.into();
+        index.connection.execute("UPDATE files SET payload=?", [encode(&cached).unwrap()]).unwrap();
+        let mut session = index.snapshot.sessions[0].clone();
+        Arc::make_mut(&mut session.detail).first_user_prompt = context.into();
+        index.connection.execute("UPDATE sessions SET payload=?", [encode(&session).unwrap()]).unwrap();
+        index.connection.execute("UPDATE metadata SET value='2' WHERE key='parser_version'", []).unwrap();
+        drop(index);
+
+        let mut restarted = Index::open(f.config).unwrap();
+        assert!(restarted.snapshot.sessions.is_empty());
+        restarted.refresh(|_| {}).unwrap();
+        assert_eq!(restarted.snapshot.sessions[0].detail.first_user_prompt, request);
+        assert_eq!(restarted.metrics.full_parses, 1);
+        assert_eq!(restarted.metrics.persistent_hits, 0);
+        assert_eq!(total(&restarted), 10);
+        assert_eq!(fs::read(&f.path).unwrap(), bytes);
     }
     #[test]
     fn compression_resume_archive_and_restart_preserve_usage() {
