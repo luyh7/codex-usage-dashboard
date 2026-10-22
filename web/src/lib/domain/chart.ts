@@ -1,11 +1,13 @@
 import type { Chart } from '../data/types';
 import { compactNumber, chartPositions } from './presentation';
-import { dateTime, type Language } from './ui';
+import { dateTime, words, type Language } from './ui';
+import { chartDates, curveSegments, usageBars } from './chartModel';
 
 export interface ChartPoint {
   x: number;
   y: number;
   tokens: number;
+  intervalTokens: number;
   time: string;
 }
 interface Options {
@@ -26,7 +28,11 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
   let progress = 1,
     path = new Path2D(),
     area = new Path2D();
-  const pad = { left: 44, right: 12, top: 14, bottom: 30 };
+  let alive = true;
+  const pad = { left: 54, right: 8, top: 14, bottom: 30 };
+  let bars: ReturnType<typeof usageBars> = { bars: [], count: 1 };
+  let ticks: { x: number; time: string; date: string }[] = [];
+  let dates = chartDates(current.zone, []);
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const x = (i: number) => pad.left + (width - pad.left - pad.right) * positions[i];
   const y = (i: number) =>
@@ -34,23 +40,11 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     pad.bottom -
     (height - pad.top - pad.bottom) *
       (current.data.timeline[i].total_token_usage.total_tokens / max);
-  const clock = (index: number, timestamp?: number) => {
-    const stamp =
-      timestamp === undefined
-        ? current.data.timeline[index]?.timestamp
-        : new Date(timestamp).toISOString();
-    if (!stamp || !Number.isFinite(Date.parse(stamp))) return String(index + 1);
-    return new Intl.DateTimeFormat(current.lang === 'zh' ? 'zh-CN' : 'en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      timeZone: current.zone,
-    }).format(new Date(stamp));
-  };
   function inspect() {
-    const inspectedIndex = active >= 0 ? active : current.data.timeline.length - 1;
+    const inspectedIndex = active;
     const row = current.data.timeline[inspectedIndex];
     const announced = row || current.data.timeline.at(-1);
+    const bar = bars.bars.find((bar) => active >= bar.start && active <= bar.end);
     canvas.setAttribute(
       'aria-valuenow',
       String(active >= 0 ? active + 1 : current.data.timeline.length),
@@ -60,7 +54,10 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
       announced
         ? compactNumber(announced.total_token_usage.total_tokens) +
             ' tokens · ' +
-            dateTime(announced.timestamp, current.zone, current.lang)
+            dateTime(announced.timestamp, current.zone, current.lang) +
+            (bar
+              ? ` · ${words(current.lang).intervalTokens} ${compactNumber(bar.tokens)} tokens`
+              : '')
         : '—',
     );
     current.inspect(
@@ -69,7 +66,8 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
             x: x(inspectedIndex),
             y: y(inspectedIndex),
             tokens: row.total_token_usage.total_tokens,
-            time: row.timestamp ? clock(inspectedIndex) : '#' + (inspectedIndex + 1),
+            intervalTokens: bar?.tokens ?? 0,
+            time: dates.tooltip(row.timestamp) ?? '#' + (inspectedIndex + 1),
           }
         : null,
     );
@@ -82,7 +80,7 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     ctx.clearRect(0, 0, width, height);
     const style = getComputedStyle(canvas);
     const accent = style.getPropertyValue('--accent').trim();
-    ctx.font = '13px ' + style.fontFamily;
+    ctx.font = '12px ' + style.fontFamily;
     ctx.fillStyle = style.getPropertyValue('--muted').trim();
     ctx.strokeStyle = style.getPropertyValue('--border').trim();
     ctx.lineWidth = 1;
@@ -93,21 +91,15 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
       ctx.lineTo(width - pad.right, py);
       ctx.stroke();
       ctx.textAlign = 'left';
-      ctx.fillText(compactNumber(max * (1 - i / 3)), 0, py + 4);
+      ctx.fillText(compactNumber(max * (1 - i / 3)).replace(/(\.\d)0(?=[KMB]$)/, '$1'), 0, py + 4);
     }
     const rows = current.data.timeline;
     if (!rows.length) return;
-    const times = rows.map((row) => (row.timestamp ? Date.parse(row.timestamp) : NaN));
-    const timed =
-      times.at(-1)! > times[0] &&
-      times.every((time, i) => Number.isFinite(time) && (!i || time >= times[i - 1]));
-    const ticks = rows.length === 1 ? [0] : [0, 1 / 3, 2 / 3, 1];
-    for (const fraction of ticks) {
-      const index = Math.round((rows.length - 1) * fraction);
-      const px = pad.left + (width - pad.left - pad.right) * fraction;
-      const timestamp = timed ? times[0] + (times.at(-1)! - times[0]) * fraction : undefined;
-      ctx.textAlign = fraction === 0 ? 'left' : fraction === 1 ? 'right' : 'center';
-      ctx.fillText(clock(index, timestamp), px, height - 5);
+    for (const [i, tick] of ticks.entries()) {
+      const px = tick.x;
+      ctx.textAlign = i === 0 ? 'left' : i === ticks.length - 1 ? 'right' : 'center';
+      if (tick.time) ctx.fillText(tick.time, px, height - pad.bottom + 18);
+      if (tick.date) ctx.fillText(tick.date, px, height - pad.bottom + (tick.time ? 34 : 18));
       ctx.beginPath();
       ctx.moveTo(px, pad.top);
       ctx.lineTo(px, height - pad.bottom);
@@ -119,29 +111,34 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     ctx.clip();
     const gradient = ctx.createLinearGradient(0, pad.top, 0, height - pad.bottom);
     gradient.addColorStop(0, style.getPropertyValue('--chart-fill').trim());
-    gradient.addColorStop(1, 'transparent');
+    // Keep the same mint hue at both ends; transparent black makes the area gray.
+    gradient.addColorStop(1, '#33bc8b00');
     ctx.fillStyle = gradient;
     ctx.fill(area);
+    // Bars use the same token axis as the curve, retaining the actual relative magnitudes.
+    const barStep = (width - pad.left - pad.right) / bars.count;
+    for (const bar of bars.bars) {
+      if (!bar.tokens) continue;
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = active >= bar.start && active <= bar.end ? 0.5 : 0.23;
+      const barHeight = ((height - pad.top - pad.bottom) * bar.tokens) / max;
+      ctx.fillRect(
+        pad.left + bar.column * barStep + 1,
+        height - pad.bottom - barHeight,
+        Math.max(1, barStep - 2),
+        barHeight,
+      );
+    }
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = accent;
     ctx.lineWidth = 2.4;
     ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
     ctx.stroke(path);
-    // Mark a few real samples, retaining every event in the line and hit testing.
-    for (const i of [
-      ...new Set(
-        Array.from({ length: Math.min(8, rows.length) }, (_, n) =>
-          Math.round((n * (rows.length - 1)) / Math.max(1, Math.min(8, rows.length) - 1)),
-        ),
-      ),
-    ]) {
-      ctx.fillStyle = accent;
-      ctx.beginPath();
-      ctx.arc(x(i), y(i), 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    const point = active >= 0 ? active : rows.length - 1;
+    const point = active;
     if (active >= 0) {
       ctx.save();
+      ctx.strokeStyle = accent;
       ctx.globalAlpha = 0.3;
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 4]);
@@ -156,14 +153,14 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
       ctx.arc(x(point), y(point), 10, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
+      ctx.fillStyle = accent;
+      ctx.strokeStyle = style.getPropertyValue('--panel').trim();
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x(point), y(point), 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     }
-    ctx.fillStyle = accent;
-    ctx.strokeStyle = style.getPropertyValue('--panel').trim();
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x(point), y(point), 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
     ctx.restore();
   }
   function prepare(animate = false) {
@@ -175,13 +172,37 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     canvas.height = Math.round(height * dpr);
     const rows = current.data.timeline;
     positions = chartPositions(rows);
+    dates = chartDates(
+      current.zone,
+      rows.map((row) => row.timestamp),
+    );
+    const times = rows.map((row) => (row.timestamp ? Date.parse(row.timestamp) : NaN));
+    const timed =
+      times.at(-1)! > times[0] &&
+      times.every((time, i) => Number.isFinite(time) && (!i || time >= times[i - 1]));
+    const plotWidth = width - pad.left - pad.right;
+    const count = Math.min(rows.length, plotWidth < 240 ? 2 : plotWidth < 400 ? 3 : 4);
+    const fractions = Array.from({ length: count }, (_, i) => i / Math.max(1, count - 1));
+    const stamps = fractions.map((fraction) =>
+      timed
+        ? new Date(times[0] + (times.at(-1)! - times[0]) * fraction).toISOString()
+        : rows[Math.round((rows.length - 1) * fraction)].timestamp,
+    );
+    ticks = dates
+      .ticks(stamps)
+      .map((tick, i) => ({ ...tick, x: pad.left + (width - pad.left - pad.right) * fractions[i] }));
+    pad.bottom = ticks.some((tick) => tick.date && tick.time) ? 46 : 30;
+    bars = usageBars(rows, positions, width - pad.left - pad.right);
     max = 1;
     for (const row of rows) max = Math.max(max, row.total_token_usage.total_tokens);
+    for (const bar of bars.bars) max = Math.max(max, bar.tokens);
     const unit = 10 ** Math.floor(Math.log10(max / 3));
     const step = [1, 1.5, 2, 2.5, 5, 10].find((value) => value * unit >= max / 3)! * unit;
     max = step * 3;
     path = new Path2D();
-    rows.forEach((_, i) => (i ? path.lineTo(x(i), y(i)) : path.moveTo(x(i), y(i))));
+    if (rows.length) path.moveTo(x(0), y(0));
+    for (const controls of curveSegments(rows.map((_, i) => [x(i), y(i)])))
+      path.bezierCurveTo(...controls);
     area = new Path2D(path);
     if (rows.length) {
       area.lineTo(x(rows.length - 1), height - pad.bottom);
@@ -203,7 +224,19 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     } else draw();
   }
   function pointer(event: PointerEvent) {
-    if (!positions.length) return;
+    if (!positions.length || event.pointerType === 'touch') return;
+    const rect = canvas.getBoundingClientRect();
+    const localX = event.clientX - rect.left,
+      localY = event.clientY - rect.top;
+    if (
+      localX < pad.left ||
+      localX > width - pad.right ||
+      localY < pad.top ||
+      localY > height - pad.bottom
+    ) {
+      leave();
+      return;
+    }
     const px =
       (event.clientX - canvas.getBoundingClientRect().left - pad.left) /
       (width - pad.left - pad.right);
@@ -225,11 +258,18 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     draw();
   };
   const focus = () => {
+    if (!canvas.matches(':focus-visible')) return;
     active = current.data.timeline.length - 1;
     inspect();
     draw();
   };
   function keyboard(event: KeyboardEvent) {
+    if (event.key === 'Escape' && active >= 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      leave();
+      return;
+    }
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !positions.length)
       return;
     event.preventDefault();
@@ -257,6 +297,10 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
   canvas.addEventListener('blur', leave);
   canvas.addEventListener('keydown', keyboard);
   prepare(true);
+  // Canvas text does not repaint automatically after the bundled fonts load.
+  void document.fonts.ready.then(() => {
+    if (alive) draw();
+  });
   return {
     update(next: Options) {
       const animate = current.data.id !== next.data.id;
@@ -265,6 +309,7 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
       prepare(animate);
     },
     destroy() {
+      alive = false;
       cancelAnimationFrame(frame);
       resize.disconnect();
       motion.removeEventListener('change', reduce);
