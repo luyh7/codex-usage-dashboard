@@ -88,6 +88,7 @@ impl State {
             params.get("period").map(String::as_str).unwrap_or("today"),
             params.get("start"),
             params.get("end"),
+            params.get("model"),
             zone.name(),
             now.with_timezone(&zone).date_naive(),
         ))?;
@@ -101,11 +102,12 @@ impl State {
             zone,
             now,
         )?;
-        let view = Arc::new(View::new(
+        let view = Arc::new(View::with_models(
             &current.snapshot,
             period,
             zone,
             &PriceSchedule::bundled(),
+            params.get("model").map(String::as_str).unwrap_or(""),
         )?);
         cache.push_back((key, view.clone(), current.clone()));
         while cache.len() > 8 {

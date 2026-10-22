@@ -39,6 +39,8 @@ pub struct SessionSummary {
     pub start_at: String,
     pub end_at: String,
     pub updated_at: Option<String>,
+    /// Latest timestamp with a positive normalized token delta, within the view's period.
+    pub last_usage_at: Option<String>,
     pub cwd: String,
     pub project: String,
     pub project_root: String,
@@ -95,6 +97,7 @@ impl From<&SessionDetail> for SessionSummary {
             start_at: detail.start_at.clone(),
             end_at: detail.end_at.clone(),
             updated_at: detail.updated_at.clone(),
+            last_usage_at: None,
             cwd: detail.cwd.clone(),
             project: detail.project.clone(),
             project_root: detail.project_root.clone(),
@@ -194,12 +197,19 @@ impl SessionDetail {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Summary {
     pub session_count: usize,
+    #[serde(default)]
+    pub main_count: usize,
+    #[serde(default)]
+    pub agent_count: usize,
     pub active_count: usize,
     pub archived_count: usize,
     pub usage: Usage,
     pub estimated_cost_usd: f64,
     pub estimated_cost_known_count: usize,
     pub by_model: Vec<ModelUsage>,
+    /// Event-level attribution, independent of the session's last model.
+    #[serde(default)]
+    pub model_breakdown: Vec<ModelBreakdown>,
     pub by_project: Vec<ProjectUsage>,
     pub by_environment: Vec<EnvironmentUsage>,
     pub by_day: Vec<DaySessions>,
@@ -210,6 +220,13 @@ pub struct ModelUsage {
     pub model: String,
     pub sessions: usize,
     pub usage: Usage,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModelBreakdown {
+    pub model: String,
+    pub usage: Usage,
+    pub estimated_cost_usd: Option<f64>,
+    pub cost_complete: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectUsage {
@@ -257,6 +274,8 @@ pub fn summarize<'a>(
             summary.top_session_uid = Some(session.uid.clone());
         }
         summary.session_count += 1;
+        summary.main_count += usize::from(!session.is_subagent);
+        summary.agent_count += usize::from(session.is_subagent);
         summary.active_count += usize::from(session.source == "active");
         summary.archived_count += usize::from(session.source == "archived");
         summary.usage = summary.usage.checked_add(session.total_token_usage)?;
@@ -471,6 +490,7 @@ pub fn detail_for_period(
         start,
         end,
         pricing,
+        &[],
     )
 }
 
@@ -492,7 +512,32 @@ pub fn detail_for_period_indexed(
         start,
         end,
         pricing,
+        &[],
     )
+}
+/// Filter normalized deltas, never raw cumulative counters: a later model's
+/// counter includes usage from earlier models in the same conversation.
+pub fn detail_for_models_indexed(
+    indexed: &crate::index::IndexedSession,
+    models: &[String],
+    pricing: &PriceSchedule,
+) -> Result<SessionDetail, Error> {
+    let detail = &indexed.detail;
+    let mut filtered = detail_for_events(
+        detail,
+        indexed.events.iter().filter_map(|e| Some((
+            &detail.timeline[e.source_order],
+            DateTime::from_timestamp_micros(e.timestamp_us)?,
+            e.delta,
+        ))),
+        DateTime::<Utc>::MIN_UTC,
+        DateTime::<Utc>::MAX_UTC,
+        pricing,
+        models,
+    )?;
+    filtered.period_start_at = detail.period_start_at.clone();
+    filtered.period_end_at = detail.period_end_at.clone();
+    Ok(filtered)
 }
 fn detail_for_events<'a>(
     detail: &SessionDetail,
@@ -500,22 +545,36 @@ fn detail_for_events<'a>(
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     pricing: &PriceSchedule,
+    selected_models: &[String],
 ) -> Result<SessionDetail, Error> {
     let mut ranged = detail.metadata();
     ranged.period_start_at = Some(timestamp::format(start));
     ranged.period_end_at = Some(timestamp::format(end));
     let mut total = Usage::default();
     let mut last = Usage::default();
-    for (source, time, delta) in events {
+    let events: Vec<_> = events.collect();
+    let event_model = |source: &crate::RawEvent| {
+        fallback(&[&source.model, &detail.model]).to_owned()
+    };
+    let matches_model = |source: &crate::RawEvent| {
+        selected_models.is_empty() || selected_models.contains(&event_model(source))
+    };
+    for &(source, time, delta) in &events {
         if time < start {
             continue;
         }
         if time > end {
             break;
         }
+        if !matches_model(source) {
+            continue;
+        }
         total = total.checked_add(delta)?;
         last = delta;
         let mut row = source.clone();
+        if !selected_models.is_empty() {
+            row.model = event_model(source);
+        }
         row.total_token_usage = total;
         row.last_token_usage = Some(last);
         ranged.timeline.push(row);
@@ -527,7 +586,11 @@ fn detail_for_events<'a>(
             task.timestamp
                 .as_deref()
                 .and_then(timestamp::parse)
-                .is_some_and(|t| t >= start && t <= end)
+                .is_some_and(|t| t >= start && t <= end && (
+                    selected_models.is_empty() || events.iter().rev()
+                        .find(|(_, time, _)| *time <= t)
+                        .is_some_and(|(source, _, _)| matches_model(source))
+                ))
         })
         .cloned()
         .collect();
@@ -634,6 +697,30 @@ fn detail_for_events<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn session_roles_are_independent_of_archive_status() {
+        let rows: Vec<_> = [(false, "active"), (true, "active"), (true, "archived")]
+            .into_iter()
+            .map(|(is_subagent, source)| {
+                let mut detail = SessionDetail::default();
+                detail.identity.is_subagent = is_subagent;
+                detail.source = source.into();
+                SessionSummary::from(&detail)
+            })
+            .collect();
+        let total = summarize(&rows).unwrap();
+        assert_eq!(total.session_count, 3);
+        assert_eq!(total.main_count, 1);
+        assert_eq!(total.agent_count, 2);
+        assert_eq!(total.active_count, 2);
+        assert_eq!(total.archived_count, 1);
+
+        let mut legacy = serde_json::to_value(&total).unwrap();
+        legacy.as_object_mut().unwrap().remove("main_count");
+        legacy.as_object_mut().unwrap().remove("agent_count");
+        let restored: Summary = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.session_count, 3);
+    }
     #[test]
     fn named_zone_bounds_cover_dst_and_midnight() {
         let now = timestamp::parse("2026-12-01T12:00:00Z").unwrap();

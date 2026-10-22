@@ -17,6 +17,7 @@ export class DataError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code = '',
   ) {
     super(message);
   }
@@ -35,6 +36,7 @@ export const cancelled = (error: unknown) => error instanceof Error && error.nam
  * away/back races. A successful response cannot revive a superseded view. */
 export class HttpDashboard implements DashboardData {
   private active = new Map<string, AbortController>();
+  private detailSequence = 0;
   private subscriptions = new Set<() => void>();
   constructor(
     private base = '',
@@ -49,6 +51,7 @@ export class HttpDashboard implements DashboardData {
     }
   }
   cancelDetails() {
+    this.detailSequence++;
     this.cancel('detail:');
     this.cancel('events:');
   }
@@ -80,7 +83,7 @@ export class HttpDashboard implements DashboardData {
       if (controller.signal.aborted || this.active.get(channel) !== controller)
         throw new Superseded();
       if (!response.ok)
-        throw new DataError(response.status, body.error || `HTTP ${response.status}`);
+        throw new DataError(response.status, body.error || `HTTP ${response.status}`, body.code || '');
       if (revision && (body.revision ?? body.page?.revision) !== revision)
         throw new DataError(409, 'snapshot stale');
       return body as T;
@@ -104,22 +107,28 @@ export class HttpDashboard implements DashboardData {
       revision || undefined,
     );
   }
-  async projectTasks(query: Query, project: string, revision: string, cursor = '') {
+  async projectTasks(query: Query, project: string, revision: string, cursor = '', limit = 5) {
     return (await this.get<Page<TaskGroup>>(
       'group:' + project,
       '/api/v2/project-tasks',
-      { ...query, project, revision, cursor, limit: 30 },
+      { ...query, project, revision, cursor, limit },
       revision,
     ))!;
   }
-  async detail(id: string, revision: string) {
+  async detail(id: string, revision: string, query?: Query) {
     this.cancelDetails();
+    const sequence = this.detailSequence;
     const params = { id, snapshot_token: revision };
-    const [detail, events, chart] = await Promise.all([
-      this.get<Detail>('detail:meta', '/api/v2/session', params, revision),
+    // Validate selection before requesting pages: an excluded session may have no
+    // events in this revision, which must not mask the filtered-out response.
+    const detail = await this.get<Detail>('detail:meta', '/api/v2/session',
+      { ...query, ...params, check_filters: query ? true : undefined }, revision);
+    if (sequence !== this.detailSequence) throw new Superseded();
+    const [events, chart] = await Promise.all([
       this.get<Events>('detail:events', '/api/v2/events', params, revision),
       this.get<Chart>('detail:chart', '/api/v2/chart', params, revision),
     ]);
+    if (sequence !== this.detailSequence) throw new Superseded();
     if (!detail || !events || !chart || detail.uid !== id || events.id !== id || chart.id !== id)
       throw new DataError(409, 'detail identity changed');
     return { detail, events, chart };

@@ -15,6 +15,33 @@ const query: Query = {
   sort: 'tokens',
   ascending: false,
 };
+test('detail validates the full filter before loading events and preserves error codes', async () => {
+  const paths: string[] = [];
+  const data = new HttpDashboard('', (async input => {
+    const url = new URL(String(input), 'http://localhost');
+    paths.push(url.pathname);
+    assert.equal(url.searchParams.get('check_filters'), 'true');
+    assert.equal(url.searchParams.get('source'), 'archived');
+    assert.equal(url.searchParams.get('snapshot_token'), 'r1');
+    return Response.json({ error: 'excluded', code: 'session_filtered_out' }, { status: 404 });
+  }) as typeof fetch);
+  await assert.rejects(data.detail('one', 'r1', { ...query, source: 'archived' }),
+    (error: unknown) => error instanceof DataError && error.code === 'session_filtered_out');
+  assert.deepEqual(paths, ['/api/v2/session']);
+});
+test('filter changes cancel a late detail failure without starting old event requests', async () => {
+  let finish!: (response: Response) => void;
+  const paths: string[] = [];
+  const data = new HttpDashboard('', ((input: string) => {
+    paths.push(new URL(input, 'http://localhost').pathname);
+    return new Promise<Response>(resolve => { finish = resolve; });
+  }) as typeof fetch);
+  const pending = data.detail('one', 'r1', query).catch(error => error);
+  data.cancelDetails();
+  finish(Response.json({ error: 'missing', code: 'details_missing' }, { status: 404 }));
+  assert(cancelled(await pending));
+  assert.deepEqual(paths, ['/api/v2/session']);
+});
 test('late transport responses cannot overwrite a newer filter, even if abort is ignored', async () => {
   const pending: ((response: Response) => void)[] = [];
   const transport = (() =>

@@ -39,7 +39,8 @@ fn error(error: QueryError) -> Response {
             StatusCode::CONFLICT,
             json!({"error":"snapshot stale","code":"snapshot_stale"}),
         ),
-        QueryError::Missing => (StatusCode::NOT_FOUND, json!({"error":"session not found"})),
+        QueryError::Missing => (StatusCode::NOT_FOUND, json!({"error":"session not found","code":"session_not_found"})),
+        QueryError::DetailsMissing => (StatusCode::NOT_FOUND, json!({"error":"snapshot does not contain session details","code":"details_missing"})),
         QueryError::Invalid(e) => (
             if e == "index is loading" {
                 StatusCode::SERVICE_UNAVAILABLE
@@ -116,13 +117,23 @@ fn filter(p: &HashMap<String, String>) -> Filter {
         ascending: text(p, "ascending") == "true",
     }
 }
+fn current_device(state: &State, published: &crate::service::Published) -> Value {
+    let mut counts = HashMap::<&str, usize>::new();
+    for session in &published.local.sessions {
+        *counts.entry(session.detail.environment_id.as_str()).or_default() += 1;
+    }
+    let sources: Vec<_> = state.sources.iter().map(|source| {
+        json!({"id":source.id,"label":source.label,"session_count":counts.get(source.id.as_str()).copied().unwrap_or(0)})
+    }).collect();
+    json!({"device_short_code":state.device,"label":state.hostname,"session_count":published.local.sessions.len(),"sources":sources})
+}
 async fn sessions(
     Extract(state): Extract<Arc<State>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
     blocking(state.clone(),move||{
     let(view,published)=state.view(&params,false)?;if text(&params,"snapshot_token")==view.revision{return Ok(StatusCode::NO_CONTENT.into_response())}
-    Ok(response(StatusCode::OK,&json!({"snapshot_token":view.revision,"generated_at":view.generated_at,"codex_home":config::homes_display(&state.sources),"codex_sources":published.sources,"period":view.period,"summary":view.summary()?,"sessions":view.wire_summaries()?,"daily_usage":view.daily_usage,"daily_usage_complete":view.period.key=="all","current_device_short_code":state.device,"remotes":published.remotes})))
+    Ok(response(StatusCode::OK,&json!({"snapshot_token":view.revision,"generated_at":view.generated_at,"codex_home":config::homes_display(&state.sources),"codex_sources":published.sources,"period":view.period,"summary":view.summary()?,"facets":view.facets()?,"sessions":view.wire_summaries()?,"daily_usage":view.daily_usage,"daily_usage_complete":view.period.key=="all","current_device_short_code":state.device,"current_device":current_device(&state,&published),"remotes":published.remotes})))
 }).await
 }
 async fn paged(
@@ -134,7 +145,7 @@ async fn paged(
     let mut page=view.query_sessions(&filter(&params),text(&params,"cursor"),limit(&params)?)?;
     if text(&params,"cursor").is_empty()&&let Ok(offset)=text(&params,"offset").parse::<usize>()&&let Some(cursor)=usage_core::view::anchor_cursor(&page,offset){page=view.query_sessions(&filter(&params),&cursor,limit(&params)?)?;}
     if text(&params,"if_query_token")==page.query_token{return Ok(StatusCode::NO_CONTENT.into_response())}
-    Ok(response(StatusCode::OK,&json!({"page":page,"period":view.period,"generated_at":view.generated_at,"codex_sources":published.sources,"remotes":published.remotes,"current_device_short_code":state.device,"facets":view.summary()?})))
+    Ok(response(StatusCode::OK,&json!({"page":page,"period":view.period,"generated_at":view.generated_at,"codex_sources":published.sources,"remotes":published.remotes,"current_device_short_code":state.device,"current_device":current_device(&state,&published),"facets":view.facets()?,"metric_trend":view.query_metric_trend(&filter(&params))?})))
 }).await
 }
 async fn project_list(
@@ -146,7 +157,7 @@ async fn project_list(
     let mut page=view.query_projects(&filter(&params),text(&params,"cursor"),limit(&params)?)?;
     if text(&params,"cursor").is_empty()&&let Ok(offset)=text(&params,"offset").parse::<usize>()&&let Some(cursor)=usage_core::view::anchor_cursor(&page,offset){page=view.query_projects(&filter(&params),&cursor,limit(&params)?)?;}
     if text(&params,"if_query_token")==page.query_token{return Ok(StatusCode::NO_CONTENT.into_response())}
-    Ok(response(StatusCode::OK,&json!({"page":page,"period":view.period,"generated_at":view.generated_at,"codex_sources":published.sources,"remotes":published.remotes,"current_device_short_code":state.device,"facets":view.summary()?})))
+    Ok(response(StatusCode::OK,&json!({"page":page,"period":view.period,"generated_at":view.generated_at,"codex_sources":published.sources,"remotes":published.remotes,"current_device_short_code":state.device,"current_device":current_device(&state,&published),"facets":view.facets()?,"metric_trend":view.query_metric_trend(&filter(&params))?})))
 }).await
 }
 async fn projects(
@@ -198,17 +209,31 @@ async fn metadata(
 ) -> Response {
     blocking(state.clone(), move || {
         let (view, _) = state.view(&params, true)?;
+        if text(&params, "check_filters") == "true"
+            && !view.session_matches(&filter(&params), text(&params, "id"))?
+        {
+            return Ok(response(StatusCode::NOT_FOUND, &json!({
+                "error":"session excluded by filters", "code":"session_filtered_out"
+            })));
+        }
+        let detail = view.query_session_detail(text(&params, "id"))?;
+        let has_subagents = view.summaries().any(|session| {
+            session.is_subagent
+                && session.environment_id == detail.environment_id
+                && session.root_session_id == detail.identity.session_id
+        });
         if let Some(mut value) = view.legacy_detail(text(&params, "id"))? {
             value.as_object_mut().unwrap().remove("timeline");
             value["revision"] = json!(view.revision);
+            value["has_subagents"] = json!(has_subagents);
             return Ok(response(StatusCode::OK, &value));
         }
-        let detail = view.query_session_detail(text(&params, "id"))?;
         let mut meta = detail.metadata();
         meta.tasks = detail.tasks.clone();
         let mut value = serde_json::to_value(meta)?;
         value.as_object_mut().unwrap().remove("timeline");
         value["revision"] = json!(view.revision);
+        value["has_subagents"] = json!(has_subagents);
         Ok(response(StatusCode::OK, &value))
     })
     .await

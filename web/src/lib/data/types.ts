@@ -38,6 +38,7 @@ export interface Session {
   start_at: string;
   end_at: string;
   updated_at: string | null;
+  last_usage_at?: string | null;
   total_token_usage: Usage;
   last_token_usage: Usage;
   inherited_token_usage: Usage;
@@ -52,17 +53,27 @@ export interface Session {
   duration_ms_total: number;
   time_to_first_token_ms_avg: number | null;
 }
+export interface ModelBreakdown {
+  model: string;
+  usage: Usage;
+  estimated_cost_usd: number | null;
+  cost_complete: boolean;
+}
 export interface Summary {
   session_count: number;
+  main_count?: number;
+  agent_count?: number;
   active_count: number;
   archived_count: number;
   usage: Usage;
   estimated_cost_usd: number;
   estimated_cost_known_count: number;
   by_model: { model: string; sessions: number; usage: Usage }[];
+  model_breakdown?: ModelBreakdown[];
   by_environment: { id: string; label: string; sessions: number; usage: Usage }[];
 }
 export interface Project {
+  updated_at?: string | null;
   key: string;
   label: string;
   session_count: number;
@@ -111,7 +122,15 @@ export interface Remote {
   exported_at: string;
   generated_at: string;
 }
+export interface LocalDevice {
+  device_short_code: string;
+  label: string;
+  session_count: number;
+  sources?: { id: string; label: string; session_count: number }[];
+}
 export interface Listing<T> {
+  current_device?: LocalDevice;
+  metric_trend?: MetricTrend;
   facets?: Summary;
   page: Page<T>;
   period: Period;
@@ -119,6 +138,17 @@ export interface Listing<T> {
   codex_sources: Source[];
   remotes: Remote[];
   current_device_short_code: string;
+}
+export interface MetricTrend {
+  complete: boolean;
+  granularity?: 'day' | 'hour';
+  points: {
+    date: string;
+    end?: string;
+    usage: Usage;
+    session_count: number;
+    estimated_cost_usd: number | null;
+  }[];
 }
 export interface Query {
   offset?: number;
@@ -159,6 +189,7 @@ export interface Chart {
   timeline: { timestamp: string | null; total_token_usage: { total_tokens: number } }[];
 }
 export interface Detail extends Session {
+  has_subagents?: boolean;
   revision: string;
   first_user_prompt: string;
   last_agent_preview: string;
@@ -171,6 +202,8 @@ export interface Detail extends Session {
   inherited_token_event_count: number;
   applied_price_segments: {
     model: string;
+    effective_at?: string | null;
+    effective_until?: string | null;
     service_tier: string;
     estimated_cost_usd: number | null;
     price_known: boolean;
@@ -228,8 +261,9 @@ export interface DashboardData {
     project: string,
     revision: string,
     cursor?: string,
+    limit?: number,
   ): Promise<Page<TaskGroup>>;
-  detail(id: string, revision: string): Promise<DetailBundle>;
+  detail(id: string, revision: string, query?: Query): Promise<DetailBundle>;
   events(id: string, revision: string, cursor: string, offset?: number): Promise<Events>;
   daily(timezone: string): Promise<Daily>;
   importSnapshot(snapshot: unknown, label?: string, allowCurrent?: boolean): Promise<ImportResult>;
