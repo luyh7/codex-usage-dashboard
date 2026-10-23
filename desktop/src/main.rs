@@ -151,6 +151,43 @@ fn save_window(app: &tauri::AppHandle) {
     }
     let _ = usage_runtime::atomic_json(&state.root.join("desktop-settings.json"), &prefs);
 }
+fn offer_source_setup(app: tauri::AppHandle, record: usage_runtime::Record) {
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + usage_runtime::TIMEOUT;
+        while Instant::now() < deadline {
+            if app.state::<Desktop>().closing.load(Ordering::SeqCst) {
+                return;
+            }
+            let Ok(health) = record.health() else {
+                return;
+            };
+            match health["index"]["phase"].as_str() {
+                Some("ready") => {
+                    let empty = usage_runtime::get_json(&format!(
+                        "{}/api/summary?period=all",
+                        record.url()
+                    ))
+                    .ok()
+                    .is_some_and(|summary| summary["summary"]["session_count"] == 0);
+                    let no_source = empty
+                        && usage_runtime::get_json(&format!("{}/api/sources", record.url()))
+                            .ok()
+                            .and_then(|sources| sources.as_array().cloned())
+                            .is_some_and(|sources| {
+                                sources.iter().all(|source| source["status"] != "available")
+                            });
+                    if no_source && let Some(window) = app.get_webview_window("main") {
+                        let _ = window
+                            .navigate(format!("{}/?page=settings", record.url()).parse().unwrap());
+                    }
+                    return;
+                }
+                Some("error") => return,
+                _ => std::thread::sleep(Duration::from_millis(200)),
+            }
+        }
+    });
+}
 fn launch_service(app: &tauri::AppHandle) -> std::result::Result<(), String> {
     let state = app.state::<Desktop>();
     if state.busy.swap(true, Ordering::SeqCst) {
@@ -192,7 +229,9 @@ fn launch_service(app: &tauri::AppHandle) -> std::result::Result<(), String> {
                     "bundled service build mismatch; reinstall the complete application".into(),
                 );
             }
-            let url = format!("{}/", service.record.url()).parse()?;
+            let first_run = !state.root.join("desktop-settings.json").exists();
+            let record = service.record.clone();
+            let url = format!("{}/", record.url()).parse()?;
             app.add_capability(json!({
                 "identifier":format!("service-{}",service.record.instance_id),
                 "local":false,"windows":["main"],"remote":{"urls":[format!("{}/*",service.record.url())]},
@@ -201,6 +240,9 @@ fn launch_service(app: &tauri::AppHandle) -> std::result::Result<(), String> {
             *state.service.lock().unwrap() = Some(service);
             if let Some(window) = app.get_webview_window("main") {
                 window.navigate(url)?;
+            }
+            if first_run {
+                offer_source_setup(app.clone(), record);
             }
             Ok(())
         })();

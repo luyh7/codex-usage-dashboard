@@ -93,6 +93,14 @@ async fn settings() -> Response {
     }
 }
 async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
+    let indexed_homes = state.current.read().unwrap().as_ref().map(|published| {
+        published
+            .local
+            .sessions
+            .iter()
+            .map(|session| session.detail.codex_home.clone())
+            .collect::<std::collections::HashSet<_>>()
+    });
     let sources: Vec<_> = state
         .sources
         .iter()
@@ -101,7 +109,13 @@ async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => "missing",
                 Err(_) => "unreadable",
                 Ok(_) => {
-                    if s.home.join("sessions").is_dir() || s.home.join("archived_sessions").is_dir()
+                    if indexed_homes
+                        .as_ref()
+                        .is_some_and(|homes| !homes.contains(s.home.to_string_lossy().as_ref()))
+                    {
+                        "empty"
+                    } else if s.home.join("sessions").is_dir()
+                        || s.home.join("archived_sessions").is_dir()
                     {
                         "available"
                     } else {

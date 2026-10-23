@@ -5,6 +5,7 @@ import {mkdir,mkdtemp,readFile,writeFile,rm,rename,copyFile} from 'node:fs/promi
 import http from 'node:http';
 import {runtimeDir,cacheDir} from './runtime-paths.mjs';
 import path from 'node:path';
+import os from 'node:os';
 import {gunzipSync} from 'node:zlib';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
@@ -31,6 +32,7 @@ test('managed lifecycle, concurrency, settings, timezone, exports and corrupt re
   const [first,second]=await Promise.all([cli(['summary','--period','all','--json'],env),cli(['summary','--period','all','--json'],env)]);
   for(const result of [first,second]){assert.equal(result.code,0,result.out);assert.equal(result.value.data.summary.usage.total_tokens,120);}
   const r=await record();const base='http://'+r.address;
+  assert((await(await fetch(base+'/api/sources')).json()).some(source=>source.status==='available'));
   const launched=await cli(['--launch','--no-browser','--no-auto-windows'],env,false);
   assert.equal(launched.code,0,launched.err);assert.equal(launched.out.trim(),base+'/');assert.equal((await record()).pid,r.pid);
   assert.notEqual(r.address.split(':').at(-1),'0');
@@ -76,4 +78,23 @@ test('managed lifecycle, concurrency, settings, timezone, exports and corrupt re
   await writeFile(path.join(runtime,'instance.json'),JSON.stringify({...r,address:'127.0.0.1:'+unknown.address().port,pid:process.pid}));
   assert.equal((await cli(['summary','--period','all','--json'],env)).code,0);assert.equal(shutdowns,0);
   assert(unknown.listening);
+});
+
+test('missing and empty session directories are reported without inventing usage',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'cousash-empty-source-'));
+  try{
+    for(const kind of ['missing','empty-sessions']){
+      const state=path.join(dir,kind,'state'),home=path.join(dir,kind,'codex');await mkdir(state,{recursive:true});
+      if(kind==='empty-sessions')await mkdir(path.join(home,'sessions'),{recursive:true});
+      await writeFile(path.join(state,'preferences.json'),JSON.stringify({schema_version:1,codex_homes:[home]}));
+      const env={...process.env,COUSASH_CONFIG_DIR:state,CODEX_HOME:home};
+      try{
+        const result=await cli(['summary','--period','all','--json'],env);assert.equal(result.code,0,result.err);assert.equal(result.value.data.summary.session_count,0);
+        const record=JSON.parse(await readFile(path.join(runtimeDir(state),'instance.json'),'utf8'));
+        const sources=await(await fetch('http://'+record.address+'/api/sources')).json();assert.equal(sources.length,1);assert.equal(sources[0].status,kind==='missing'?'missing':'empty');
+      }finally{
+        await cli(['--stop'],env,false);if(process.platform!=='win32')await rm(cacheDir(state),{recursive:true,force:true});
+      }
+    }
+  }finally{await rm(dir,{recursive:true,force:true});}
 });
