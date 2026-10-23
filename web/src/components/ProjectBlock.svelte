@@ -9,6 +9,7 @@
   import TaskRows from './TaskRows.svelte';
   import RelativeTime from './RelativeTime.svelte';
   import CacheHit from './CacheHit.svelte';
+  import type { ProjectCache } from '../lib/data/projectCache';
   let {
     project,
     showEnvironment,
@@ -23,6 +24,9 @@
     agentExpanded,
     toggleAgent,
     onerror,
+    cache,
+    active = true,
+    zone,
   }: {
     project: Project;
     showEnvironment: boolean;
@@ -37,17 +41,21 @@
     agentExpanded: Set<string>;
     toggleAgent: (id: string) => void;
     onerror: (error: unknown) => void;
+    cache: ProjectCache;
+    active?: boolean;
+    zone: string;
   } = $props();
   let t = $derived(words(lang));
-  let page = $state.raw<Page<TaskGroup> | null>(null);
+  const cached = untrack(() => cache.get(project.key));
+  let page = $state.raw<Page<TaskGroup> | null>(cached?.loadedQuery === JSON.stringify(untrack(() => query)) ? cached.page : null);
   const previewLimit = 5;
-  let showAll = $state(false);
+  let showAll = $state(cached?.showAll ?? false);
   let heading: HTMLButtonElement;
   let visibleTasks = $derived(showAll ? page?.items : page?.items.slice(0, previewLimit));
   let loading = $state(false);
   let error = $state('');
-  let loaded = '';
-  let loadedQuery = '';
+  let loaded = cached?.loaded ?? '';
+  let loadedQuery = cached?.loadedQuery ?? '';
   let sequence = 0;
   let alive = true;
   async function load(q = query, r = revision, all = showAll) {
@@ -79,11 +87,14 @@
   }
   $effect(() => {
     const key = JSON.stringify([query, revision]);
-    if (open && key !== loaded) {
+    if (active && open && key !== loaded) {
       const q = query,
         r = revision;
       untrack(() => {
-        if (JSON.stringify(q) !== loadedQuery) showAll = false;
+        if (JSON.stringify(q) !== loadedQuery) {
+          showAll = false;
+          page = null;
+        }
         void load(q, r);
       });
     }
@@ -106,6 +117,7 @@
     }
   }
   onDestroy(() => {
+    cache.set(project.key, { page, loaded, loadedQuery, showAll });
     alive = false;
     sequence++;
   });
@@ -125,7 +137,7 @@
             value={project.session_count}
             format={(value) => number(Math.round(value), lang)}
           />
-          {t.sessionCount}<span><RelativeTime value={project.updated_at} {lang} zone={query.timezone} /></span></small
+          {t.sessionCount}<span><RelativeTime value={project.updated_at} {lang} {zone} /></span></small
         ></span
       ></span
     >
@@ -146,7 +158,7 @@
       {#if page}
         <div class="project-tasks">
           {#each visibleTasks ?? [] as group (group.identity)}<TaskRows
-              zone={query.timezone}
+              {zone}
               {group}
               {selected}
               {select}

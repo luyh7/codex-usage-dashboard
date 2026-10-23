@@ -68,6 +68,18 @@ test('unchanged responses do not replace data; revision mismatch is explicit', a
   );
 });
 
+test('typing invalidates an in-flight listing before the debounced replacement starts', async () => {
+  let finish!: (response: Response) => void;
+  const data = new HttpDashboard('', (() => new Promise<Response>(resolve => {
+    finish = resolve;
+  })) as typeof fetch);
+  const pending = data.projects(query).catch(error => error);
+  data.cancelListing();
+  // Some transports still complete despite AbortController cancellation.
+  finish(Response.json({ page: { revision: 'obsolete' } }));
+  assert(cancelled(await pending));
+});
+
 test('snapshot files upload unchanged with encoded labels and confirmation on retry', async () => {
   const file = new Blob([new Uint8Array([0x1f, 0x8b, 0x08])], { type: 'application/gzip' });
   let calls = 0;

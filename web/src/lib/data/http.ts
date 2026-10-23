@@ -92,13 +92,16 @@ export class HttpDashboard implements DashboardData {
       if (this.active.get(channel) === controller) this.active.delete(channel);
     }
   }
-  projects(query: Query, cursor = '', revision = '', conditional = '') {
+  projects(query: Query, cursor = '', revision = '', conditional = '', limit = 30) {
     return this.get<Listing<Project>>(
       'listing',
       '/api/v2/projects',
-      { ...query, cursor, revision, if_query_token: conditional, limit: 30 },
+      { ...query, cursor, revision, if_query_token: conditional, limit },
       revision || undefined,
     );
+  }
+  cancelListing() {
+    this.cancel('listing');
   }
   sessions(query: Query, cursor = '', revision = '', conditional = '') {
     return this.get<Listing<Session>>(

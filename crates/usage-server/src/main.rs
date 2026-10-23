@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "UTC".into())
         .parse()?;
     let sources = config::sources(&args.codex_home, !args.no_auto_windows);
-    // Claim the fixed port before opening the index. A previous Windows/WSL
+    // Claim the requested port before opening the index. A previous Windows/WSL
     // binding can outlive its process, and waiting must not hold the index lock.
     let listener = if args.serve {
         let address = SocketAddr::new(args.host.parse()?, args.port);

@@ -249,6 +249,7 @@ export interface DashboardData {
     cursor?: string,
     revision?: string,
     conditional?: string,
+    limit?: number,
   ): Promise<Listing<Project> | null>;
   sessions(
     query: Query,

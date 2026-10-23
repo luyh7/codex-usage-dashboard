@@ -41,10 +41,14 @@
   import Calendar from './components/Calendar.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
   import SettingsPage from './components/SettingsPage.svelte';
+  import VirtualProjects from './components/VirtualProjects.svelte';
+  import { ProjectCache } from './lib/data/projectCache';
   const data = new HttpDashboard();
+  const projectCache = new ProjectCache();
   const initial = fromUrl();
   let page = $state(initial.page);
   let query = $state.raw<Query>(initial.query);
+  let displayedQuery = $state.raw<Query>(initial.query);
   let mode = $state<'projects' | 'sessions'>(initial.mode);
   let selected = $state(initial.selected);
   let displayedMode = $state<'projects' | 'sessions'>(initial.mode);
@@ -66,6 +70,13 @@
     detailRetryable = $state(true),
     calendar = $state(false),
     newData = $state(false);
+  let slowLoading = $state(false);
+  let moreLoading = $state(false);
+  let moreError = $state('');
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  let progressTimer: ReturnType<typeof setTimeout> | undefined;
+  const queryKey = (value: Query) => JSON.stringify({ ...value, offset: 0 });
+  let pendingResults = $derived(!!listing && (mode !== displayedMode || queryKey(query) !== queryKey(displayedQuery)));
   let expanded = $state.raw(new Set<string>()),
     agents = $state.raw(new Set<string>());
   let expansionScope = '';
@@ -130,17 +141,28 @@
     save('agents:' + expansionScope, [...next]);
   }
   async function load(refresh = false, nextCursor = '') {
+    if (refresh && (loading || moreLoading || searchTimer)) return;
+    clearTimeout(searchTimer);
+    searchTimer = undefined;
+    clearTimeout(progressTimer);
+    if (refresh && pendingResults) refresh = false;
     const seq = ++listSequence;
     const requestedMode = mode;
+    const requestedQuery = { ...query };
+    const previousCount = refresh && displayedMode === 'projects' ? listing?.page.items.length || 30 : 30;
+    data.cancelListing();
+    moreLoading = false;
+    moreError = '';
     loading = true;
+    progressTimer = setTimeout(() => { if (seq === listSequence) slowLoading = true; }, 150);
     error = '';
     const currentRevision = nextCursor ? revision : '';
     const conditional = refresh ? listing?.page.query_token : undefined;
-    const requestQuery = refresh ? { ...query, offset: listing?.page.offset || 0 } : query;
+    const requestQuery = refresh ? { ...requestedQuery, offset: listing?.page.offset || 0 } : requestedQuery;
     try {
       let result =
         mode === 'projects'
-          ? await data.projects(requestQuery, nextCursor, currentRevision, conditional)
+          ? await data.projects(requestQuery, nextCursor, currentRevision, conditional, Math.min(100, previousCount))
           : await data.sessions(requestQuery, nextCursor, currentRevision, conditional);
       if (seq !== listSequence || !alive) return;
       if (!result) {
@@ -151,17 +173,18 @@
         const projects = result as Listing<Project>;
         const items = [...projects.page.items];
         let next = projects.page.next_cursor;
-        while (next) {
-          const more = await data.projects(requestQuery, next, projects.page.revision);
+        while (next && items.length < previousCount) {
+          const more = await data.projects(requestQuery, next, projects.page.revision, '', 100);
           if (seq !== listSequence || !alive || !more) return;
           items.push(...more.page.items);
           next = more.page.next_cursor;
         }
-        result = { ...projects, page: { ...projects.page, items, next_cursor: null, previous_cursor: null } };
+        result = { ...projects, page: { ...projects.page, items, next_cursor: next, previous_cursor: null } };
       }
       const changedRevision = result.page.revision !== revision;
       listing = result;
       displayedMode = requestedMode;
+      displayedQuery = requestedQuery;
       cursor = nextCursor;
       newData = false;
       loadExpansion(result.current_device_short_code);
@@ -185,7 +208,34 @@
         }
       }
     } finally {
-      if (seq === listSequence && alive) loading = false;
+      if (seq === listSequence && alive) {
+        loading = false;
+        slowLoading = false;
+        clearTimeout(progressTimer);
+      }
+    }
+  }
+  async function loadMoreProjects() {
+    if (loading || moreLoading || pendingResults || moreError || displayedMode !== 'projects' || !listing?.page.next_cursor) return;
+    const previous = listing as Listing<Project>;
+    const seq = listSequence;
+    moreLoading = true;
+    try {
+      const result = await data.projects(displayedQuery, previous.page.next_cursor!, previous.page.revision);
+      if (!alive || seq !== listSequence || listing !== previous || !result) return;
+      listing = { ...previous, page: { ...previous.page, items: [...previous.page.items, ...result.page.items], next_cursor: result.page.next_cursor } };
+      if (!stored('projects:' + expansionScope, null))
+        expanded = new Set([...expanded, ...result.page.items.map(project => project.key)]);
+    } catch (e) {
+      if (!cancelled(e) && seq === listSequence) {
+        if (e instanceof DataError && e.stale) {
+          moreLoading = false;
+          void load(true);
+        }
+        else moreError = String(e);
+      }
+    } finally {
+      if (seq === listSequence) moreLoading = false;
     }
   }
   let detailTrigger: HTMLElement | null = null;
@@ -277,7 +327,16 @@
       lastSearch = Date.now();
     }
     persist(replace);
-    void load();
+    if (key === 'search' && value) {
+      clearTimeout(searchTimer);
+      clearTimeout(progressTimer);
+      data.cancelListing();
+      listSequence++;
+      moreLoading = false;
+      loading = true;
+      progressTimer = setTimeout(() => slowLoading = true, 150);
+      searchTimer = setTimeout(() => { searchTimer = undefined; void load(); }, 180);
+    } else void load();
   }
   function switchMode(value: 'projects' | 'sessions') {
     if (mode === value) return;
@@ -307,7 +366,7 @@
     page = next;
     persist();
     await tick();
-    document.querySelector<HTMLElement>('main h1')?.focus({ preventScroll: true });
+    document.querySelector<HTMLElement>(next === 'settings' ? '.settings-header h1' : '.overview-page h1')?.focus({ preventScroll: true });
   }
   function childError(e: unknown) {
     if (e instanceof DataError && e.stale) {
@@ -421,6 +480,8 @@
     window.addEventListener('popstate', back);
     return () => {
       alive = false;
+      clearTimeout(searchTimer);
+      clearTimeout(progressTimer);
       clearInterval(poll);
       unsubscribe();
       data.close();
@@ -460,7 +521,8 @@
         languageChanged={(value) => lang = value}
         timezoneChanged={(value) => { save('timezone', value); change('timezone', value); }}
         changed={() => load()} />
-    {:else}
+    {/if}
+    <div class="overview-page" hidden={page !== 'overview'} inert={page !== 'overview'}>
     <header class="page-header">
       <div class="page-title">
         <h1 tabindex="-1"><img class="brand-title" src={brandTitle} width="118" height="50" alt="Codex Usage Dashboard" /></h1>
@@ -520,9 +582,11 @@
     </GlobalFilters>
     </header>
     {#if status.error}<p class="error" role="alert">{status.error}</p>{/if}
+    <div class="results" class:pending={pendingResults}>
     <Metrics {summary} {lang} trend={listing?.metric_trend} period={listing?.period ?? null} />
     <div class="workspace" class:with-detail={!!selected}>
       <section id="usage-browser" class="browser-pane" aria-busy={loading}>
+        {#if slowLoading}<div class="results-progress" aria-hidden="true"></div>{/if}
         <header class="list-heading">
           <div>
             <h2>{t.conversationUsage}</h2>
@@ -542,10 +606,10 @@
             </div>
           <span
             class="index-status"
-            class:working={indexPhase !== 'ready'}
-            data-tooltip={listing ? dateTime(listing.generated_at, query.timezone, lang) : ''}
+            class:working={slowLoading || indexPhase !== 'ready'}
+            data-tooltip={pendingResults ? t.previousResults : listing ? dateTime(listing.generated_at, query.timezone, lang) : ''}
             role="status"
-            ><span class="status-dot"></span>{#if indexPhase === 'ready'}<span
+            ><span class="status-dot"></span>{#if slowLoading}{t.updating}{:else if indexPhase === 'ready'}<span
                 >{t.ready}{#if listing}{' '}
                   <time datetime={listing.generated_at}>{updatedTime}</time>{/if}</span
               >{:else}{indexPhase === 'error'
@@ -583,11 +647,17 @@
                   class="numeric">{t.cost}{#if query.sort === 'cost'}<Icon name="arrow" size={15} />{/if}</span
                 ><span class="numeric cache-column">{t.cacheHit}</span>
               </div>{/if}
-            {#each listing.page.items as Project[] as project (project.key)}
+            <VirtualProjects projects={listing.page.items as Project[]} scope={queryKey(displayedQuery)}
+              active={page === 'overview'} more={!!listing.page.next_cursor} loading={loading || moreLoading || !!moreError}
+              loadMore={() => void loadMoreProjects()}>
+            {#snippet row(project)}
               <ProjectBlock
                 {project}
                 {showEnvironment}
-                {query}
+                query={displayedQuery}
+                zone={query.timezone}
+                cache={projectCache}
+                active={page === 'overview' && !loading}
                 {revision}
                 {data}
                 {selected}
@@ -599,7 +669,10 @@
                 {toggleAgent}
                 onerror={childError}
               />
-            {/each}
+            {/snippet}
+            </VirtualProjects>
+            {#if moreLoading}<div class="project-load-state" role="status">{t.loading}</div>{/if}
+            {#if moreError}<p class="error" role="alert">{moreError} <button onclick={() => { moreError = ''; void loadMoreProjects(); }}>{t.retry}</button></p>{/if}
           {:else if listing && listing.page.total}
             <div class="table-scroll">
               <table class="sessions-table">
@@ -686,6 +759,7 @@
           {data}
           close={closeDetail}
           retry={() => openDetail(selected, false)}
+          active={page === 'overview'}
           onerror={childError}
         />
       {:else}<aside class="detail-placeholder">
@@ -693,7 +767,8 @@
           <h2>{t.selectSession}</h2>
         </aside>{/if}
     </div>
-    {/if}
+    </div>
+    </div>
     <footer>
       <span><Icon name="shield" size={14} />{t.localOnly} · {t.estimatedHint}</span>
     </footer>

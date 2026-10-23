@@ -19,6 +19,7 @@
     showEnvironment,
     projectView,
     loading,
+    active = true,
     error,
     retryable = true,
     lang,
@@ -32,6 +33,7 @@
     showEnvironment: boolean;
     projectView: boolean;
     loading: boolean;
+    active?: boolean;
     error: string;
     retryable?: boolean;
     lang: Language;
@@ -62,13 +64,14 @@
     const update = () => {
       const entering = media.matches && !mobile;
       mobile = media.matches;
-      if (entering) void tick().then(() => panel?.focus());
+      if (active && entering) void tick().then(() => { if (active) panel?.focus(); });
     };
     update();
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   });
   function keyboard(event: KeyboardEvent) {
+    if (!active) return;
     if (document.querySelector('dialog[open], .calendar-panel')) return;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -92,7 +95,7 @@
     }
   }
   $effect(() => {
-    if (!mobile) return;
+    if (!active || !mobile) return;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {

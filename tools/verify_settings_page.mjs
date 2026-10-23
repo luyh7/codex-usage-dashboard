@@ -7,6 +7,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || '../benchmark
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined, headless: true });
 const context = await browser.newContext({ viewport: { width: 1536, height: 960 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai', reducedMotion: 'reduce' });
 await installMintFixture(context);
+await context.route('**/api/security/token', route => route.fulfill({ json: { token: 'settings-fixture-token' } }));
 let remotes = [];
 await context.route('**/api/v2/projects?**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
   page: { items: [], summary: summary(sessions), total: 0, offset: 0, limit: 100, revision: 'settings-test', query_token: 'settings-test' },
@@ -17,6 +18,7 @@ await context.route('**/api/v2/projects?**', route => route.fulfill({ contentTyp
 }) }));
 await context.route('**/api/remotes/**', route => {
   const request = route.request(), url = new URL(request.url());
+  assert.equal(request.headers()['x-codex-write-token'], 'settings-fixture-token');
   const json = value => route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) });
   if (url.pathname.endsWith('import-file')) {
     assert.ok(request.postDataBuffer().length > 0);
@@ -36,13 +38,21 @@ page.setDefaultTimeout(8000);
 const errors = [], checks = [];
 page.on('pageerror', error => errors.push(String(error)));
 const output = 'output/verification/settings-page';
+const base = process.env.DASHBOARD_URL || 'http://127.0.0.1:8765';
 await mkdir(output, { recursive: true });
 try {
-  await page.goto('http://127.0.0.1:8765/?period=week&session=main&view=sessions&timezone=Asia%2FShanghai');
+  await page.goto(base + '/?period=week&session=main&view=sessions&timezone=Asia%2FShanghai');
   await page.locator('.sessions-table').waitFor();
+  await page.locator('.detail-scroll').waitFor();
+  await page.locator('.detail-panel').evaluate(el => window.__retainedDetail = el);
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('heading', { name: '设置', exact: true }).waitFor();
-  assert.equal(await page.locator('dialog, .preferences, .metrics, .detail-panel').count(), 0);
+  assert.equal(await page.locator('dialog:visible, .preferences:visible, .metrics:visible, .detail-panel:visible').count(), 0);
+  await page.keyboard.press('Escape');
+  assert.equal(new URL(page.url()).searchParams.get('session'), 'main', 'A retained hidden detail must not handle settings keyboard events');
+  await page.getByRole('button', { name: '概览', exact: true }).click();
+  assert.equal(await page.locator('.detail-panel').evaluate(el => el === window.__retainedDetail), true);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   assert.equal(await page.locator('.main-nav [aria-current="page"]').getAttribute('aria-label'), '设置');
   assert.equal(new URL(page.url()).searchParams.get('page'), 'settings');
   const localDevice = page.locator('.local-device-row');
@@ -51,7 +61,9 @@ try {
   const localSources = localDevice.locator('.local-sources li');
   assert.deepEqual(await localSources.allTextContents(), ['Windows23 会话数', 'WSL100 会话数']);
   assert.equal(await localDevice.getByText('本机', { exact: true }).count(), 1);
-  assert.equal(await localDevice.getByRole('button').count(), 1);
+  assert.equal(await localDevice.getByRole('button').count(), 2);
+  assert.equal(await localDevice.getByRole('button', { name: '完整导出', exact: true }).count(), 1);
+  assert.equal(await localDevice.getByRole('button', { name: '脱敏导出', exact: true }).count(), 1);
   assert.equal(await page.locator('.remote-actions').getByRole('button').count(), 1);
   await page.reload();
   await page.getByRole('heading', { name: '设置', exact: true }).waitFor();
@@ -83,7 +95,7 @@ try {
   await page.keyboard.press('Enter');
   assert.equal(new URL(page.url()).searchParams.get('timezone'), 'UTC');
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cousash:v2:timezone'))), 'UTC');
-  await page.goto('http://127.0.0.1:8765/?page=settings');
+  await page.goto(base + '/?page=settings');
   await zone.waitFor();
   assert.equal(await zone.innerText(), '协调世界时 (UTC+00:00)');
   await zone.click();
@@ -113,11 +125,11 @@ try {
   await page.locator('.remote-row').getByText('Test laptop', { exact: true }).waitFor();
   const importedDevice = page.locator('.imported-device-row');
   assert.equal(await importedDevice.getByText('外部导入', { exact: true }).count(), 1);
-  assert.equal(await importedDevice.getByRole('button', { name: '导出本机快照', exact: true }).count(), 0);
+  assert.equal(await importedDevice.getByRole('button', { name: /完整导出|脱敏导出/ }).count(), 0);
   assert.match(await localDevice.innerText(), /this-device · 123 会话数/);
   assert.deepEqual(await localSources.allTextContents(), ['Windows23 会话数', 'WSL100 会话数']);
   checks.push('Windows and WSL have separate local counts that persist across import and language changes');
-  const exportBounds = await localDevice.getByRole('button').boundingBox();
+  const exportBounds = await localDevice.getByRole('button', { name: '完整导出', exact: true }).boundingBox();
   const nameBounds = await localDevice.locator('.device-name').boundingBox();
   assert.ok(exportBounds.x >= nameBounds.x + nameBounds.width, 'Export is to the right of local device data');
   checks.push('Local identity and unfiltered session count stay distinct from imports; only the local row exports');
@@ -127,7 +139,7 @@ try {
   await page.locator('.remote-row').getByText('Renamed laptop', { exact: true }).waitFor();
   await page.screenshot({ path: `${output}/desktop.png` });
   const downloadEvent = page.waitForEvent('download');
-  await page.getByRole('button', { name: '导出本机快照', exact: true }).click();
+  await localDevice.getByRole('button', { name: '完整导出', exact: true }).click();
   assert.equal((await downloadEvent).suggestedFilename(), 'settings-test.json.gz');
   await page.locator('.remote-row').getByRole('button', { name: '删除', exact: true }).click();
   await page.locator('.remote-row').getByRole('button', { name: '取消', exact: true }).click();

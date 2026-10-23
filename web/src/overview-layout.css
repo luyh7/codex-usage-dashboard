@@ -1,4 +1,14 @@
 /* Overview is the shared visual baseline; lists and details scroll within the viewport. */
+.overview-page, .results { display: contents; }
+.overview-page[hidden] { display: none; }
+.browser-pane { position: relative; }
+.results .metrics, .results .browser-scroll { transition: opacity 140ms ease-out; }
+.results.pending .metrics, .results.pending .browser-scroll { opacity: .64; }
+.results-progress { position: absolute; z-index: 5; left: 0; right: 0; top: 0; height: 2px; overflow: hidden; background: #00a46918; }
+.results-progress::after { content: ''; display: block; height: 100%; width: 35%; background: var(--accent); animation: results-loading 1.1s ease-in-out infinite; }
+.project-load-state { min-height: 32px; padding: 8px 12px; color: var(--muted); font-size: 12px; }
+@keyframes results-loading { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
+@media (prefers-reduced-motion: reduce) { .results-progress::after { animation: none; width: 100%; } .results .metrics, .results .browser-scroll { transition: none; } }
 :root {
   font-size: 14px;
   --row-height: 42px;

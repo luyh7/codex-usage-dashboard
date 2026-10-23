@@ -5,6 +5,7 @@ import { installMintFixture, session, sessions, summary, stamp } from './fixture
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || '../benchmarks/refactor/frontend/node_modules/playwright/index.mjs');
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined, headless: true });
 const output = 'output/verification/project-expansion';
+const base = process.env.DASHBOARD_URL || 'http://127.0.0.1:8765';
 await mkdir(output, { recursive: true });
 const context = await browser.newContext({ viewport: { width: 1536, height: 800 }, locale: 'zh-CN', reducedMotion: 'reduce' });
 await installMintFixture(context);
@@ -42,9 +43,9 @@ const pinned = async block => {
   assert.ok(Math.abs(delta) < 2, `Project heading sticks below columns: ${delta}`);
 };
 try {
-  await page.goto('http://127.0.0.1:8765/?period=all&timezone=Asia%2FShanghai');
+  await page.goto(base + '/?period=all&timezone=Asia%2FShanghai');
   await checkCount(0, 5);
-  assert.equal(await page.locator('.project-block').count(), 33, 'Every project is present beyond the old 30-project page');
+  assert.ok(await page.locator('.project-block').count() <= 30, 'Only nearby projects are mounted');
   assert.equal(await page.locator('.pager').count(), 0);
   assert.equal(await first.locator('.agent-row').count(), 3, 'Subagents stay attached to their main task and do not consume preview slots');
   assert.match(await first.locator('.project-more').innerText(), /200/);
@@ -58,6 +59,10 @@ try {
   await pinned(first);
   await page.screenshot({ path: `${output}/sticky-expanded.png` });
 
+  await first.locator('.project-more').click();
+  await checkCount(0, 5);
+  assert.equal(await first.locator('.project-more').getAttribute('aria-expanded'), 'false');
+
   await second.locator('.project-heading').click();
   await checkCount(1, 5);
   assert.equal(await second.locator('.project-more').count(), 0, 'Exactly five tasks need no expansion control');
@@ -68,9 +73,6 @@ try {
   await pinned(second);
   assert.ok((await first.locator('.project-heading').boundingBox()).y < (await second.locator('.project-heading').boundingBox()).y);
 
-  await first.locator('.project-more').click();
-  await checkCount(0, 5);
-  assert.equal(await first.locator('.project-more').getAttribute('aria-expanded'), 'false');
   const tasksBeforeReopen = requests.filter(r => r.project === 'web-app').length;
   await first.locator('.project-more').click();
   await checkCount(0, 205);
@@ -106,7 +108,7 @@ try {
   assert.equal(await first.locator('.project-more').getAttribute('aria-expanded'), 'false', 'A new filter starts with five tasks');
   assert.deepEqual(errors, []);
   await writeFile(`${output}/checks.json`, JSON.stringify({ passed: true, projects: 33, expandedTasks: 205, viewports: [1536, 390, 320], errors, requests }, null, 2));
-  console.log('PASS: all 33 projects, five-task preview, 205-task expansion, collapse/reopen, live refresh, subagents and desktop/mobile sticky headings');
+  console.log('PASS: virtual projects, five-task preview, 205-task expansion, collapse/reopen, live refresh, subagents and desktop/mobile sticky headings');
 } catch (error) {
   await page.screenshot({ path: `${output}/failure.png` });
   throw error;

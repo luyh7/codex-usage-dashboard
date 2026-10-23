@@ -4,7 +4,7 @@ import { installMintFixture } from './fixtures/clear_mint.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || '../benchmarks/refactor/frontend/node_modules/playwright/index.mjs');
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined, headless: true });
-const origin = 'http://127.0.0.1:8765';
+const origin = process.env.DASHBOARD_URL || 'http://127.0.0.1:8765';
 const output = 'output/verification/detail-filters';
 await mkdir(output, { recursive: true });
 const context = await browser.newContext({ viewport: { width: 1536, height: 1024 }, locale: 'zh-CN', reducedMotion: 'reduce' });
