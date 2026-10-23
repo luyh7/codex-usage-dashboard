@@ -100,7 +100,7 @@ try {
  const before=await readFile(path.join(runtime,'manifest.json'),'utf8');
  assert.equal(run(process.execPath,[install,'--runtime-manifest',path.join(bad,'manifest.json'),'--offline'],false),null);
  assert.equal(await readFile(path.join(runtime,'manifest.json'),'utf8'),before);assert.equal((await health()).pid,pid);checks.push('checksum failure preserves install and running process');
- // Legacy installed files disappear only after a successful native upgrade.
+ // An upgrade preserves obsolete files that may contain user changes.
  await writeFile(path.join(skill,'scripts/open_dashboard.py'),'obsolete');await mkdir(path.join(config,'remotes'),{recursive:true});await writeFile(path.join(config,'remotes/preserve.txt'),'sentinel');
  run(process.execPath,[...installArgs,'--force']);assert.equal(await readFile(path.join(skill,'scripts/open_dashboard.py'),'utf8'),'obsolete');assert.equal(await readFile(path.join(config,'remotes/preserve.txt'),'utf8'),'sentinel');checks.push('upgrade preserves obsolete files and external user data');
  // Skills CLI updates can leave a previous runtime behind. Mock release transport
@@ -119,9 +119,9 @@ try {
  checks.push('fresh skill-only installation downloads and verifies the same release executable (mock HTTPS transport)');
  assert.equal(run(process.execPath,['--import',pathToFileURL(transport).href,ensure,'--ensure']).trim(),binary);
  assert.equal(JSON.parse(await readFile(path.join(runtime,'manifest.json'),'utf8')).version,manifest.version);
- assert(!(await readdir(path.join(skill,'scripts'))).includes('open_dashboard.py'));
+ assert.equal(await readFile(path.join(skill,'scripts/open_dashboard.py'),'utf8'),'obsolete');
  run(binary,launchArgs);assert.equal((await health()).ui,'svelte');
- checks.push('skills CLI update replaces stale runtime with the skill release and cleans old backend');
+ checks.push('skills CLI update replaces stale runtime with the skill release and preserves obsolete files');
  run(process.execPath,installArgs);run(binary,launchArgs);run(process.execPath,[path.join(skill,'scripts/install_runtime.mjs'),'--rollback']);run(binary,launchArgs);checks.push('verified native-only rollback');
  // Explicit source changes must replace the service even for the same build.
  const oldPid=(await health()).pid;const empty=path.join(tmp,'empty');await mkdir(empty);
