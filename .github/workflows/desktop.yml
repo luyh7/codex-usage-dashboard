@@ -40,6 +40,12 @@ jobs:
       - run: node tools/desktop.mjs bundle
         env:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+      - name: Desktop Rust formatting and all-feature checks
+        run: |
+          cargo fmt --manifest-path desktop/Cargo.toml -- --check
+          cargo clippy --manifest-path desktop/Cargo.toml --release --all-features --target ${{ matrix.target }} -- -D warnings
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/target
       - name: Native desktop startup and duplicate launch
         if: runner.os != 'Linux'
         run: |
