@@ -2,7 +2,7 @@
 // Fresh installation and real native lifecycle, on 8765, with no Python on PATH.
 import assert from 'node:assert/strict';
 import {execFileSync,spawn} from 'node:child_process';
-import {mkdtemp,mkdir,readFile,writeFile,rm,copyFile,readdir,chmod} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,copyFile,readdir,chmod,realpath} from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -19,7 +19,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const until=async test=>{const end=Date.now()+60000;while(!await test()){if(Date.now()>end)throw Error('Timed out');await sleep(50)}};
 if(replace) execFileSync(worktree,['--stop']);
 assert(!await occupied(),'8765 must be free; existing process was not stopped');
-const tmp=await mkdtemp(path.join(os.tmpdir(),'native-only-'));
+const tmp=await realpath(await mkdtemp(path.join(os.tmpdir(),'native-only-')));
 const codex=path.join(tmp,'codex');await mkdir(path.join(codex,'sessions'),{recursive:true});
 const config=path.join(tmp,'config');
 const emptyPath=path.join(tmp,'no-interpreters');await mkdir(emptyPath);
