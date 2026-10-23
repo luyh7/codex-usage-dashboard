@@ -23,7 +23,7 @@ use std::{
 };
 
 const SCHEMA_VERSION: &str = "1";
-const PARSER_VERSION: &str = "4";
+const PARSER_VERSION: &str = "6";
 const MARKER_BYTES: u64 = 4096;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventIndex {

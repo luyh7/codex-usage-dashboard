@@ -31,11 +31,24 @@ export function tooltipPosition(
   };
 }
 
+/** Center numeric hints over their painted values rather than the whole column. */
+function valueRect(anchor: Element) {
+  const value = anchor.querySelector('.animated-value, .event-field-value') ?? anchor;
+  const box = value.getBoundingClientRect();
+  const range = document.createRange();
+  range.selectNodeContents(value);
+  const text = range.getBoundingClientRect();
+  if (!text.width || !text.height) return box;
+  const left = Math.max(box.left, text.left), right = Math.min(box.right, text.right);
+  const top = Math.max(box.top, text.top), bottom = Math.min(box.bottom, text.bottom);
+  return right > left && bottom > top ? { left, right, top, bottom, width: right - left, height: bottom - top } : box;
+}
+
 /** One shared, unclipped tooltip surface for text and structured metric hints. */
 export function openTooltip(
   anchor: Element,
   content: string | Node,
-  { className = 'ui-tooltip', side, x, y, onClose }: TooltipOptions & { className?: string; onClose?: () => void } = {},
+  { className = 'ui-tooltip', side, x, y, reference = anchor, onClose }: TooltipOptions & { className?: string; reference?: Element; onClose?: () => void } = {},
 ) {
   dismissActive?.();
   const surface = document.createElement('div');
@@ -54,13 +67,16 @@ export function openTooltip(
 
   function place(pointerX = x, pointerY = y) {
     if (closed) return;
-    if (!anchor.isConnected) return close();
+    if (!anchor.isConnected || !reference.isConnected) return close();
     // Content updates use the latest pointer position, including after pointermove.
     x = pointerX;
     y = pointerY;
-    const position = tooltipPosition(anchor.getBoundingClientRect(), surface.getBoundingClientRect(),
+    const placement = side ?? (anchor.closest('.sidebar') && innerWidth > 760 ? 'right' : 'top');
+    const rect = className === 'ui-tooltip' && placement === 'top' && !reference.matches('button, summary')
+      ? valueRect(reference) : reference.getBoundingClientRect();
+    const position = tooltipPosition(rect, surface.getBoundingClientRect(),
       { width: innerWidth, height: innerHeight },
-      { side: side ?? (anchor.closest('.sidebar') && innerWidth > 760 ? 'right' : 'top'), x, y });
+      { side: placement, x, y });
     surface.style.left = `${position.left}px`;
     surface.style.top = `${position.top}px`;
   }
@@ -124,8 +140,14 @@ export function tooltips(root: HTMLElement) {
   function find(node: EventTarget | null) {
     if (!(node instanceof Element)) return null;
     if (node.closest('[data-tooltip-managed]')) return null;
-    const element = node.closest('[data-tooltip], button[aria-label], summary[aria-label]');
-    return element && root.contains(element) && text(element) ? element : null;
+    let element = node.closest('[data-tooltip], button[aria-label], summary[aria-label]');
+    while (element && root.contains(element)) {
+      if (element.hasAttribute('data-tooltip')) return text(element) ? element : null;
+      if (text(element)) return element;
+      // A named button inside a numeric cell must not swallow the cell's hint.
+      element = element.parentElement?.closest('[data-tooltip], button[aria-label], summary[aria-label]') ?? null;
+    }
+    return null;
   }
   function hide() {
     active?.close();
@@ -149,6 +171,8 @@ export function tooltips(root: HTMLElement) {
     if (!target.isConnected || !text(target)) hide();
     else if (records.some(record => record.type === 'attributes' && record.target === target))
       active?.update(text(target));
+    else if (records.some(record => record.type === 'childList' && target!.contains(record.target)))
+      active?.place();
   });
   observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-overflow', 'aria-label'] });
   root.addEventListener('pointerover', over);

@@ -104,6 +104,8 @@ Re-importing a newer snapshot updates that device's data. Imported snapshots liv
 
 ## Understanding the numbers
 
+Estimated output speed appears in the overview, in usage-value tooltips on the left, and in the final `tok/s` column of the session event table. It reconstructs request windows from logs, excluding tool execution and user idle time where possible. Matching `token_usage_record` timestamps identify response completion; older logs use `token_count`, or the last model output if the counter was delayed until tool completion. Timing starts at the earliest model output's `item_completed.started_at_ms` when available (including reasoning); otherwise it includes first-token wait. Hover or focus the overview speed for coverage of each method. Positive output deltas require a valid window of at least 100 ms with first-token timing, or 1 second without it, and at most 1 hour. There is no minimum output-token count. Aggregates divide total output by total timed duration, follow date/model filters, and exclude duplicate snapshots and inherited history. Unknown timing shows `—`. Log timestamps remain an estimate, especially with buffering or hidden reasoning.
+
 - **Costs are estimates.** They use public API pricing and the model, context, and service tier recorded in the logs. They are not your ChatGPT/Codex subscription bill or remaining quota.
 - **Reasoning is part of output.** It is shown as a breakdown, not charged a second time.
 - **Coverage follows saved logs.** Temporary `ephemeral` side chats are not included because they do not persist the session logs this dashboard reads.

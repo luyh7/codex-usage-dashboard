@@ -151,6 +151,8 @@ pub struct Page<'a, T: Serialize> {
 }
 #[derive(Serialize)]
 pub struct ProjectRow {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_speed: Option<crate::speed::SpeedTotals>,
     pub key: String,
     pub label: String,
     pub session_count: usize,
@@ -387,6 +389,7 @@ impl View {
                     let mut detail_shape = wire.detail.clone();
                     detail_shape.include(&[
                         "period_start_at",
+                        "estimated_speed",
                         "period_end_at",
                         "total_token_usage",
                         "last_token_usage",
@@ -886,6 +889,7 @@ impl View {
             let index = *keys.entry(key).or_insert(next);
             if index == next {
                 rows.push(ProjectRow {
+                    estimated_speed: None,
                     key: key.into(),
                     label: session.project.clone(),
                     session_count: 0,
@@ -907,6 +911,11 @@ impl View {
                     .map(|time| time.to_rfc3339());
             }
             row.usage = row.usage.checked_add(session.total_token_usage)?;
+            if let Some(speed) = &session.estimated_speed {
+                row.estimated_speed
+                    .get_or_insert_with(Default::default)
+                    .checked_add(speed)?;
+            }
             if let Some(cost) = session.estimated_cost_usd {
                 row.estimated_cost_usd += cost;
                 row.estimated_cost_known_count += 1;

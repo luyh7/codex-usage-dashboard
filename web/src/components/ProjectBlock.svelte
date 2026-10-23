@@ -9,6 +9,7 @@
   import TaskRows from './TaskRows.svelte';
   import RelativeTime from './RelativeTime.svelte';
   import CacheHit from './CacheHit.svelte';
+  import { usageSpeedHint } from '../lib/domain/speed';
   import type { ProjectCache } from '../lib/data/projectCache';
   let {
     project,
@@ -141,7 +142,7 @@
         ></span
       ></span
     >
-    <span class="numeric" data-tooltip={number(project.usage.total_tokens, lang)}
+    <span class="numeric" data-tooltip={usageSpeedHint(project.estimated_speed, lang)}
       ><AnimatedValue value={project.usage.total_tokens} format={compactNumber} /></span
     >
     <span class="numeric project-cost" data-tooltip={money(project.estimated_cost_usd, lang)}

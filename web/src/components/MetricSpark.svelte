@@ -116,7 +116,7 @@
           />
           <g class="cost-marker" aria-hidden="true">
             <circle class="cost-halo" cx={x} cy={y} r="8" />
-            <circle class="cost-dot" cx={x} cy={y} r="3.5" />
+            <circle class="cost-dot" data-tooltip-anchor cx={x} cy={y} r="3.5" />
           </g>
         </g>
       {/each}

@@ -29,6 +29,8 @@ pub struct SessionIdentity {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionDetail {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_speed: Option<crate::speed::SpeedTotals>,
     #[serde(flatten)]
     pub identity: SessionIdentity,
     #[serde(flatten)]
@@ -108,6 +110,8 @@ pub struct TierEvent {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParserState {
+    #[serde(default)]
+    pub(crate) request_timer: crate::speed::RequestTimer,
     pub session_meta_seen: bool,
     pub raw_created_at: String,
     pub raw_start_at: String,
@@ -307,6 +311,7 @@ impl ParsedFile {
             }
         }
         let payload = &item["payload"];
+        self.state.request_timer.observe(&item);
         match text(&item["type"]) {
             "session_meta" if !self.state.session_meta_seen => {
                 self.state.session_meta_seen = true;
@@ -452,14 +457,37 @@ impl ParsedFile {
                             },
                             time,
                         );
+                        let previous_usage =
+                            self.detail.timeline.last().map(|e| e.total_token_usage);
                         self.detail.total_token_usage =
                             serde_json::from_value(info["total_token_usage"].clone())?;
                         self.detail.last_token_usage =
                             serde_json::from_value(info["last_token_usage"].clone())?;
+                        let changed = previous_usage != Some(self.detail.total_token_usage);
+                        let request_timing = if changed {
+                            let timing = self
+                                .state
+                                .request_timer
+                                .finish(time, self.detail.last_token_usage);
+                            let output = previous_usage
+                                .map(|p| self.detail.total_token_usage.delta(p))
+                                .transpose()?
+                                .map(|u| u.output_tokens)
+                                .unwrap_or(self.detail.last_token_usage.output_tokens);
+                            if output > 0 && output == self.detail.last_token_usage.output_tokens {
+                                timing
+                            } else {
+                                Default::default()
+                            }
+                        } else {
+                            Default::default()
+                        };
                         if let Some(window) = integer(&info["model_context_window"]) {
                             self.detail.model_context_window = Some(window);
                         }
                         self.detail.timeline.push(RawEvent {
+                            request_duration_ms: request_timing.duration_ms,
+                            generation_duration_ms: request_timing.generation_ms,
                             timestamp: time.map(str::to_owned),
                             model: self.detail.model.clone(),
                             service_tier: self.detail.service_tier.clone(),
@@ -663,6 +691,7 @@ pub fn parse_file(
         )
     };
     let events = usage::normalize(&detail.timeline)?;
+    detail.estimated_speed = crate::speed::SpeedTotals::from_events(&events)?;
     detail.pricing = pricing.price_events(
         &events,
         &detail.model,

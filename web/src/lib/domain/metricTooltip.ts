@@ -112,6 +112,7 @@ export function metricTooltip(node: HTMLElement | SVGElement, initial: MetricToo
     hide();
     active = openTooltip(node, content(), {
       className: data.className ?? 'metric-tooltip',
+      reference: node.parentElement?.querySelector('[data-tooltip-anchor]') ?? node,
       x: data.followPointer && event instanceof PointerEvent ? event.clientX : undefined,
       y: data.followPointer && event instanceof PointerEvent ? event.clientY : undefined,
       side: data.followPointer ? 'pointer' : 'top',

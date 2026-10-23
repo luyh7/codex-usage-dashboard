@@ -13,6 +13,8 @@ use std::collections::{BTreeMap, HashMap};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_speed: Option<crate::speed::SpeedTotals>,
     pub uid: String,
     pub session_id: String,
     pub root_session_id: String,
@@ -71,6 +73,7 @@ pub struct SessionSummary {
 impl From<&SessionDetail> for SessionSummary {
     fn from(detail: &SessionDetail) -> Self {
         Self {
+            estimated_speed: detail.estimated_speed.clone(),
             uid: detail.identity.uid.clone(),
             session_id: detail.identity.session_id.clone(),
             root_session_id: detail.identity.root_session_id.clone(),
@@ -131,6 +134,7 @@ impl From<&SessionDetail> for SessionSummary {
 impl SessionDetail {
     pub fn metadata(&self) -> Self {
         Self {
+            estimated_speed: self.estimated_speed.clone(),
             identity: self.identity.clone(),
             pricing: self.pricing.clone(),
             title: self.title.clone(),
@@ -196,6 +200,8 @@ impl SessionDetail {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Summary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_speed: Option<crate::speed::SpeedTotals>,
     pub session_count: usize,
     #[serde(default)]
     pub main_count: usize,
@@ -279,6 +285,12 @@ pub fn summarize<'a>(
         summary.active_count += usize::from(session.source == "active");
         summary.archived_count += usize::from(session.source == "archived");
         summary.usage = summary.usage.checked_add(session.total_token_usage)?;
+        if let Some(speed) = &session.estimated_speed {
+            summary
+                .estimated_speed
+                .get_or_insert_with(Default::default)
+                .checked_add(speed)?;
+        }
         if let Some(cost) = session.estimated_cost_usd {
             summary.estimated_cost_usd += cost;
             summary.estimated_cost_known_count += 1;
@@ -632,6 +644,7 @@ fn detail_for_events<'a>(
         ranged.service_tiers.push(ranged.service_tier.clone());
     }
     let normalized = usage::normalize(&ranged.timeline)?;
+    ranged.estimated_speed = crate::speed::SpeedTotals::from_events(&normalized)?;
     let price_time = ranged
         .timeline
         .last()

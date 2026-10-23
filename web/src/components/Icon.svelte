@@ -30,6 +30,7 @@
     import: 'M12 16V3m-5 8 5 5 5-5M4 16v5h16v-5',
     export: 'M12 3v13m-5-8 5-5 5 5M4 16v5h16v-5',
     info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 11v6M12 7v1',
+    'alert-circle': 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 7v6M12 16v.1',
   };
 </script>
 

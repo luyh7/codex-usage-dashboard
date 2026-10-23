@@ -114,7 +114,7 @@ function pricePeriod(segment: Detail['applied_price_segments'][number], lang: La
 
 export function segmentPriceTooltip(detail: Detail, segment: Detail['applied_price_segments'][number], lang: Language, zone = 'UTC') {
   const model = segment.model || detail.model;
-  return usagePriceTooltip({
+  const tooltip = usagePriceTooltip({
     ...detail,
     model,
     models: [model],
@@ -125,4 +125,5 @@ export function segmentPriceTooltip(detail: Detail, segment: Detail['applied_pri
     estimated_cost_breakdown_usd: segment.estimated_cost_breakdown_usd as Partial<Usage> | undefined ?? null,
     applied_price_segments: [segment],
   }, lang, zone);
+  return { ...tooltip, followPointer: false };
 }
