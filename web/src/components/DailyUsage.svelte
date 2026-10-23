@@ -33,6 +33,7 @@
           }}
           aria-label={`${date}: ${number(row.value, lang)} tokens`}
           use:metricTooltip={{
+            followPointer: true,
             title: date,
             rows: [{ label, value: `${compactNumber(row.value)} tokens` }],
           }}

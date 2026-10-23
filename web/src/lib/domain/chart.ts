@@ -2,19 +2,12 @@ import type { Chart } from '../data/types';
 import { compactNumber, chartPositions } from './presentation';
 import { dateTime, words, type Language } from './ui';
 import { chartDates, curveSegments, usageBars } from './chartModel';
+import { openTooltip } from './tooltip';
 
-export interface ChartPoint {
-  x: number;
-  y: number;
-  tokens: number;
-  intervalTokens: number;
-  time: string;
-}
 interface Options {
   data: Chart;
   lang: Language;
   zone: string;
-  inspect: (point: ChartPoint | null) => void;
 }
 
 export function chart(canvas: HTMLCanvasElement, options: Options) {
@@ -33,6 +26,8 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
   let bars: ReturnType<typeof usageBars> = { bars: [], count: 1 };
   let ticks: { x: number; time: string; date: string }[] = [];
   let dates = chartDates(current.zone, []);
+  let tooltip: ReturnType<typeof openTooltip> | null = null;
+  let pointerPosition: { x: number; y: number } | null = null;
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const x = (i: number) => pad.left + (width - pad.left - pad.right) * positions[i];
   const y = (i: number) =>
@@ -60,17 +55,29 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
               : '')
         : '—',
     );
-    current.inspect(
-      row
-        ? {
-            x: x(inspectedIndex),
-            y: y(inspectedIndex),
-            tokens: row.total_token_usage.total_tokens,
-            intervalTokens: bar?.tokens ?? 0,
-            time: dates.tooltip(row.timestamp) ?? '#' + (inspectedIndex + 1),
-          }
-        : null,
-    );
+    if (!row) { tooltip?.close(); return; }
+    const content = document.createDocumentFragment();
+    const total = document.createElement('strong');
+    total.textContent = compactNumber(row.total_token_usage.total_tokens) + ' tokens';
+    const time = document.createElement('span');
+    time.textContent = dates.tooltip(row.timestamp) ?? '#' + (inspectedIndex + 1);
+    const interval = document.createElement('span');
+    interval.append(words(current.lang).intervalTokens + ' ');
+    const value = document.createElement('b');
+    value.textContent = compactNumber(bar?.tokens ?? 0);
+    interval.append(value);
+    content.append(total, time, interval);
+    const rect = canvas.getBoundingClientRect();
+    const position = pointerPosition ?? { x: rect.left + x(inspectedIndex), y: rect.top + y(inspectedIndex) };
+    if (tooltip) {
+      tooltip.update(content);
+      tooltip.place(position.x, position.y);
+    } else {
+      tooltip = openTooltip(canvas, content, {
+        className: 'chart-tooltip', side: 'pointer', ...position,
+        onClose: () => { tooltip = null; active = -1; pointerPosition = null; if (alive) draw(); },
+      });
+    }
   }
   function draw() {
     const ctx = canvas.getContext('2d');
@@ -249,16 +256,19 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     }
     active =
       low > 0 && Math.abs(positions[low - 1] - px) < Math.abs(positions[low] - px) ? low - 1 : low;
+    pointerPosition = { x: event.clientX, y: event.clientY };
     inspect();
     draw();
   }
   const leave = () => {
+    pointerPosition = null;
     active = -1;
     inspect();
     draw();
   };
   const focus = () => {
     if (!canvas.matches(':focus-visible')) return;
+    pointerPosition = null;
     active = current.data.timeline.length - 1;
     inspect();
     draw();
@@ -273,6 +283,7 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !positions.length)
       return;
     event.preventDefault();
+    pointerPosition = null;
     active =
       event.key === 'Home'
         ? 0
@@ -310,6 +321,7 @@ export function chart(canvas: HTMLCanvasElement, options: Options) {
     },
     destroy() {
       alive = false;
+      tooltip?.close();
       cancelAnimationFrame(frame);
       resize.disconnect();
       motion.removeEventListener('change', reduce);

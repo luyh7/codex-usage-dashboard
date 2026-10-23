@@ -110,7 +110,7 @@
               event.currentTarget.blur();
             }}
             aria-label={`${date}: ${label} ${format(cumulative[i])}`}
-            use:metricTooltip={{ title: date, rows }}
+            use:metricTooltip={{ title: date, rows, followPointer: true }}
             data-cost={cumulative[i]}
             data-date={i ? row.end : row.date}
           />

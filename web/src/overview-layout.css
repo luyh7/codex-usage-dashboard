@@ -235,38 +235,6 @@ main:has(.metrics.show-models) .workspace {
   font-weight: 600;
   color: #42556e;
 }
-.metric-tooltip {
-  position: fixed;
-  z-index: 120;
-  pointer-events: none;
-  max-width: min(330px, calc(100vw - 16px));
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  color: var(--text);
-  background: var(--panel);
-  box-shadow: 0 4px 18px #16263f14;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.metric-tooltip-title {
-  margin-bottom: 3px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.metric-tooltip-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 14px;
-}
-.metric-tooltip-row > span {
-  color: var(--muted);
-}
-.metric-tooltip-row > b {
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
 .breakdown-values {
   font-size: 12px;
 }
@@ -669,12 +637,6 @@ main:has(.metrics.show-models) .workspace {
 }
 canvas {
   height: clamp(150px, 21vh, 215px);
-}
-.chart-tooltip {
-  font-size: 12px;
-}
-.chart-tooltip span {
-  font-size: 11px;
 }
 .cost-composition h3 {
   margin-bottom: 10px;

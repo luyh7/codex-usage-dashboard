@@ -21,7 +21,8 @@
   pointer-events: none;
 }
 .ui-tooltip,
-.metric-tooltip {
+.metric-tooltip,
+.chart-tooltip {
   position: fixed;
   inset: auto;
   margin: 0;
@@ -29,11 +30,18 @@
   max-height: calc(100dvh - 16px);
   overflow: hidden;
 }
+.chart-tooltip { min-width: min(148px, calc(100vw - 16px)); max-width: min(220px, calc(100vw - 16px)); }
+.chart-tooltip strong { white-space: nowrap; }
+.chart-tooltip span { display: block; }
+.metric-tooltip-title { margin-bottom: 3px; }
+.metric-tooltip-row { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; }
+.metric-tooltip-row > b { font-variant-numeric: tabular-nums; }
 .metric-tooltip-title,
 .chart-tooltip span { color: #668275; font-size: 11px; }
 .metric-tooltip-row > span { color: #668275; }
 .metric-tooltip-row > b,
-.chart-tooltip strong { color: #264b40; font-weight: 600; }
+.chart-tooltip strong,
+.chart-tooltip b { color: #264b40; font-weight: 600; }
 .price-tooltip {
   max-width: min(560px, calc(100vw - 16px));
   padding: 11px 13px;

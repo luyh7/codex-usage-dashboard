@@ -78,7 +78,7 @@ export function usagePriceTooltip(detail: Detail, lang: Language, zone = 'UTC'):
     if (parts[i].cost !== null) value.cost = parts[i].cost;
   });
   return {
-    title: '', rows: [], followPointer: true, className: 'metric-tooltip price-tooltip',
+    title: '', rows: [], className: 'metric-tooltip price-tooltip',
     tables: [...groups.values()].map(group => ({
       caption: group.caption,
       modelTags: group.modelTags,
