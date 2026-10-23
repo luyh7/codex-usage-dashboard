@@ -1,11 +1,24 @@
 let nextId = 0;
 let dismissActive: (() => void) | null = null;
 
+/** Use the painted text bounds, including static numeric labels without animation. */
+function valueRect(anchor: Element) {
+  const value = anchor.querySelector('.animated-value, .event-field-value') ?? anchor;
+  const box = value.getBoundingClientRect();
+  const range = document.createRange();
+  range.selectNodeContents(value);
+  const text = range.getBoundingClientRect();
+  if (!text.width || !text.height) return box;
+  const left = Math.max(box.left, text.left), right = Math.min(box.right, text.right);
+  const top = Math.max(box.top, text.top), bottom = Math.min(box.bottom, text.bottom);
+  return right > left && bottom > top ? { left, right, top, bottom, width: right - left, height: bottom - top } : box;
+}
+
 /** One shared, unclipped tooltip surface for text and structured metric hints. */
 export function openTooltip(
   anchor: Element,
   content: string | Node,
-  { className = 'ui-tooltip', side = 'top', x, y }: { className?: string; side?: 'top' | 'right' | 'pointer'; x?: number; y?: number } = {},
+  { className = 'ui-tooltip', side = 'top', x, y, reference = anchor }: { className?: string; side?: 'top' | 'right' | 'pointer'; x?: number; y?: number; reference?: Element } = {},
 ) {
   dismissActive?.();
   const surface = document.createElement('div');
@@ -28,10 +41,11 @@ export function openTooltip(
     // Content updates use the latest pointer position, including after pointermove.
     x = pointerX;
     y = pointerY;
-    const rect = anchor.getBoundingClientRect();
+    // Numeric cells fill their column, while their visible values align right.
+    const rect = className === 'ui-tooltip' && side === 'top' ? valueRect(reference) : reference.getBoundingClientRect();
     const box = surface.getBoundingClientRect();
     const gap = 10;
-    let left = (pointerX ?? rect.left + rect.width / 2) - box.width / 2;
+    let left = rect.left + rect.width / 2 - box.width / 2;
     let top = rect.top - box.height - gap;
     if (side === 'pointer' && pointerX !== undefined && pointerY !== undefined) {
       left = pointerX + 14;
@@ -107,8 +121,14 @@ export function tooltips(root: HTMLElement) {
   function find(node: EventTarget | null) {
     if (!(node instanceof Element)) return null;
     if (node.closest('[data-tooltip-managed]')) return null;
-    const element = node.closest('[data-tooltip], button[aria-label], summary[aria-label]');
-    return element && root.contains(element) && text(element) ? element : null;
+    let element = node.closest('[data-tooltip], button[aria-label], summary[aria-label]');
+    while (element && root.contains(element)) {
+      if (element.hasAttribute('data-tooltip')) return text(element) ? element : null;
+      if (text(element)) return element;
+      // A named button inside a numeric cell must not swallow the cell's hint.
+      element = element.parentElement?.closest('[data-tooltip], button[aria-label], summary[aria-label]') ?? null;
+    }
+    return null;
   }
   function hide() {
     active?.close();
@@ -132,6 +152,8 @@ export function tooltips(root: HTMLElement) {
     if (!target.isConnected || !text(target)) hide();
     else if (records.some(record => record.type === 'attributes' && record.target === target))
       active?.update(text(target));
+    else if (records.some(record => record.type === 'childList' && target!.contains(record.target)))
+      active?.place();
   });
   observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-tooltip', 'data-tooltip-overflow', 'aria-label'] });
   root.addEventListener('pointerover', over);

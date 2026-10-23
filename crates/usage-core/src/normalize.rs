@@ -395,6 +395,7 @@ fn reprice(
     } else {
         usage::normalize(&detail.timeline)?
     };
+    detail.estimated_speed = crate::speed::SpeedTotals::from_events(&events)?;
     detail.pricing = pricing.price_events(
         &events,
         &detail.model,
@@ -609,6 +610,7 @@ fn normalize_child(
     let d = &mut file.detail;
     d.fork_usage_resolved = spec.resolved;
     if !spec.resolved {
+        d.estimated_speed = None;
         d.timeline.clear();
         d.total_token_usage = Usage::default();
         d.last_token_usage = Usage::default();

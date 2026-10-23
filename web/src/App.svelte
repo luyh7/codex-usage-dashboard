@@ -26,6 +26,7 @@
   import brandIcon from './assets/cud-soft-icon.svg';
   import brandTitle from './assets/cud-soft-title-light.svg';
   import { tooltips } from './lib/domain/tooltip';
+  import { usageSpeedHint } from './lib/domain/speed';
   import AnimatedValue from './components/AnimatedValue.svelte';
   import { compactNumber, displayMoney, activityTime } from './lib/domain/presentation';
   import RelativeTime from './components/RelativeTime.svelte';
@@ -710,7 +711,7 @@
                           >
                         </div></td
                       >
-                      <td class="numeric" data-tooltip={number(row.total_token_usage?.total_tokens, lang)}
+                      <td class="numeric" data-tooltip={usageSpeedHint(row.estimated_speed, lang)}
                         ><AnimatedValue
                           value={row.total_token_usage?.total_tokens ?? 0}
                           format={compactNumber}

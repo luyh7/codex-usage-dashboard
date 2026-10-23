@@ -8,6 +8,7 @@
   import ArchiveTag from './ArchiveTag.svelte';
   import SessionMetadata from './SessionMetadata.svelte';
   import CacheHit from './CacheHit.svelte';
+  import { usageSpeedHint } from '../lib/domain/speed';
   let {
     group,
     selected,
@@ -78,7 +79,7 @@
             >{/if}<SessionMetadata sessions={group.sessions} {lang} /></span
         ></span
       >
-      <span class="numeric" data-tooltip={number(group.summary.usage.total_tokens, lang)}
+      <span class="numeric" data-tooltip={usageSpeedHint(group.summary.estimated_speed, lang)}
         ><AnimatedValue value={group.summary.usage.total_tokens} format={compactNumber} /></span
       >
       <span class="numeric cost-cell"
@@ -106,7 +107,7 @@
               ><span class="task-title-line"><ArchiveTag source={root.source} {lang} /><span class="title-text" data-tooltip={root.title} data-tooltip-overflow>{root.title || root.session_id}</span><span class="role-tag main-role-tag">{t.mainThread}</span><RelativeTime value={activityTime(root)} {lang} {zone} /></span><SessionMetadata sessions={[root]} {lang} /></span
             ></span
           >
-          <span class="numeric" data-tooltip={number(root.total_token_usage?.total_tokens, lang)}
+          <span class="numeric" data-tooltip={usageSpeedHint(root.estimated_speed, lang)}
             ><AnimatedValue
               value={root.total_token_usage?.total_tokens ?? 0}
               format={compactNumber}
@@ -136,7 +137,7 @@
                 ><SessionMetadata sessions={[row]} {lang} /></span
               ></span
             >
-            <span class="numeric" data-tooltip={number(row.total_token_usage?.total_tokens, lang)}
+            <span class="numeric" data-tooltip={usageSpeedHint(row.estimated_speed, lang)}
               ><AnimatedValue
                 value={row.total_token_usage?.total_tokens ?? 0}
                 format={compactNumber}

@@ -129,6 +129,10 @@ impl Usage {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RawEvent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation_duration_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_duration_ms: Option<i64>,
     pub timestamp: Option<String>,
     pub model: String,
     pub service_tier: String,

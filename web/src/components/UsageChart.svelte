@@ -5,6 +5,9 @@
   import { words, type Language } from '../lib/domain/ui';
   let { data, lang, zone }: { data: Chart; lang: Language; zone: string } = $props();
   let point = $state<ChartPoint | null>(null);
+  let surfaceWidth = $state(400);
+  let tooltipWidth = $state(168);
+  let tooltipHeight = $state(80);
   let t = $derived(words(lang));
   const inspect = (next: ChartPoint | null) => {
     point = next;
@@ -21,7 +24,7 @@
     >
   </figcaption>
   {#if data.timeline.length}
-    <div class="chart-surface">
+    <div class="chart-surface" bind:clientWidth={surfaceWidth}>
       <canvas
         use:chart={{ data, lang, zone, inspect }}
         tabindex="0"
@@ -34,8 +37,10 @@
       {#if point}<div
           class="chart-tooltip"
           role="tooltip"
-          style:left={`clamp(0px, ${point.x - 168}px, max(0px, calc(100% - 168px)))`}
-          style:top={Math.max(-38, point.y - 94) + 'px'}
+          bind:offsetWidth={tooltipWidth}
+          bind:offsetHeight={tooltipHeight}
+          style:left={Math.max(0, Math.min(surfaceWidth - tooltipWidth, point.x - tooltipWidth / 2)) + 'px'}
+          style:top={Math.max(-38, point.y - tooltipHeight - 10) + 'px'}
         >
           <strong>{compactNumber(point.tokens)} <small>tokens</small></strong><span
             >{point.time}</span

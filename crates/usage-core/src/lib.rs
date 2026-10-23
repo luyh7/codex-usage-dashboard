@@ -12,6 +12,7 @@ pub mod query;
 pub mod reader;
 pub mod remote;
 pub mod runtime;
+pub mod speed;
 pub mod timestamp;
 pub mod usage;
 pub mod view;

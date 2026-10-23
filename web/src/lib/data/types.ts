@@ -6,7 +6,14 @@ export interface Usage {
   reasoning_output_tokens: number;
   total_tokens: number;
 }
+export interface SpeedTotals {
+  first_token_request_count?: number;
+  output_tokens: number;
+  duration_ms: number;
+  request_count: number;
+}
 export interface Session {
+  estimated_speed?: SpeedTotals | null;
   uid: string;
   session_id: string;
   root_session_id: string;
@@ -60,6 +67,7 @@ export interface ModelBreakdown {
   cost_complete: boolean;
 }
 export interface Summary {
+  estimated_speed?: SpeedTotals | null;
   session_count: number;
   main_count?: number;
   agent_count?: number;
@@ -73,6 +81,7 @@ export interface Summary {
   by_environment: { id: string; label: string; sessions: number; usage: Usage }[];
 }
 export interface Project {
+  estimated_speed?: SpeedTotals | null;
   updated_at?: string | null;
   key: string;
   label: string;
@@ -165,6 +174,8 @@ export interface Query {
   ascending: boolean;
 }
 export interface TokenEvent {
+  generation_duration_ms?: number | null;
+  request_duration_ms?: number | null;
   timestamp: string | null;
   model: string;
   service_tier: string;

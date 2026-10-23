@@ -147,7 +147,10 @@ pub struct RemoteWire {
 }
 pub fn detail_schema() -> Value {
     let mut schema = serde_json::to_value(crate::parser::SessionDetail::default()).unwrap();
+    schema["estimated_speed"] = serde_json::json!(crate::speed::SpeedTotals::default());
     schema["timeline"] = serde_json::json!([crate::RawEvent::default()]);
+    schema["timeline"][0]["request_duration_ms"] = Value::Null;
+    schema["timeline"][0]["generation_duration_ms"] = Value::Null;
     schema["tasks"] = serde_json::json!([crate::parser::Task::default()]);
     schema["applied_price_segments"] = serde_json::json!([crate::pricing::PriceSegment::default()]);
     schema["estimated_cost_breakdown_usd"] =
@@ -156,6 +159,7 @@ pub fn detail_schema() -> Value {
 }
 pub fn summary_schema() -> Value {
     let mut schema = serde_json::to_value(crate::query::SessionSummary::default()).unwrap();
+    schema["estimated_speed"] = serde_json::json!(crate::speed::SpeedTotals::default());
     schema["estimated_cost_breakdown_usd"] =
         serde_json::to_value(crate::pricing::CostParts::default()).unwrap();
     schema
