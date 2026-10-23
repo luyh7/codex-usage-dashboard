@@ -26,6 +26,8 @@ Windows 从开始菜单启动；macOS 将 `.app` 放入 Applications 后打开�
 
 设备数据中可导入 `.json` / `.json.gz`，重命名导入设备，以及完整或脱敏导出。完整快照包含会话摘要和本地路径；脱敏模式保留用量和费用并移除或匿名化这些内容。桌面导出使用系统保存对话框、后台压缩和实际进度，写入成功前不会替换目标文件。取消导出不生成快照。
 
+完整和脱敏导出共用上次成功保存的目录；目录已不存在时回到文档目录或用户主目录。取消或保存失败不会覆盖记录。日志文件夹选择记住上次选择，首次优先当前配置来源，再使用用户主目录。目录记录与业务设置、窗口状态分开保存，无法保存记录不影响已完成的导出或选择。
+
 同一来源的完整与脱敏快照使用不同的设备标识，同时导入会分别计入总量。汇总同一份用量时，保留其中一种副本。
 
 Windows 默认关闭窗口退出，可选择保留在托盘。macOS 关闭窗口保留应用，通过 Dock、菜单或托盘重新显示，Cmd+Q 明确退出。Linux 关闭窗口退出，保留显示、设置和退出菜单；不提供可能在无托盘桌面中无法恢复的隐藏设置。登录启动默认关闭，由用户开启；开发配置不注册开机启动。后台启动遇到无托盘或 Linux 会话时保持窗口可恢复。
@@ -41,6 +43,7 @@ Windows 默认关闭窗口退出，可选择保留在托盘。macOS 关闭窗口
 | Linux 业务配置 | `$XDG_CONFIG_HOME/cousash`，默认 `~/.config/cousash` |
 | 长期设置 | 配置目录下 `preferences.json` |
 | 窗口设置 | 配置目录下 `desktop-settings.json` |
+| 文件对话框目录 | 配置目录下 `desktop-file-dialogs.json` |
 | 运行记录、启动锁和日志 | Windows：配置目录下 `runtime/`；Linux：`$XDG_CACHE_HOME/cousash/scopes/<配置路径哈希>/runtime`（默认 `~/.cache`）；macOS：`~/Library/Caches/cousash/scopes/<配置路径哈希>/runtime` |
 | 可重建的 WebView 缓存 | Windows：配置目录下 `cache/webview`；Linux：上述私有范围目录下 `webview/`；WKWebView 使用按配置范围派生的数据存储标识 |
 

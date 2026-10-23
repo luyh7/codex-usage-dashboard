@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #[cfg(target_os = "linux")]
 mod desktop_entry;
+mod dialog_history;
 #[cfg(target_os = "linux")]
 mod linux_autostart;
 mod native;
@@ -27,6 +28,7 @@ use usage_runtime::{Result, Service};
 
 struct Desktop {
     root: PathBuf,
+    dialog_history: dialog_history::History,
     binary: PathBuf,
     service: Mutex<Option<Service>>,
     busy: AtomicBool,
@@ -383,6 +385,7 @@ fn main() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Desktop {
+            dialog_history: dialog_history::History::load(&root),
             root: root.clone(),
             binary,
             service: Mutex::new(None),

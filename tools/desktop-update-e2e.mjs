@@ -72,6 +72,8 @@ await writeFile(path.join(home,'sessions/fixture.jsonl'),[
   {timestamp:'2026-10-23T00:00:00Z',type:'event_msg',payload:{type:'token_count',info:{total_token_usage:{input_tokens:10000,cached_input_tokens:8000,output_tokens:2000,total_tokens:12000}}}},
 ].map(JSON.stringify).join('\n')+'\n');
 await save(path.join(state,'preferences.json'),{schema_version:1,language:'zh',timezone:'Asia/Shanghai',codex_homes:[home]});
+const exportDirectory=path.join(dir,'导出 目录');await mkdir(exportDirectory,{recursive:true});
+await save(path.join(state,'desktop-file-dialogs.json'),{source:home,export:exportDirectory});
 const env={...process.env,COUSASH_CONFIG_DIR:state,CODEX_HOME:home};const runtime=runtimeDir(state);
 const goodSignature=(await readFile(next.artifact+'.sig','utf8')).trim();const bytes=await readFile(next.artifact);
 const damagedLines=Buffer.from(goodSignature,'base64').toString('utf8').split(/\r?\n/);const damagedPacket=Buffer.from(damagedLines[1],'base64');assert(damagedPacket.length>20);damagedPacket[20]^=1;damagedLines[1]=damagedPacket.toString('base64');const damagedSignature=Buffer.from(damagedLines.join('\n')).toString('base64');
@@ -105,7 +107,7 @@ async function activate(action){
 async function healthy(buildId,timeout=90000){
   const deadline=Date.now()+timeout;while(Date.now()<deadline){try{const record=await json(path.join(runtime,'instance.json'));const value=await(await fetch('http://'+record.address+'/api/health',{signal:AbortSignal.timeout(1000)})).json();if(value.build_id===buildId&&value.index.phase==='ready')return{record,value,base:'http://'+record.address};}catch{}await sleep(100);}throw Error('Updated service readiness timeout');
 }
-async function hashes(){const values={};for(const file of [path.join(state,'preferences.json'),...await files(path.join(state,'remotes'))]){values[path.relative(state,file)]=createHash('sha256').update(await readFile(file)).digest('hex');}return values;}
+async function hashes(){const values={};for(const file of [path.join(state,'preferences.json'),path.join(state,'desktop-file-dialogs.json'),...await files(path.join(state,'remotes'))]){values[path.relative(state,file)]=createHash('sha256').update(await readFile(file)).digest('hex');}return values;}
 let navigationPreconditionRetries=0;
 async function trustedAction(action){
   // The native driver can reach a recovering WKWebView before its page can
@@ -151,7 +153,7 @@ try{
   await updated.catch(error=>{if(!/ECONNRESET/.test(String(error)))throw error;});
   current=await healthy(next.info.build_id,120000);assert.equal(current.value.version,'1.0.2');assert.equal(current.value.device_short_code,device);assert.notEqual(current.record.pid,initialPid);assert.deepEqual(await hashes(),before);
   const summary=await(await fetch(current.base+'/api/summary?period=all')).json();assert.equal(summary.summary.usage.total_tokens,24000);
-  report.checks.push({case:'signed-update-install-restart',version:'1.0.2',build_id:current.value.build_id,tokens:24000,settings_identity_imports_retained:true});
+  report.checks.push({case:'signed-update-install-restart',version:'1.0.2',build_id:current.value.build_id,tokens:24000,settings_identity_imports_retained:true,dialog_directories_retained:true});
   report.passed=true;
 }finally{
   try{await activate('quit');}catch{}

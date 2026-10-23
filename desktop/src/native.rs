@@ -1,3 +1,4 @@
+use super::dialog_history::Kind as DirectoryKind;
 use super::*;
 #[cfg(not(target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt as _;
@@ -79,21 +80,41 @@ pub async fn choose_source(
     app: tauri::AppHandle,
 ) -> std::result::Result<Option<String>, String> {
     trusted_live(&window, &app).await?;
-    let path = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || -> std::result::Result<Option<String>, String> {
+        let state = app.state::<Desktop>();
         let mut picker = app.dialog().file().set_parent(&window);
-        if let Ok(home) = app.path().home_dir() {
-            picker = picker.set_directory(home);
+        let directory = state
+            .dialog_history
+            .directory(DirectoryKind::Source)
+            .or_else(|| {
+                fs::read(state.root.join("preferences.json"))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                    .and_then(|value| {
+                        value["codex_homes"].as_array().and_then(|homes| {
+                            homes
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(PathBuf::from)
+                                .find(|path| path.is_dir())
+                        })
+                    })
+            })
+            .or_else(|| app.path().home_dir().ok());
+        if let Some(directory) = directory {
+            picker = picker.set_directory(directory);
         }
-        picker.blocking_pick_folder()
+        let Some(path) = picker.blocking_pick_folder() else {
+            return Ok(None);
+        };
+        let path = path.into_path().map_err(|e| e.to_string())?;
+        // Directory history is advisory; its persistence must not turn a
+        // successful selection or export into a failed business operation.
+        let _ = state.dialog_history.remember(DirectoryKind::Source, &path);
+        Ok(Some(path.to_string_lossy().into_owned()))
     })
     .await
-    .map_err(|e| e.to_string())?;
-    path.map(|p| {
-        p.into_path()
-            .map(|p| p.to_string_lossy().into_owned())
-            .map_err(|e| e.to_string())
-    })
-    .transpose()
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub async fn apply_sources(
@@ -134,7 +155,8 @@ pub async fn export_snapshot(
         let mut picker=app.dialog().file().set_parent(&window).set_file_name(if redacted{"cousash-shared.json.gz"}else{"cousash-snapshot.json.gz"}).add_filter("Snapshot",&["json.gz"]);
         // AppImage changes cwd to its temporary AppDir. Never offer that as a
         // user's export destination; it disappears when the application exits.
-        if let Some(directory)=app.path().document_dir().ok().filter(|path|path.is_dir()).or_else(||app.path().home_dir().ok()) {picker=picker.set_directory(directory);}
+        let state=app.state::<Desktop>();
+        if let Some(directory)=state.dialog_history.directory(DirectoryKind::Export).or_else(||app.path().document_dir().ok().filter(|path|path.is_dir())).or_else(||app.path().home_dir().ok()) {picker=picker.set_directory(directory);}
         let Some(path)=picker.blocking_save_file() else{return Ok(false);};
         let path=path.into_path()?;
         let base=app.state::<Desktop>().service.lock().unwrap().as_ref().ok_or("service stopped")?.record.url();
@@ -153,8 +175,10 @@ pub async fn export_snapshot(
         let mut url=usage_runtime::ureq_url(&format!("{base}/api/export.json.gz{mode}"))?;
         url.query_pairs_mut().append_pair("job",job["id"].as_str().ok_or("invalid export job")?);
         let mut response=usage_runtime::agent_with_timeout(Duration::from_secs(600)).get(url.as_str()).call()?;
-        let mut file=tempfile::NamedTempFile::new_in(path.parent().ok_or("invalid destination")?)?;
-        std::io::copy(&mut response.body_mut().as_reader(),&mut file)?;file.as_file().sync_all()?;file.persist(path).map_err(|e|e.error)?;Ok(true)
+        let directory=path.parent().ok_or("invalid destination")?.to_owned();
+        let mut file=tempfile::NamedTempFile::new_in(&directory)?;
+        std::io::copy(&mut response.body_mut().as_reader(),&mut file)?;file.as_file().sync_all()?;file.persist(path).map_err(|e|e.error)?;
+        let _=state.dialog_history.remember(DirectoryKind::Export,&directory);Ok(true)
     }).await.map_err(|e|e.to_string())?.map_err(|e|e.to_string())
 }
 #[tauri::command]

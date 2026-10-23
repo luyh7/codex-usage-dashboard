@@ -45,6 +45,7 @@ jobs:
           node --test tools/desktop-entry.test.mjs
           cargo fmt --manifest-path desktop/Cargo.toml -- --check
           cargo clippy --manifest-path desktop/Cargo.toml --release --all-features --target ${{ matrix.target }} -- -D warnings
+          cargo test --manifest-path desktop/Cargo.toml --release --locked --target ${{ matrix.target }}
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/target
       - name: Native desktop startup and duplicate launch

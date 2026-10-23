@@ -25,7 +25,7 @@ Windows、macOS 两架构和 Linux 开发包均已在各自系统构建、启动
 - desktop/target/linux/x86_64-unknown-linux-gnu/release/bundle/appimage/Codex Usage Dashboard_1.0.1_amd64.AppImage
 - desktop/target/linux/x86_64-unknown-linux-gnu/release/bundle/deb/Codex Usage Dashboard_1.0.1_amd64.deb
 
-当前应用源码 e28dcc4 的四目标 CI 已全部通过，制品均已生成并核对，包含 Linux 登录启动与复选框修复，均为开发包：
+目录记忆补充之前的应用源码 e28dcc4 四目标 CI 已全部通过，制品均已生成并核对，包含 Linux 登录启动与复选框修复，均为开发包。下表暂保留该轮制品；目录记忆的新 CI 结果另行记录，不能用旧制品证明新增功能：
 
 | 目标 | 下载内容 |
 | --- | --- |
@@ -80,7 +80,9 @@ Windows：11 Pro 10.0.22631，x64，WebView2 155.0.4283.62。Linux：WSLg Ubuntu
 
 2026-10-24 延续验证发现一个 WSLg AppImage 实例已退出，日志尾部有 `free(): corrupted unsorted chunks`，触发原因未确定。日志保留为 linux-appimage-heap-crash.log；同包连续三次受控退出返回 0 且无该错误，不能据此宣布根因已消除。Linux 对自有服务发送 SIGTERM 后约 5.6 秒恢复为新 PID，宿主与业务数据保留，见 linux-service-recovery.json。Windows 24K 小夹具的 30 秒空闲采样，9 个宿主/服务/WebView 进程 CPU 增量为 0，私有内存约 268 MiB；这不是长期或大负载指标。Linux 采样期间子进程集合发生变化，不据此宣称完整空闲资源通过。
 
-真实界面检查修复了 AppImage 保存框默认进入临时解包目录的问题；现默认文档目录，不存在时用用户主目录。新包已实测：Windows 打开文档目录并取消；Linux 打开用户主目录，导出到中文/空格路径，解压后确认一个会话、12K 本机用量，并在真实 WebKit 文件选择器中导入 Windows 快照，合计仍为 24K。日志来源选择从用户主目录开始。
+真实界面检查修复了 AppImage 保存框默认进入临时解包目录的问题。后续按计划补充目录记忆：完整/脱敏导出共用上次成功目录，取消与失败不更新；来源选择使用独立记录，首次优先当前配置来源。记录使用独立文件和原子替换，避免与窗口状态并发写入互相覆盖；无效目录回退，记录写入失败不改变成功的业务结果。
+
+Windows/WebView2 与 Linux/WebKit 新生产包已实际验证首次默认目录、首次取消不生成记录、中文/空格路径成功保存，以及下次脱敏保存框复用成功目录。Linux 的真实不可写目录返回可见权限错误，无目标/临时文件残留，重试仍打开成功目录，记录摘要不变；测试目录权限已恢复。见 dialog-history-windows.json、dialog-history-linux.json 及对应 reused/failure/retry 截图。两端独立桌面 crate 的 3 项 release 单元测试及 all-feature clippy 通过，覆盖并发来源/导出写入、重开、损坏/已移除目录和持久化失败；四目标 CI 已加入该 crate 的测试命令。最新本地升级发起端的 main.rs/native.rs 哈希均为 `9746d79f…`，Windows/Linux 严格六项签名更新回归通过，额外核对目录文件在升级后逐字节保留；宿主退出码均为 0。新增代码的云端构建仍待验证，不把先前 e28dcc4 结果用于证明它。
 
 ## 更新与恢复
 
@@ -122,9 +124,9 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 
 截图属于对应图形轮次，最终二进制身份以最后复核 JSON 为准。
 
-2026-10-24 当前复核的隔离实例（虚构日志与导入快照，合计 24K）：Windows http://127.0.0.1:3374/?period=all，Linux/WSLg FUSE AppImage http://127.0.0.1:44745/?period=all。Windows build ID 为 `900724c2512be230d01be72a482e78be964cc1daea57ac71685370013885479d`；Linux 为 `95746341f4f21aec574dd96961d79ca156887ddad669ebf8a1ff99e0f355e2e5`。两端均含登录启动和复选框补充修复；Windows 使用本机编译包，Linux 使用 e28dcc4 的 Ubuntu 22.04 CI 包，应用源码与当前工作树一致，随包辅助程序复制在本工作树 `output/verification/codex-usage-dashboard-linux22`。健康身份与相应二进制相同，Linux 实际宿主和辅助程序逐字节匹配当前 AppDir。此前列出的其他验收地址均已退出，不再作为当前地址。地址仅在对应验收实例仍运行时有效。
+2026-10-24 目录记忆补充后的隔离实例（虚构日志与导入快照，合计 24K）：Windows http://127.0.0.1:14755/?period=all，Linux/WSLg FUSE AppImage http://127.0.0.1:45147/?period=all。Windows build ID 为 `900724c2512be230d01be72a482e78be964cc1daea57ac71685370013885479d`；Linux 为 `a7f2dfb1a45635a900862d40573bc69b128f23ea07327916d538e89a297826e6`。两端使用本机编译包，实际随包辅助程序与本工作树相应二进制及健康身份匹配，Linux 实际宿主逐字节匹配当前 AppDir。e28dcc4 的 Ubuntu 22.04 CI 实例已退出，其报告保留为历史验证。地址仅在对应验收实例仍运行时有效；重启后的实际地址以最终复核为准。
 
-当前工作树安装包 SHA256：Windows NSIS `6e55606306c3365ade1f681ac2eb551a176ae7fa9188f457690fa71bc2ec7511`；Ubuntu 26.04 本地 AppImage `9119106732d09679bb39f6c8ac7d426a8e97933d79ebefa6e2a367aa7f335453`、`.deb` `c81f1e358b360ff38f2ff78be85b76f1ab6096cf6823e68fed55392fcd3ee139`。实际文件与各平台 artifacts.json 已逐字节校验。较低基线的最新 Ubuntu 22.04 CI AppImage 为 `c64b2f8fcf20892d4d9fd3a24db136078e3e05a2abcdfd50aa7036b6bb65eb03`、`.deb` 为 `982900deb4069430a3a9414271944a684637bd1bc5cd4857c52d790efecb66a9`；该最新 `.deb` 已完成上述 Debian 12 检查。Windows CI NSIS 为 `b2deabe441bc8160b91aebb77383a084dd8e098b285f2e182f84262bb527190f`，已独立完成安装/覆盖/移除复验。以上 CI 制品均来自 e28dcc4，下载地址见本文表格。
+目录记忆补充后的本地安装包 SHA256：Windows NSIS `f9a4526d4a92a67e2e522339145e51785f6920bd8e02aa03c957e77e51c39513`；Ubuntu 26.04 本地 AppImage `b44f4de52374208a3ccd8af56a41a932c08b7c97797a792cd9a650bd5e6f2073`、`.deb` `efdf2435da93bce29627f194e835ae46a2cc91468501e7efc263dc4f8ee2965d`。实际文件与各平台 artifacts.json 已逐字节校验。目录记忆补充之前的 Ubuntu 22.04 CI AppImage 为 `c64b2f8fcf20892d4d9fd3a24db136078e3e05a2abcdfd50aa7036b6bb65eb03`、`.deb` 为 `982900deb4069430a3a9414271944a684637bd1bc5cd4857c52d790efecb66a9`；该 `.deb` 已完成上述 Debian 12 检查。Windows CI NSIS 为 `b2deabe441bc8160b91aebb77383a084dd8e098b285f2e182f84262bb527190f`，已独立完成安装/覆盖/移除复验。以上旧 CI 制品均来自 e28dcc4，下载地址见本文表格，不包含本次目录记忆补充。
 
 ## 验收清单对照
 
