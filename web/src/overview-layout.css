@@ -1569,7 +1569,6 @@ dialog:not(.calendar-panel)::backdrop {
   font-size: 12px;
   color: var(--muted);
 }
-.calendar-extra { min-width: 0; }
 .calendar-month-selectors { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .calendar-year-input { width: 62px; min-height: 34px; padding: 4px 6px; font-size: 13px; text-align: center; font-weight: 600; }
 .calendar-month-dropdown { width: 72px; }

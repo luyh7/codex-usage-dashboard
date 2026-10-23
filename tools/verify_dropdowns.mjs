@@ -58,17 +58,17 @@ try {
   await page.getByLabel('年', { exact: true }).fill('2025');
   await page.getByLabel('年', { exact: true }).press('Tab');
   assert.match(await page.locator('.calendar-grid').getAttribute('aria-label'), /2025/);
-  await trigger('更多').click();
-  await bounds('menu');
-  await page.screenshot({ path: `${output}/calendar-more.png` });
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.calendar-panel').count(), 1, 'Escape closes the calendar menu before the modal');
-  await trigger('更多').click();
-  await page.getByRole('menuitemradio', { name: '近 30 天', exact: true }).click();
+  const presets = page.locator('.calendar-presets');
+  assert.deepEqual(await presets.getByRole('button').allTextContents(), ['今天', '近 7 天', '本周', '本月', '近 30 天', '全部', '自定义']);
+  await presets.getByRole('button', { name: '近 30 天', exact: true }).click();
+  assert.equal(await presets.getByRole('button', { name: '近 30 天', exact: true }).getAttribute('aria-pressed'), 'true');
+  await presets.getByRole('button', { name: '全部', exact: true }).click();
+  assert.equal(await presets.getByRole('button', { name: '全部', exact: true }).getAttribute('aria-pressed'), 'true');
+  await page.screenshot({ path: `${output}/calendar-presets.png` });
   assert.equal(await page.locator('.calendar-panel').count(), 1);
   assert.equal(new URL(page.url()).searchParams.get('period'), 'week', 'Calendar choice remains a draft');
   await page.keyboard.press('Escape');
-  check('Calendar More has the same menu style, stays above the modal and preserves draft selection');
+  check('Calendar presets are directly visible and preserve draft selection');
 
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });

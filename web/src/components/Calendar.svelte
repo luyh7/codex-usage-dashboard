@@ -92,6 +92,8 @@
     ['7d', t.days7],
     ['week', t.week],
     ['month', t.month],
+    ['30d', t.days30],
+    ['all', t.all],
     ['custom', t.customShort],
   ]);
 
@@ -246,7 +248,6 @@
           aria-pressed={draftPeriod === value}
           onclick={() => preset(value)}>{label}</button
         >{/each}
-      <div class="calendar-extra"><Dropdown variant="text" label={t.more} display={t.more} value={draftPeriod} options={[["30d", t.days30], ["all", t.all]]} change={preset} /></div>
     </nav>
     <div class="calendar-month">
       <div class="calendar-nav">

@@ -292,8 +292,7 @@ small {
   display: none;
 }
 .preferences > summary::-webkit-details-marker,
-.metric-breakdown > summary::-webkit-details-marker,
-.calendar-more > summary::-webkit-details-marker {
+.metric-breakdown > summary::-webkit-details-marker {
   display: none;
 }
 .preferences > div {
@@ -1737,27 +1736,6 @@ dd button {
 .calendar-presets > button:hover {
   background: var(--hover);
 }
-.calendar-more {
-  margin-top: 12px;
-}
-.calendar-more summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  cursor: pointer;
-  list-style: none;
-  font-size: 13px;
-  color: var(--muted);
-}
-.calendar-more button {
-  border: 0;
-  background: transparent;
-  justify-content: flex-start;
-  width: 100%;
-  font-size: 13px;
-  padding: 7px 16px;
-}
 .calendar-month {
   padding: 12px 20px 0 12px;
   min-width: 0;
@@ -2830,24 +2808,6 @@ footer a {
     min-height: 34px;
     font-size: 12px;
     padding: 6px 9px;
-  }
-  .calendar-more {
-    position: relative;
-    margin: 0;
-  }
-  .calendar-more summary {
-    padding: 6px 9px;
-    font-size: 12px;
-  }
-  .calendar-more > div {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    z-index: 3;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    min-width: 110px;
   }
   .calendar-month {
     padding: 12px 12px 0;
