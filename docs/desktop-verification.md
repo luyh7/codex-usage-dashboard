@@ -25,7 +25,7 @@ Windows、macOS 两架构和 Linux 开发包均已在各自系统构建、启动
 - desktop/target/linux/x86_64-unknown-linux-gnu/release/bundle/appimage/Codex Usage Dashboard_1.0.1_amd64.AppImage
 - desktop/target/linux/x86_64-unknown-linux-gnu/release/bundle/deb/Codex Usage Dashboard_1.0.1_amd64.deb
 
-当前应用源码 a78cfc4 的 CI 制品可直接下载，均为开发包：
+上一轮已通过的应用源码 a78cfc4 的 CI 制品可直接下载，均为开发包；尚不含下节新增的 Linux 登录启动修复，新一轮四目标复验结果待补充：
 
 | 目标 | 下载内容 |
 | --- | --- |
@@ -36,7 +36,15 @@ Windows、macOS 两架构和 Linux 开发包均已在各自系统构建、启动
 
 两份 macOS ZIP 已下载到本机隔离缓存并对照 GitHub 的 ZIP 摘要，包内宿主/辅助程序的 Mach-O 架构、版本清单及 DMG 摘要均已检查，生产包不含测试控制接口。arm64 DMG SHA256 为 `4e126a55c63fdea34b558a9fa9cfeb97a5ad345344917f3fdb92da1bdb0b9227`，x64 为 `4d826ff596f4a8ea25272c34222138223b98f42f96f67308703133b57d3f9dfe`；见 macos-package-aarch64-apple-darwin.json、macos-package-x86_64-apple-darwin.json。静态校验不算 Mac 实机验收，应用签名检查由对应 macOS CI 执行。
 
-对应 release/artifacts.json 记录实际文件、大小和 SHA256。最终复核文件为未提交的 output/verification/final-windows.json、final-linux22.json：检查当前健康接口、当前 worktree 中对应随包程序的 --build-info、实际辅助程序身份和安装包 SHA256。Ubuntu 26.04 本地包的上一轮记录保留在 final-linux.json。AppImage 程序还逐字节对照最终 AppDir；打包器处理后的 ELF 不与 Cargo 原始文件直接混比。生产宿主不含 desktop-tests 控制接口。
+对应 release/artifacts.json 记录实际文件、大小和 SHA256。当前复核文件为未提交的 output/verification/final-windows.json、final-linux.json：检查当前健康接口、当前 worktree 中对应随包程序的 --build-info、实际辅助程序身份和安装包 SHA256。上一轮 Ubuntu 22.04 CI 包的记录保留在 final-linux22.json。AppImage 程序还逐字节对照最终 AppDir；打包器处理后的 ELF 不与 Cargo 原始文件直接混比。生产宿主不含 desktop-tests 控制接口。
+
+## Linux 登录启动补充修复
+
+继续验收发现 auto-launch 0.6 在 Linux 启动项中未引用程序路径。将 AppImage 移到中文/空格路径后，真实设置开关虽显示开启，GLib `gio launch` 无法加载该启动项；只给同一路径加引号的对照项可启动。见 linux-autostart-unquoted-failure.json。
+
+现改为原子写入遵循 [Desktop Entry Exec 规范](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html) 的启动项，处理键值与命令行的两层转义、百分号字面量，并尊重 XDG_CONFIG_HOME。旧版本写在用户主目录下的本应用启动项仍可识别，切换设置时清理旧项，避免双份注册。Windows/macOS 继续使用原有系统适配。
+
+生产转义函数经真实 GLib 启动器回归，覆盖中文、空格、单双引号、反斜杠、美元符号、反引号、百分号和换行等路径，确认实际执行文件与参数相符。Windows/Linux 新包已构建运行，all-feature clippy 与格式检查通过。隔离 Linux 用户的真实界面完成默认关闭、识别旧项、关闭清理、在自定义 XDG 目录开启、退出后从启动项重新启动和再次关闭清理；后台参数确实传入，Linux 保持可恢复的窗口，设置和 12K 夹具保留。启动器使用独立进程组，避免验证 shell 结束影响测试宿主。见 linux-autostart.json、linux-autostart-settings.jpg、linux-autostart-background.jpg。测试没有修改日常用户的登录启动项，没有注销当前会话，真实重新登录仍未验证。
 
 ## 环境与自动化结果
 
@@ -108,9 +116,9 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 
 截图属于对应图形轮次，最终二进制身份以最后复核 JSON 为准。
 
-2026-10-24 最后复核的隔离实例（虚构日志与导入快照，合计 24K）：Windows http://127.0.0.1:14333/?period=all，Linux/WSLg FUSE AppImage http://127.0.0.1:46363/?period=all。Windows build ID 为 `e5433151949aeff601fe56202e846c1263103d3d9a99a5fcd9abb8ed9a8b7313`；Linux 为 `a24eac4c3ce62accb5acd7f5f71a37742ba98afbb476499aea7239641a9d1971`。Linux 使用应用源码 a78cfc4 的 Ubuntu 22.04 CI 制品，随包辅助程序复制到本工作树 `output/verification/codex-usage-dashboard-linux22`，其 `--build-info` 与健康接口相同；实际宿主和辅助程序均与该制品 AppDir 逐字节匹配。Windows 同样核对本工作树的二进制和包。最终文档提交不改变应用源码。地址仅在对应验收实例仍运行时有效。Ubuntu 26.04 本地包的 `26610f5c…` 大数据验证实例已主动退出，最终地址采用较低构建基线的 CI 包。
+2026-10-24 当前复核的隔离实例（虚构日志与导入快照，合计 24K）：Windows http://127.0.0.1:6660/?period=all，Linux/WSLg FUSE AppImage http://127.0.0.1:45251/?period=all。Windows build ID 为 `e5433151949aeff601fe56202e846c1263103d3d9a99a5fcd9abb8ed9a8b7313`；Linux 为 `26610f5c848fdaefa8bd9b8cee628e9f53afd22f07a1681398ea178bc2378833`。两端均运行包含登录启动补充修复的当前本地包；健康身份与本工作树对应随包辅助程序相同，Linux 实际宿主和辅助程序逐字节匹配当前 AppDir。核心/前端未改动，辅助程序 build ID 因此沿用，宿主另以文件哈希核对。旧的 14333/46363 实例已退出，不再作为当前地址。地址仅在对应验收实例仍运行时有效。
 
-当前工作树安装包 SHA256：Windows NSIS `c884a9d1e87922e870a6acabdfd80386977fe43c9d0aee36f732ea4057e10da9`；Ubuntu 26.04 本地 AppImage `360b6a30c0d55f94fa63d64160a04d04361158de3ff69ae16bbdb050bc7db0fe`、`.deb` `dd8f60c14bd863037d8e79cc00dfdc36c5ce7f17df5fabb86841243e5f663531`。实际文件与各平台 artifacts.json 已逐字节校验。较低基线的 Ubuntu 22.04 CI AppImage 为 `990ff6e80406566eddd5e8e957e17c505f10f731e67ac7a8febb0fb1d888dddc`、`.deb` 为 `e5c7a1f9aa5c196164f726c8502aec76f09eefdb162b520752cebc3b263c11f7`；来自 [a78cfc4 的 Linux 制品](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12524584684)，包内宿主和辅助程序、ZIP 摘要、包摘要均已核对，该最新 `.deb` 已重新完成上述 Debian 12 检查。
+当前工作树安装包 SHA256：Windows NSIS `353919a5668bd2f8aed4ba7a4e44ec8ebaabdeb2d80b5cba3509b8f84e973526`；Ubuntu 26.04 本地 AppImage `b36f640f5e109a270e8908e8514aad560fc9e56549ec3a8328f761d856cf5656`、`.deb` `22ec86aaae754d9c19f66892569295617284dcf362af9d298fa9449ad5b794d9`。实际文件与各平台 artifacts.json 已逐字节校验。上一轮较低基线的 Ubuntu 22.04 CI AppImage 为 `990ff6e80406566eddd5e8e957e17c505f10f731e67ac7a8febb0fb1d888dddc`、`.deb` 为 `e5c7a1f9aa5c196164f726c8502aec76f09eefdb162b520752cebc3b263c11f7`；来自 [a78cfc4 的 Linux 制品](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12524584684)，该 `.deb` 已完成上述 Debian 12 检查；补充修复后的 CI 基线包仍待复验。
 
 ## 验收清单对照
 
@@ -137,7 +145,7 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 | 日常 1 | 无开发工具用户安装与系统入口 | Windows、Ubuntu/WSLg、Debian 用户环境已有包检查；Mac Applications/Dock 和全新用户机器未验证 |
 | 日常 2 | 自动发现、空/无权限/自定义来源 | 协议及 Windows/Linux 首次空来源实际界面通过；Mac 文件选择和完整权限交互未验证 |
 | 日常 3 | 中文路径、原生文件、取消覆盖、大快照 | Windows/Linux 中文/空格路径、原生选择、取消及约 49 MB 完整/47 MB 脱敏快照往返通过；Mac 文件界面及更大边界规模未验 |
-| 日常 4 | 托盘、关闭、登录启动与退出清理 | 按平台实现、拥有者退出和隔离 CI 通过；真实登录启动及 Mac Dock 未验证 |
+| 日常 4 | 托盘、关闭、登录启动与退出清理 | 按平台实现、拥有者退出和隔离 CI 通过；Linux 已实际注册/执行/清理登录启动项并验证可恢复窗口，真实重新登录及 Mac Dock 未验证 |
 | 日常 5 | 窗口、多屏、高 DPI、键盘与响应 | 窗口尺寸往返、Windows/Linux 键盘及基础性能已有证据；多屏/高 DPI 硬件未验证 |
 | 日常 6 | 代表性启动、交互与空闲性能 | Windows/Linux 12M 合成负载与小夹具空闲采样已记录；Mac 和完整交互性能矩阵未完成 |
 | 日常 7 | 睡眠、服务退出及长期恢复 | Windows/Linux 自有服务恢复及日志持续追加通过；实际睡眠唤醒和长期运行未验证，已保留异常风险 |

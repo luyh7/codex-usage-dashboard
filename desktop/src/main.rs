@@ -1,4 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#[cfg(target_os = "linux")]
+mod desktop_entry;
+#[cfg(target_os = "linux")]
+mod linux_autostart;
 mod native;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

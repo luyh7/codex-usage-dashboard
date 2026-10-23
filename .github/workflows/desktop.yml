@@ -42,6 +42,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
       - name: Desktop Rust formatting and all-feature checks
         run: |
+          node --test tools/desktop-entry.test.mjs
           cargo fmt --manifest-path desktop/Cargo.toml -- --check
           cargo clippy --manifest-path desktop/Cargo.toml --release --all-features --target ${{ matrix.target }} -- -D warnings
         env:

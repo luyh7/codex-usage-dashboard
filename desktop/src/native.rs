@@ -1,7 +1,34 @@
 use super::*;
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
+
+fn autostart_enabled(app: &tauri::AppHandle) -> std::result::Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        super::linux_autostart::enabled(app)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    }
+}
+fn set_autostart(app: &tauri::AppHandle, enabled: bool) -> std::result::Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        super::linux_autostart::set_enabled(app, enabled)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if enabled {
+            app.autolaunch().enable()
+        } else {
+            app.autolaunch().disable()
+        }
+        .map_err(|e| e.to_string())
+    }
+}
 
 #[tauri::command]
 pub async fn desktop_settings(
@@ -11,7 +38,7 @@ pub async fn desktop_settings(
     trusted_live(&window, &app).await?;
     let state = app.state::<Desktop>();
     Ok(
-        json!({"hide_on_close":state.hide_on_close.load(Ordering::SeqCst),"can_hide":state.tray.load(Ordering::SeqCst)&&cfg!(windows),"autostart":app.autolaunch().is_enabled().map_err(|e|e.to_string())?,"version":env!("CARGO_PKG_VERSION"),"channel":if cfg!(target_os="linux")&&std::env::var_os("APPIMAGE").is_none(){"package"}else{"direct"}}),
+        json!({"hide_on_close":state.hide_on_close.load(Ordering::SeqCst),"can_hide":state.tray.load(Ordering::SeqCst)&&cfg!(windows),"autostart":autostart_enabled(&app)?,"version":env!("CARGO_PKG_VERSION"),"channel":if cfg!(target_os="linux")&&std::env::var_os("APPIMAGE").is_none(){"package"}else{"direct"}}),
     )
 }
 #[tauri::command]
@@ -29,14 +56,9 @@ pub async fn save_desktop_settings(
     if std::env::var_os("COUSASH_CONFIG_DIR").is_some() && autostart {
         return Err("autostart is available only for the installed application".into());
     }
-    let was_enabled = app.autolaunch().is_enabled().map_err(|e| e.to_string())?;
-    if autostart != was_enabled {
-        if autostart {
-            app.autolaunch().enable()
-        } else {
-            app.autolaunch().disable()
-        }
-        .map_err(|e| e.to_string())?;
+    let was_enabled = autostart_enabled(&app)?;
+    if autostart != was_enabled || (cfg!(target_os = "linux") && autostart) {
+        set_autostart(&app, autostart)?;
     }
     let mut value = read_window(&state.root);
     value.hide_on_close = hide_on_close;
@@ -44,11 +66,7 @@ pub async fn save_desktop_settings(
         usage_runtime::atomic_json(&state.root.join("desktop-settings.json"), &value)
     {
         if autostart != was_enabled {
-            let _ = if was_enabled {
-                app.autolaunch().enable()
-            } else {
-                app.autolaunch().disable()
-            };
+            let _ = set_autostart(&app, was_enabled);
         }
         return Err(error.to_string());
     }
