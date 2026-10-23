@@ -1,7 +1,7 @@
 // Local, signed updater test. Builds a different product ID with desktop-tests;
 // neither the ephemeral key nor the test controller belongs in shipping builds.
 import assert from 'node:assert/strict';
-import {cp,mkdir,readFile,writeFile,readdir,chmod,stat,unlink} from 'node:fs/promises';
+import {cp,mkdir,readFile,writeFile,readdir,chmod,stat,unlink,open} from 'node:fs/promises';
 import {spawn,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {once} from 'node:events';
@@ -95,7 +95,9 @@ const host=windows?path.join(installed,'cousash-desktop.exe'):mac?path.join(inst
 if(windows){
   const result=spawnSync(previous.artifact,['/S','/D='+installed],{env,windowsHide:true,windowsVerbatimArguments:true,timeout:120000});assert.equal(result.status,0,'Baseline installer failed');
 }else if(mac){run('tar',['-xzf',previous.artifact,'-C',installed],root);}else{await cp(previous.artifact,host);await chmod(host,0o755);}
-let child;const launch=()=>child=spawn(host,windows||mac?[]:['--appimage-extract-and-run'],{env,cwd:dir,windowsHide:true,stdio:'ignore'});
+await mkdir(path.join(root,'output/verification'),{recursive:true});
+const hostLog=await open(path.join(root,'output/verification',`updater-host-${target}.log`),'w');
+let child;const launch=()=>{child=spawn(host,windows||mac?[]:['--appimage-extract-and-run'],{env,cwd:dir,windowsHide:true,stdio:['ignore',hostLog.fd,hostLog.fd]});child.on('exit',(code,signal)=>console.log(JSON.stringify({updater_host_exit:code,signal,target})));return child;};
 async function activate(action){
   const desktop=await json(path.join(runtime,'desktop.json'));
   return new Promise((resolve,reject)=>{const socket=net.connect(Number(desktop.address.split(':')[1]),'127.0.0.1');let reply='';socket.setTimeout(300000,()=>socket.destroy(Error('Updater command timeout')));socket.on('connect',()=>socket.write(JSON.stringify({token:desktop.token,action})+'\n'));socket.on('data',data=>reply+=data);socket.on('error',reject);socket.on('end',()=>{try{resolve(reply.trim()==='ok'?{ok:true}:reply.trim()?JSON.parse(reply):null);}catch(error){reject(error);}});});
@@ -128,6 +130,7 @@ try{
   for(const failure of ['offline','interrupted','bad-signature','wrong-version']){
     mode=failure;const result=await activate(failure==='offline'?'test_update_check':'test_update_install');assert.equal(result?.ok,false,`${failure} must fail`);
     assert.doesNotMatch(result.error,/untrusted desktop page/);
+    assert.match(result.error,failure==='bad-signature'?/signature verification failed/i:failure==='wrong-version'?/signed for version/i:/fetch|decode|decoding|download|connection|body|release JSON/i,`${failure}: unexpected failure: ${result.error}`);
     current=await healthy(previous.info.build_id);assert.equal(current.record.pid,initialPid,`${failure} must leave service running`);assert.deepEqual(await hashes(),before);report.checks.push({case:failure,service_preserved:true,error:result.error});
   }
   const installedHash=createHash('sha256').update(await readFile(host)).digest('hex');
@@ -146,5 +149,6 @@ try{
   try{await activate('quit');}catch{}
   await sleep(1500);server.close();
   if(windows){const uninstaller=path.join(installed,'uninstall.exe');try{await stat(uninstaller);const result=spawnSync(uninstaller,['/S'],{env,windowsHide:true,timeout:120000});report.uninstall_exit=result.status;}catch{}}
+  await hostLog.close();
   await mkdir(path.join(root,'output/verification'),{recursive:true});await save(path.join(root,'output/verification',`desktop-update-e2e-${process.platform}.json`),report);console.log(JSON.stringify(report));
 }
