@@ -12,8 +12,10 @@ import {fileURLToPath} from 'node:url';
 import {runtimeDir} from './runtime-paths.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const windows=process.platform==='win32';
-assert(windows||process.platform==='linux','This driver currently covers Windows and Linux AppImage');
-const target=windows?'x86_64-pc-windows-msvc':'x86_64-unknown-linux-gnu';
+const mac=process.platform==='darwin';
+assert(windows||mac||process.platform==='linux','Unsupported updater test platform');
+const target=windows?'x86_64-pc-windows-msvc':mac?(process.arch==='arm64'?'aarch64-apple-darwin':'x86_64-apple-darwin'):'x86_64-unknown-linux-gnu';
+const platformKey=windows?'windows-x86_64':mac?(process.arch==='arm64'?'darwin-aarch64':'darwin-x86_64'):'linux-x86_64';
 const dir=path.join(root,'output',`update-e2e-${process.platform}`);
 const source=path.join(dir,'source');const configFile=path.join(dir,'test-config.json');
 const cli=path.join(root,'desktop/node_modules/@tauri-apps/cli/tauri.js');
@@ -36,7 +38,7 @@ if(process.argv[2]==='build'){
     const generated=spawnSync(process.execPath,[cli,'signer','generate','--ci','--force','--write-keys',key],{encoding:'utf8',windowsHide:true});assert.equal(generated.status,0,'Test key generation failed');
     if(!windows)await chmod(key,0o600);
     const pubkey=(await readFile(key+'.pub','utf8')).trim();
-    const config={productName:'Cousash Updater Test',identifier:'io.github.luyh7.cousash.updater-test',bundle:{createUpdaterArtifacts:true,targets:windows?['nsis']:['appimage']},plugins:{updater:{pubkey,endpoints:[`http://127.0.0.1:${port}/latest.json`],dangerousInsecureTransportProtocol:true,requireSignedVersion:true,windows:{installMode:'quiet'}}}};
+    const config={productName:'Cousash Updater Test',identifier:'io.github.luyh7.cousash.updater-test',bundle:{createUpdaterArtifacts:true,targets:windows?['nsis']:mac?['app']:['appimage']},plugins:{updater:{pubkey,endpoints:[`http://127.0.0.1:${port}/latest.json`],dangerousInsecureTransportProtocol:true,requireSignedVersion:true,windows:{installMode:'quiet'}}}};
     await save(configFile,config);
     const results={port,target,versions:{}};
     for(const version of ['1.0.1','1.0.2']){
@@ -50,11 +52,11 @@ if(process.argv[2]==='build'){
       await mkdir(path.join(source,'desktop/binaries'),{recursive:true});await cp(service,path.join(source,'desktop/binaries',`codex-usage-dashboard-${target}${ext}`));
       await save(path.join(source,'desktop',`service-build-${target}.json`),info);
       run(process.execPath,[cli,'build','--target',target,'--features','desktop-tests','--config',configFile,'--ci'],path.join(source,'desktop'),{CARGO_TARGET_DIR:desktopTarget,TAURI_SIGNING_PRIVATE_KEY:key,TAURI_SIGNING_PRIVATE_KEY_PASSWORD:''});
-      const artifacts=(await files(path.join(desktopTarget,target,'release/bundle'))).filter(f=>path.basename(f).startsWith('Cousash Updater Test_'+version)&&f.endsWith(windows?'-setup.exe':'.AppImage'));
+      const artifacts=(await files(path.join(desktopTarget,target,'release/bundle'))).filter(f=>path.basename(f).startsWith(mac?'Cousash Updater Test':'Cousash Updater Test_'+version)&&f.endsWith(windows?'-setup.exe':mac?'.app.tar.gz':'.AppImage'));
       assert.equal(artifacts.length,1,'Exactly one test artifact required');
       const dest=path.join(dir,version,path.basename(artifacts[0]));await mkdir(path.dirname(dest),{recursive:true});await cp(artifacts[0],dest);await cp(artifacts[0]+'.sig',dest+'.sig');
       assert(artifacts[0].startsWith(path.join(desktopTarget,target,'release/bundle')+path.sep));await unlink(artifacts[0]);await unlink(artifacts[0]+'.sig');
-      results.versions[version]={artifact:dest,info};console.log(`Prepared ${target} signed test package ${version}`);
+      results.versions[version]={artifact:dest,info,source_sha256:createHash('sha256').update(await readFile(path.join(root,'desktop/src/main.rs'))).update(await readFile(path.join(root,'desktop/src/native.rs'))).digest('hex')};console.log(`Prepared ${target} signed test package ${version}`);
     }
     await save(path.join(dir,'builds.json'),results);
   }finally{portServer.close();}
@@ -81,7 +83,7 @@ const server=http.createServer((req,res)=>{
   if(mode==='offline'){res.writeHead(503).end('Offline fixture');return;}
   if(req.url==='/latest.json'){
     const signature=mode==='bad-signature'?damagedSignature:mode==='invalid-package'?invalidSignature:goodSignature;
-    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({version:mode==='wrong-version'?'1.0.3':'1.0.2',notes:'Signed local update fixture',pub_date:'2026-10-23T00:00:00Z',platforms:{[windows?'windows-x86_64':'linux-x86_64']:{url:`http://127.0.0.1:${builds.port}/artifact`,signature}}}));return;
+    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({version:mode==='wrong-version'?'1.0.3':'1.0.2',notes:'Signed local update fixture',pub_date:'2026-10-23T00:00:00Z',platforms:{[platformKey]:{url:`http://127.0.0.1:${builds.port}/artifact`,signature}}}));return;
   }
   if(req.url==='/artifact'){
     const payload=mode==='invalid-package'?invalidBytes:bytes;res.writeHead(200,{'Content-Length':payload.length});
@@ -89,11 +91,11 @@ const server=http.createServer((req,res)=>{
   }
   res.writeHead(404).end();
 });server.listen(builds.port,'127.0.0.1');await once(server,'listening');
-const host=windows?path.join(installed,'cousash-desktop.exe'):path.join(installed,'Cousash-Test.AppImage');
+const host=windows?path.join(installed,'cousash-desktop.exe'):mac?path.join(installed,'Cousash Updater Test.app/Contents/MacOS/cousash-desktop'):path.join(installed,'Cousash-Test.AppImage');
 if(windows){
   const result=spawnSync(previous.artifact,['/S','/D='+installed],{env,windowsHide:true,windowsVerbatimArguments:true,timeout:120000});assert.equal(result.status,0,'Baseline installer failed');
-}else{await cp(previous.artifact,host);await chmod(host,0o755);}
-let child;const launch=()=>child=spawn(host,windows?[]:['--appimage-extract-and-run'],{env,cwd:dir,windowsHide:true,stdio:'ignore'});
+}else if(mac){run('tar',['-xzf',previous.artifact,'-C',installed],root);}else{await cp(previous.artifact,host);await chmod(host,0o755);}
+let child;const launch=()=>child=spawn(host,windows||mac?[]:['--appimage-extract-and-run'],{env,cwd:dir,windowsHide:true,stdio:'ignore'});
 async function activate(action){
   const desktop=await json(path.join(runtime,'desktop.json'));
   return new Promise((resolve,reject)=>{const socket=net.connect(Number(desktop.address.split(':')[1]),'127.0.0.1');let reply='';socket.setTimeout(300000,()=>socket.destroy(Error('Updater command timeout')));socket.on('connect',()=>socket.write(JSON.stringify({token:desktop.token,action})+'\n'));socket.on('data',data=>reply+=data);socket.on('error',reject);socket.on('end',()=>{try{resolve(reply.trim()==='ok'?{ok:true}:reply.trim()?JSON.parse(reply):null);}catch(error){reject(error);}});});

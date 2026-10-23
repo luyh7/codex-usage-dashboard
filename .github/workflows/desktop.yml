@@ -20,7 +20,7 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       DESKTOP_TARGET: ${{ matrix.target }}
     steps:
@@ -69,11 +69,6 @@ jobs:
           "$APP/Contents/MacOS/codex-usage-dashboard" --build-info
           codesign --verify --deep --strict "$APP"
       - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: desktop-verification-${{ matrix.target }}
-          path: output/verification/
-      - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.target }}
           path: |
@@ -81,3 +76,16 @@ jobs:
             desktop/service-build.json
             desktop/target/${{ matrix.target }}/release/artifacts.json
           if-no-files-found: error
+      # Upload production bundles before building the isolated test product.
+      - name: macOS signed update and recovery
+        if: runner.os == 'macOS'
+        run: |
+          node tools/desktop-update-e2e.mjs build
+          node tools/desktop-update-e2e.mjs run
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-verification-${{ matrix.target }}
+          path: output/verification/
