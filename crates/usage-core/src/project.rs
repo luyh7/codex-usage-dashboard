@@ -248,7 +248,14 @@ mod tests {
         );
         let result = resolve(branch.to_str().unwrap());
         assert_eq!(result.project, "project with spaces");
-        assert_eq!(result.project_root, main.to_str().unwrap());
+        assert_eq!(
+            Path::new(&result.project_root).canonicalize().unwrap(),
+            main.canonicalize().unwrap()
+        );
+        assert_eq!(
+            Path::new(&result.workspace_root).canonicalize().unwrap(),
+            branch.canonicalize().unwrap()
+        );
         assert_eq!(result.project_branch, "feature/test");
         assert!(result.is_git_worktree);
         let missing = resolve("Z:\\missing\\folder");

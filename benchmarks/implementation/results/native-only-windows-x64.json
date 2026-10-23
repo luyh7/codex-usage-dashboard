@@ -3,7 +3,7 @@
   "platform": "windows-x64",
   "version": "1.0.1",
   "ui": "svelte",
-  "build_id": "5c7e11ff5b615d2f4076160ae6f550033f9d499fad1aa219642d918713c53af7",
+  "build_id": "8a16b9983ad5650f21ed86d777819d5fffd126bf2c42fe7eab51abc69db8ef5b",
   "python_on_path": false,
   "checks": [
     "missing offline artifact fails without fallback",
