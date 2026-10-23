@@ -13,6 +13,7 @@ import platform
 import random
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -39,6 +40,8 @@ def legacy_view(value):
 
 
 def main():
+    if sys.version_info[:3] != (3, 14, 5):
+        raise SystemExit('The frozen legacy differential oracle requires Python 3.14.5; the shipped dashboard needs no Python.')
     os.environ['TZ']='UTC'
     if hasattr(time,'tzset'): time.tzset()
     d=load_dashboard();rng=random.Random(64321)

@@ -38,7 +38,8 @@ jobs:
           node-version: 24
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          # The frozen legacy oracle includes CPython 3.14.5 timestamp semantics.
+          python-version: '3.14.5'
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
