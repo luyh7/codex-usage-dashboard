@@ -3,6 +3,7 @@
   import { words, number, type Language } from '../lib/domain/ui';
   import { downloadSnapshot } from '../../shared/snapshot-export.js';
   import Icon from './Icon.svelte';
+  import { isDesktop, desktop } from '../lib/data/desktop';
   let {
     data,
     remotes,
@@ -27,7 +28,12 @@
     if (exporting) return;
     exporting = true; exportMode = mode; error = ''; exportPercent = 0; exportPhase = 'preparing';
     try {
-      await downloadSnapshot(data.exportUrl(mode), (percent, phase) => { exportPercent = percent; exportPhase = phase; });
+      if (isDesktop()) {
+        const progress = (event: Event) => { const detail = (event as CustomEvent).detail; exportPercent = detail.percent; exportPhase = detail.phase; };
+        window.addEventListener('cousash-export-progress', progress);
+        try { const saved = await desktop<boolean>('export_snapshot', { redacted: mode === 'redacted' }); exportPhase = saved ? 'complete' : ''; if (saved) exportPercent = 100; }
+        finally { window.removeEventListener('cousash-export-progress', progress); }
+      } else await downloadSnapshot(data.exportUrl(mode), (percent, phase) => { exportPercent = percent; exportPhase = phase; });
     } catch (e) { error = String(e); exportPhase = ''; }
     finally { exporting = false; }
   }

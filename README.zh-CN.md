@@ -32,6 +32,8 @@
 
 ## 快速开始
 
+独立桌面客户端已提供开发构建：[构建与使用](docs/desktop.md) · [平台验证](docs/desktop-verification.md)。Windows、Linux 已有本机测试结果，macOS 保留未验证项。客户端包含原生运行程序，不需要 Skill 或 Agensi 账号。
+
 安装 Codex 技能：
 
 ```bash

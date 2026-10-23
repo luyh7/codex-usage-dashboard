@@ -1,0 +1,77 @@
+name: Desktop clients
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['desktop/**', 'crates/**', 'web/**', 'tools/desktop*', 'tools/runtime*', 'Cargo*', '.github/workflows/desktop.yml']
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      DESKTOP_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils xvfb
+      - run: npm ci --prefix web
+      - run: npm ci --prefix desktop
+      - run: npm run check --prefix web
+      - run: npm test --prefix web
+      - run: node --test tools/desktop-update.test.mjs
+      - run: node tools/desktop.mjs bundle
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+      - name: Native desktop startup and duplicate launch
+        if: runner.os != 'Linux'
+        run: |
+          node tools/desktop-smoke.mjs
+          node tools/desktop-concurrency.mjs
+      - name: Linux desktop startup under X11
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a node tools/desktop-smoke.mjs
+          xvfb-run -a node tools/desktop-concurrency.mjs
+      - run: cargo test --workspace --locked
+      - name: Shared protocol and fixture smoke test
+        shell: bash
+        run: AUDIT_BINARY="target/${DESKTOP_TARGET}/release/codex-usage-dashboard${{ runner.os == 'Windows' && '.exe' || '' }}" node --test tools/runtime.test.mjs tools/security.test.mjs
+      - name: Verify macOS bundle resources
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP="desktop/target/${DESKTOP_TARGET}/release/bundle/macos/Codex Usage Dashboard.app"
+          test -x "$APP/Contents/MacOS/codex-usage-dashboard"
+          "$APP/Contents/MacOS/codex-usage-dashboard" --build-info
+          codesign --verify --deep --strict "$APP"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-verification-${{ matrix.target }}
+          path: output/verification/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: |
+            desktop/target/${{ matrix.target }}/release/bundle/
+            desktop/service-build.json
+            desktop/target/${{ matrix.target }}/release/artifacts.json
+          if-no-files-found: error

@@ -4,8 +4,13 @@
   import { timezoneOption } from '../lib/domain/timezones';
   import Dropdown from './Dropdown.svelte';
   import RemoteManager from './RemoteManager.svelte';
+  import DesktopSettings from './DesktopSettings.svelte';
+  import { isDesktop, desktop } from '../lib/data/desktop';
+  import { preferences, savePreferences } from '../lib/data/preferences';
+  import { onMount } from 'svelte';
 
-  let { data, remotes, localDevice, lang, timezone, languageChanged, timezoneChanged, changed }: {
+  let { data, remotes, localDevice, lang, timezone, languageChanged, timezoneChanged, changed, settingsError = '' }: {
+    settingsError?: string;
     data: DashboardData;
     remotes: Remote[];
     localDevice?: LocalDevice;
@@ -16,7 +21,24 @@
     changed: () => void;
   } = $props();
   let t = $derived(words(lang));
-  const supportedTimezones = Intl.supportedValuesOf('timeZone');
+  const supportedTimezones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : ['Asia/Shanghai', 'Asia/Tokyo', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris'];
+  let homes = $state<string[]>([]), sourceError = $state(''), sourceSaved = $state(false);
+  let effectiveSources = $state<{ path: string; status: string }[]>([]);
+  let sourceBusy = $state(false);
+  const sourceLabels: Record<string, [string, string]> = { missing: ['未找到日志文件夹', 'Log folder not found'], unreadable: ['无法读取日志文件夹', 'Cannot read log folder'], empty: ['此文件夹尚无 Codex 日志', 'No Codex logs in this folder'] };
+  onMount(() => {
+    preferences().then(v => homes = v.codex_homes).catch(e => sourceError = String(e));
+    fetch('/api/sources').then(async r => { if (!r.ok) throw new Error('Cannot read log sources'); effectiveSources = await r.json(); }).catch(e => sourceError = String(e));
+  });
+  async function saveSources(paths: string[]) {
+    sourceBusy = true; sourceError = '';
+    try { await savePreferences({ codex_homes: paths }); homes = paths; sourceSaved = true; await desktop('apply_sources'); }
+    catch (e) { sourceError = String(e); } finally { sourceBusy = false; }
+  }
+  async function chooseSource() {
+    try { const path = await desktop<string | null>('choose_source'); if (!path) return; await saveSources([path]); }
+    catch (e) { sourceError = String(e); }
+  }
   let timezoneOptions = $derived(
     [...new Set(['UTC', timezone, ...supportedTimezones])]
       .sort()
@@ -29,6 +51,7 @@
   <div class="settings-content">
     <section class="settings-card" aria-labelledby="general-title">
       <h2 id="general-title">{t.general}</h2>
+      {#if settingsError}<p class="error" role="alert">{settingsError}</p>{/if}
       <div class="setting-row">
         <span>{t.language}</span>
         <div class="setting-control">
@@ -44,6 +67,16 @@
         </div>
       </div>
     </section>
+    {#if isDesktop()}
+      <div class="settings-card"><DesktopSettings {lang} /></div>
+      <section class="settings-card"><h2>{lang === 'zh' ? 'Codex 日志来源' : 'Codex log sources'}</h2>
+        {#each effectiveSources as source}<p class="source-path">{source.path}</p>{#if sourceLabels[source.status]}<p role="status">{sourceLabels[source.status][lang === 'zh' ? 0 : 1]}</p>{/if}{/each}
+        <button disabled={sourceBusy} onclick={chooseSource}>{lang === 'zh' ? '选择文件夹' : 'Choose folder'}</button>
+        {#if homes.length}<button disabled={sourceBusy} onclick={() => saveSources([])}>{lang === 'zh' ? '恢复自动发现' : 'Discover automatically'}</button>{/if}
+        {#if sourceSaved}<p role="status">{lang === 'zh' ? '已保存，退出并重新打开应用后生效。' : 'Saved. Quit and reopen the application to apply.'}</p>{/if}
+        {#if sourceError}<p class="error" role="alert">{sourceError}</p>{/if}
+      </section>
+    {/if}
     <div class="settings-card"><RemoteManager {data} {remotes} {localDevice} {lang} {changed} /></div>
   </div>
 </div>
@@ -52,6 +85,7 @@
   .settings-header { margin-bottom: 24px; }
   h1 { margin: 0; }
   h2 { margin: 0 0 12px; }
+  .source-path { overflow-wrap: anywhere; }
   .settings-scroll { flex: 1; min-height: 0; overflow: auto; padding: 2px 4px 24px 2px; }
   .settings-content { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
   .settings-card { min-width: 0; padding: 28px 32px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }

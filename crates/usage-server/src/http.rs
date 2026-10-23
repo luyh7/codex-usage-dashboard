@@ -83,8 +83,61 @@ async fn blocking(
 async fn health(Extract(state): Extract<Arc<State>>) -> Response {
     response(
         StatusCode::OK,
-        &json!({"ok":true,"app":"codex-usage-dashboard","protocol_version":1,"implementation":"rust","ui":env!("COUSASH_UI"),"timezone":state.zone.name(),"source_sha256":env!("COUSASH_BUILD_ID"),"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"pid":std::process::id(),"codex_homes":state.sources.iter().map(|s|s.home.to_string_lossy()).collect::<Vec<_>>(),"instance_id":std::env::var("COUSASH_INSTANCE_ID").unwrap_or_default(),"features":["paged-events-v1","separate-chart-v1","indexed-search-v1","periods","period-deltas","all-period","multi-codex-home","remote-snapshot-v1","background-index-v1","sse-revision-v1"],"device_short_code":state.device,"index":*state.status.read().unwrap()}),
+        &json!({"ok":true,"app":"codex-usage-dashboard","protocol_version":1,"implementation":"rust","ui":env!("COUSASH_UI"),"timezone":state.zone.name(),"config_scope":usage_runtime::scope_id(&crate::config::config_dir()),"source_sha256":env!("COUSASH_BUILD_ID"),"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"pid":std::process::id(),"codex_homes":state.sources.iter().map(|s|s.home.to_string_lossy()).collect::<Vec<_>>(),"instance_id":std::env::var("COUSASH_INSTANCE_ID").unwrap_or_default(),"features":["paged-events-v1","separate-chart-v1","indexed-search-v1","periods","period-deltas","all-period","multi-codex-home","remote-snapshot-v1","background-index-v1","sse-revision-v1"],"device_short_code":state.device,"index":*state.status.read().unwrap()}),
     )
+}
+async fn settings() -> Response {
+    match crate::preferences::load() {
+        Ok(value) => response(StatusCode::OK, &value),
+        Err(e) => response(StatusCode::INTERNAL_SERVER_ERROR, &json!({"error":e})),
+    }
+}
+async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
+    let sources: Vec<_> = state
+        .sources
+        .iter()
+        .map(|s| {
+            let status = match std::fs::read_dir(&s.home) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "missing",
+                Err(_) => "unreadable",
+                Ok(_) => {
+                    if s.home.join("sessions").is_dir() || s.home.join("archived_sessions").is_dir()
+                    {
+                        "available"
+                    } else {
+                        "empty"
+                    }
+                }
+            };
+            json!({"path":s.home,"status":status})
+        })
+        .collect();
+    response(StatusCode::OK, &sources)
+}
+async fn save_settings(axum::Json(value): axum::Json<Value>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::preferences::save_patch(value)).await {
+        Ok(Ok(value)) => response(StatusCode::OK, &value),
+        Ok(Err(crate::preferences::SaveError::Invalid(e))) => {
+            response(StatusCode::BAD_REQUEST, &json!({"error":e}))
+        }
+        Ok(Err(crate::preferences::SaveError::Storage(e))) => {
+            response(StatusCode::INTERNAL_SERVER_ERROR, &json!({"error":e}))
+        }
+        Err(_) => response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &json!({"error":"settings writer unavailable"}),
+        ),
+    }
+}
+async fn summary(
+    Extract(state): Extract<Arc<State>>,
+    Query(mut params): Query<HashMap<String, String>>,
+) -> Response {
+    blocking(state.clone(),move||{
+        if !params.contains_key("timezone") && let Some(zone)=crate::preferences::load().map_err(QueryError::Invalid)?.timezone {params.insert("timezone".into(),zone);}
+        let (view,_)=state.view(&params,false)?;
+        Ok(response(StatusCode::OK,&json!({"period":view.period,"generated_at":view.generated_at,"summary":view.summary()?})))
+    }).await
 }
 async fn shutdown(Extract(state): Extract<Arc<State>>, headers: axum::http::HeaderMap) -> Response {
     let token = std::env::var("COUSASH_SHUTDOWN_TOKEN").unwrap_or_default();
@@ -595,6 +648,9 @@ pub fn router(state: Arc<State>) -> Router {
         .route("/svelte/", get(previous_entry))
         .fallback(static_file)
         .route("/api/health", get(health))
+        .route("/api/settings", get(settings).post(save_settings))
+        .route("/api/sources", get(sources))
+        .route("/api/summary", get(summary))
         .route("/api/refresh", post(refresh))
         .route("/api/shutdown", post(shutdown))
         .route("/api/daily-usage", get(daily))

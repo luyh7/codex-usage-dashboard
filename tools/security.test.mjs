@@ -70,7 +70,7 @@ test('native HTTP boundary blocks hostile reads/writes while legitimate operatio
   const base = await server(t, f);
   const headers = {'Content-Type':'application/json'};
   const post = (route, body, extra={}) => fetch(base+route, {method:'POST',headers:{...headers,...extra},body:JSON.stringify(body)});
-  for (const route of ['/api/health','/api/security/token','/api/export.json','/api/export.json.gz','/api/v2/projects','/api/revisions','/']) {
+  for (const route of ['/api/health','/api/settings','/api/sources','/api/summary','/api/security/token','/api/export.json','/api/export.json.gz','/api/v2/projects','/api/revisions','/']) {
     for (const hostile of [{Host:'evil.test'}, {Origin:'https://evil.test'}, {Origin:'null'}, {Origin:base.replace(/:\d+$/,':1')}, {'Sec-Fetch-Site':'cross-site'}]) {
       assert.equal(await rawStatus(base+route,hostile),403,route+JSON.stringify(hostile));
     }
@@ -80,7 +80,7 @@ test('native HTTP boundary blocks hostile reads/writes while legitimate operatio
   assert.equal(session.headers.get('x-frame-options'),'DENY');
   const token = (await session.json()).token;
   assert.match(token,/^[a-f0-9]{64}$/);
-  for (const route of ['/api/refresh','/api/remotes/import','/api/remotes/import-file','/api/remotes/rename','/api/remotes/delete','/api/export/start']) {
+  for (const route of ['/api/settings','/api/refresh','/api/remotes/import','/api/remotes/import-file','/api/remotes/rename','/api/remotes/delete','/api/export/start']) {
     assert.equal((await post(route,{})).status,403);
     assert.equal((await post(route,{}, {'X-Codex-Write-Token':'wrong'})).status,403);
     assert.equal((await post(route,{}, {'X-Codex-Write-Token':token,'Content-Type':'text/plain'})).status,415);

@@ -17,7 +17,11 @@
     "install-skill": "node ./bin/install.js",
     "validate": "node --check ./bin/install.js",
     "package-native": "node tools/package_release.mjs",
-    "test-native": "node tools/verify_native.mjs"
+    "test-native": "node tools/verify_native.mjs",
+    "desktop:build": "node tools/desktop.mjs build",
+    "desktop:run": "node tools/desktop.mjs run",
+    "desktop:bundle": "node tools/desktop.mjs bundle",
+    "desktop:smoke": "node tools/desktop-smoke.mjs"
   },
   "keywords": [
     "codex",

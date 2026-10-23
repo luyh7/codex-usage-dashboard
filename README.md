@@ -32,6 +32,8 @@
 
 ## Quick start
 
+Standalone desktop clients are available as development builds: [build and use](docs/desktop.md) · [platform validation](docs/desktop-verification.md). Windows and Linux have local test results; macOS remains unverified. The clients include the native runtime and do not require a skill or an Agensi account.
+
 Install the Codex skill:
 
 ```bash

@@ -1,9 +1,8 @@
 //! Native process lifecycle. All normal launches use this executable directly.
 use crate::{Args, config};
-use fs2::FileExt;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
-    fs::{self, OpenOptions},
+    fs,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
@@ -12,7 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const URL: &str = "http://127.0.0.1:8765/";
 // Keep compatibility with existing managed Rust process records.
 fn root() -> PathBuf {
     std::env::var_os("COUSASH_CONFIG_DIR")
@@ -127,172 +125,50 @@ fn process_alive(pid: u32) -> bool {
         }
     }
 }
-fn random() -> Result<String> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
-}
-fn matches(health: &Value, args: &Args) -> bool {
-    let expected = config::sources(&args.codex_home, !args.no_auto_windows);
-    let mut homes: Vec<_> = expected
-        .iter()
-        .map(|s| s.home.to_string_lossy().into_owned())
-        .collect();
-    homes.sort();
-    let mut actual: Vec<_> = health["codex_homes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect();
-    actual.sort();
-    valid(health)
-        && health["index"]["phase"] != "error"
-        && health["build_id"] == env!("COUSASH_BUILD_ID")
-        && homes == actual
-        && args
-            .timezone
-            .as_ref()
-            .is_none_or(|zone| health["timezone"].as_str() == Some(zone))
-}
 pub fn run(args: &Args) -> Result<()> {
     if args.host != "127.0.0.1" {
         return Err(
-            "The desktop launcher binds 127.0.0.1; use --serve for an explicit server host".into(),
+            "The launcher binds 127.0.0.1; use --serve for an explicit loopback host".into(),
         );
     }
-    fs::create_dir_all(root())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(root(), fs::Permissions::from_mode(0o700))?;
+    if args.stop || args.shortcut {
+        return legacy_run(args);
     }
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(root().join("launcher.lock"))?;
-    lock.lock_exclusive()?;
-    if args.stop {
-        stop()?;
-        return Ok(());
+    let homes = if args.codex_home.is_empty() {
+        crate::preferences::load()?.codex_homes
+    } else {
+        args.codex_home.clone()
+    };
+    let service = usage_runtime::ensure_service_options(
+        &std::env::current_exe()?,
+        &config::config_dir(),
+        &homes,
+        None,
+        8765,
+        !args.no_auto_windows,
+        args.timezone.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    let url = format!("{}/", service.record.url());
+    if !args.no_browser {
+        open_browser_url(&url)?;
     }
+    println!("{url}");
+    Ok(())
+}
+fn legacy_run(args: &Args) -> Result<()> {
     if args.shortcut {
         return shortcut();
     }
-    if let Some(current) = health()
-        && matches(&current, args)
+    if let Some(record) =
+        usage_runtime::Record::read(&config::config_dir()).map_err(|e| e.to_string())?
+        && record.health().is_ok()
     {
-        if !args.no_browser {
-            open_browser()?;
-        }
-        println!("{URL}");
-        return Ok(());
+        return record.stop().map_err(|e| e.to_string().into());
     }
-    stop()?;
-    let executable = std::env::current_exe()?;
-    let token = random()?;
-    let instance = random()?;
-    let log = root().join("dashboard.log");
-    let output = OpenOptions::new().create(true).append(true).open(&log)?;
-    let mut child = Command::new(executable);
-    child.arg("--serve").arg("--host").arg(&args.host);
-    for home in &args.codex_home {
-        child.arg("--codex-home").arg(home);
-    }
-    if args.no_auto_windows {
-        child.arg("--no-auto-windows");
-    }
-    if let Some(zone) = &args.timezone {
-        child.arg("--timezone").arg(zone);
-    }
-    child
-        .env("COUSASH_SHUTDOWN_TOKEN", &token)
-        .env("COUSASH_INSTANCE_ID", &instance)
-        .stdin(Stdio::null())
-        .stdout(output.try_clone()?)
-        .stderr(output);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // setsid detaches the server from the invoking terminal/session.
-        unsafe {
-            child.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        use windows_sys::Win32::{
-            Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation},
-            System::Console::{
-                GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-            },
-        };
-        // Command::spawn inherits more than the redirected standard handles on
-        // Windows. Keeping the caller's pipes open in the detached server makes
-        // Node/skill launchers wait forever for EOF even after this process exits.
-        for stream in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-            unsafe {
-                let handle = GetStdHandle(stream);
-                if !handle.is_null()
-                    && handle != INVALID_HANDLE_VALUE
-                    && SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) == 0
-                {
-                    return Err(std::io::Error::last_os_error().into());
-                }
-            }
-        }
-        child.creation_flags(0x08000000 | 0x00000200); // NO_WINDOW | NEW_PROCESS_GROUP
-    }
-    let mut child = child.spawn()?;
-    config::atomic_json(
-        &root().join("launcher-process.json"),
-        &json!({"pid":child.id(),"build_id":env!("COUSASH_BUILD_ID"),"instance_id":instance,"shutdown_token":token}),
-    )?;
-    let deadline = Instant::now() + crate::network::STARTUP_TIMEOUT;
-    let progress_at = Instant::now() + Duration::from_secs(2);
-    let mut reported_wait = false;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Err(format!("Dashboard exited ({status}); see {}", log.display()).into());
-        }
-        if let Some(current) = health()
-            && current["instance_id"] == instance
-        {
-            if current["index"]["phase"] == "error" {
-                return Err(format!("Dashboard index failed; see {}", log.display()).into());
-            }
-            if matches(&current, args) && current["index"]["phase"] == "ready" {
-                if !args.no_browser {
-                    open_browser()?;
-                }
-                println!("{URL}");
-                return Ok(());
-            }
-        }
-        if Instant::now() > deadline {
-            return Err(format!("Dashboard startup timed out; see {}", log.display()).into());
-        }
-        if !reported_wait && Instant::now() >= progress_at {
-            eprintln!(
-                "Waiting for the dashboard on port 8765; see {}",
-                log.display()
-            );
-            reported_wait = true;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-pub fn open_browser() -> Result<()> {
-    open_browser_url(URL)
+    let _lock = usage_runtime::lock(&root(), "launcher.lock", Duration::from_secs(15))
+        .map_err(|e| e.to_string())?;
+    stop()
 }
 pub fn open_browser_url(url: &str) -> Result<()> {
     let mut command;

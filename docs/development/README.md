@@ -2,6 +2,8 @@
 
 [← README](../../README.md) · [Usage guide](../usage.md)
 
+Desktop clients: [build, runtime protocol and distribution](../desktop.md) · [platform verification](../desktop-verification.md).
+
 ## Prerequisites
 
 - Rust stable.
