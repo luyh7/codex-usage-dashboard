@@ -59,7 +59,7 @@ npm test --prefix web
 node --test tools/release.test.mjs
 ```
 
-After application code changes, run the current worktree dashboard on port **8765** and verify `/api/health` as required by [AGENTS.md](../../AGENTS.md). If a managed dashboard is already running there, verify its identity and replace it gracefully. Do not use an alternate port.
+After application code changes, run an isolated dashboard from the current worktree and verify its build identity and URL as required by [AGENTS.md](../../AGENTS.md).
 
 Python is used only by optional historical differential checks in `tools/`, `tests/`, and `benchmarks/`. Their oracle is loaded from pinned Git history into a temporary directory; it is not an application backend. Release CI runs the differential check on each supported platform.
 
@@ -101,8 +101,10 @@ See [release and rollback](../implementation/release-and-rollback.md), the [1.0.
 
 ## Design and screenshots
 
-[Clear Mint](../design/clear-mint/README.md) is the current interface reference. README brand assets reuse the approved Soft-A SVGs.
+[Clear Mint](../design/clear-mint/README.md) is the visual reference. UI requirements and acceptance checks live in the [UI contract](ui-contract.md). README brand assets reuse the approved Soft-A SVGs.
 
 The README screenshots were rendered from the Svelte production build using the repository's synthetic [Clear Mint fixture](../../tools/fixtures/clear_mint.mjs). They show demo data, not a user's Codex history. The English image uses translated fixture titles; the Chinese image retains the original titles.
 
 The light and dark README covers adapt the branding to GitHub's background. They do not represent separate application themes.
+
+Store UI verification captures under `output/verification/`, preserving the original design images. Earlier screenshot/layout scripts and browser dependency overrides are listed in the [design record](../design/clear-mint/history.md#早期验收素材).

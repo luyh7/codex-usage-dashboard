@@ -16,13 +16,6 @@
     changed: () => void;
   } = $props();
   let t = $derived(words(lang));
-  let refreshing = $state(false), refreshError = $state('');
-  async function refresh() {
-    refreshing = true; refreshError = '';
-    try { await data.forceRefresh(); changed(); }
-    catch (error) { refreshError = String(error); }
-    finally { refreshing = false; }
-  }
   const supportedTimezones = Intl.supportedValuesOf('timeZone');
   let timezoneOptions = $derived(
     [...new Set(['UTC', timezone, ...supportedTimezones])]
@@ -50,13 +43,6 @@
             emptyLabel={lang === 'zh' ? '没有匹配的时区' : 'No matching time zones'} />
         </div>
       </div>
-      <div class="setting-row">
-        <span>{lang === 'zh' ? '数据' : 'Data'}</span>
-        <div class="setting-control"><button disabled={refreshing} aria-busy={refreshing} onclick={refresh}>
-          {refreshing ? (lang === 'zh' ? '正在刷新…' : 'Refreshing…') : (lang === 'zh' ? '强制刷新' : 'Force refresh')}
-        </button></div>
-      </div>
-      {#if refreshError}<p class="error" role="alert">{refreshError}</p>{/if}
     </section>
     <div class="settings-card"><RemoteManager {data} {remotes} {localDevice} {lang} {changed} /></div>
   </div>

@@ -112,14 +112,17 @@ export function metricTooltip(node: HTMLElement | SVGElement, initial: MetricToo
     hide();
     active = openTooltip(node, content(), {
       className: data.className ?? 'metric-tooltip',
-      x: event instanceof PointerEvent ? event.clientX : undefined,
-      y: event instanceof PointerEvent ? event.clientY : undefined,
+      x: data.followPointer && event instanceof PointerEvent ? event.clientX : undefined,
+      y: data.followPointer && event instanceof PointerEvent ? event.clientY : undefined,
       side: data.followPointer ? 'pointer' : 'top',
+      onClose: () => { active = null; clearMounted(); },
     });
     void tick().then(() => active?.place());
   }
   function hide() { active?.close(); active = null; clearMounted(); }
-  function move(event: Event) { active?.place((event as PointerEvent).clientX, (event as PointerEvent).clientY); }
+  function move(event: Event) {
+    if (data.followPointer) active?.place((event as PointerEvent).clientX, (event as PointerEvent).clientY);
+  }
   const listeners: [string, EventListener][] = [
     ['pointerenter', show], ['pointermove', move], ['pointerleave', hide],
     ['focus', show], ['blur', hide],

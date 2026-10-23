@@ -1,11 +1,41 @@
 let nextId = 0;
 let dismissActive: (() => void) | null = null;
 
+type TooltipSide = 'top' | 'right' | 'pointer';
+type Size = { width: number; height: number };
+type TooltipOptions = { side?: TooltipSide; x?: number; y?: number };
+
+/** Placement rules shared by text hints, structured hints, and chart readouts. */
+export function tooltipPosition(
+  anchor: Size & { left: number; top: number },
+  surface: Size,
+  viewport: Size,
+  { side = 'top', x, y }: TooltipOptions = {},
+) {
+  const edge = 8, gap = 10, pointerGap = 14;
+  let left = anchor.left + (anchor.width - surface.width) / 2;
+  let top = anchor.top - surface.height - gap;
+  if (side === 'pointer' && x !== undefined && y !== undefined) {
+    left = x + pointerGap;
+    top = y + pointerGap;
+    if (left + surface.width > viewport.width - edge) left = x - surface.width - pointerGap;
+    if (top + surface.height > viewport.height - edge) top = y - surface.height - pointerGap;
+  } else if (side === 'right') {
+    left = anchor.left + anchor.width + gap;
+    top = anchor.top + (anchor.height - surface.height) / 2;
+    if (left + surface.width > viewport.width - edge) left = anchor.left - surface.width - gap;
+  } else if (top < edge) top = anchor.top + anchor.height + gap;
+  return {
+    left: Math.max(edge, Math.min(viewport.width - surface.width - edge, left)),
+    top: Math.max(edge, Math.min(viewport.height - surface.height - edge, top)),
+  };
+}
+
 /** One shared, unclipped tooltip surface for text and structured metric hints. */
 export function openTooltip(
   anchor: Element,
   content: string | Node,
-  { className = 'ui-tooltip', side = 'top', x, y }: { className?: string; side?: 'top' | 'right' | 'pointer'; x?: number; y?: number } = {},
+  { className = 'ui-tooltip', side, x, y, onClose }: TooltipOptions & { className?: string; onClose?: () => void } = {},
 ) {
   dismissActive?.();
   const surface = document.createElement('div');
@@ -28,23 +58,11 @@ export function openTooltip(
     // Content updates use the latest pointer position, including after pointermove.
     x = pointerX;
     y = pointerY;
-    const rect = anchor.getBoundingClientRect();
-    const box = surface.getBoundingClientRect();
-    const gap = 10;
-    let left = (pointerX ?? rect.left + rect.width / 2) - box.width / 2;
-    let top = rect.top - box.height - gap;
-    if (side === 'pointer' && pointerX !== undefined && pointerY !== undefined) {
-      left = pointerX + 14;
-      top = pointerY + 14;
-      if (left + box.width > innerWidth - 8) left = pointerX - box.width - 14;
-      if (top + box.height > innerHeight - 8) top = pointerY - box.height - 14;
-    } else if (side === 'right') {
-      left = rect.right + gap;
-      top = rect.top + (rect.height - box.height) / 2;
-      if (left + box.width > innerWidth - 8) left = rect.left - box.width - gap;
-    } else if (top < 8) top = rect.bottom + gap;
-    surface.style.left = `${Math.max(8, Math.min(innerWidth - box.width - 8, left))}px`;
-    surface.style.top = `${Math.max(8, Math.min(innerHeight - box.height - 8, top))}px`;
+    const position = tooltipPosition(anchor.getBoundingClientRect(), surface.getBoundingClientRect(),
+      { width: innerWidth, height: innerHeight },
+      { side: side ?? (anchor.closest('.sidebar') && innerWidth > 760 ? 'right' : 'top'), x, y });
+    surface.style.left = `${position.left}px`;
+    surface.style.top = `${position.top}px`;
   }
   function close() {
     if (closed) return;
@@ -59,13 +77,12 @@ export function openTooltip(
     window.removeEventListener('blur', close);
     document.removeEventListener('keydown', key, true);
     document.removeEventListener('pointerdown', close, true);
+    onClose?.();
   }
   function key(event: KeyboardEvent) {
     if (event.key === 'Escape') {
-      if (side === 'pointer') {
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      event.preventDefault();
+      event.stopPropagation();
       close();
     }
   }
@@ -120,7 +137,7 @@ export function tooltips(root: HTMLElement) {
     hide();
     if (!element) return;
     target = element;
-    active = openTooltip(element, text(element), { side: element.closest('.sidebar') && innerWidth > 760 ? 'right' : 'top' });
+    active = openTooltip(element, text(element));
   }
   const over = (event: PointerEvent) => { if (event.pointerType !== 'touch') enter(find(event.target)); };
   const out = (event: PointerEvent) => { if (find(event.relatedTarget) !== target) hide(); };

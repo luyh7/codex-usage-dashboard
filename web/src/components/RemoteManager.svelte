@@ -2,6 +2,7 @@
   import type { DashboardData, Remote, LocalDevice, ImportResult } from '../lib/data/types';
   import { words, number, type Language } from '../lib/domain/ui';
   import { downloadSnapshot } from '../../shared/snapshot-export.js';
+  import Icon from './Icon.svelte';
   let {
     data,
     remotes,
@@ -97,11 +98,12 @@
 </script>
 
 <section class="device-settings" aria-labelledby="remote-title">
-  <h2 id="remote-title">{t.devices}</h2>
+  <header class="device-header">
+    <h2 id="remote-title">{t.devices}</h2>
+    <button class="primary" disabled={busy} onclick={() => fileInput.click()}><Icon name="import" size={16} />{t.import}</button>
+  </header>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <div class="remote-actions">
-    <button class="button" disabled={busy} onclick={() => fileInput.click()}>{t.import}</button>
-    <input
+  <input
         bind:this={fileInput!}
         class="snapshot-input"
         aria-label={t.import}
@@ -109,8 +111,7 @@
         accept=".json,.json.gz,.gz,application/json,application/gzip,application/x-gzip"
         onchange={read}
         disabled={busy}
-      />
-  </div>
+    />
   {#if result?.needs_label || result?.needs_confirmation}<section class="notice">
       {#if result.needs_confirmation}<p>{t.currentConfirm}</p>{/if}
       <label>{t.label}<input bind:value={label} /></label><button
@@ -139,13 +140,13 @@
     <div class="export-options">
       <div class="remote-buttons">
         {#each ['full', 'redacted'] as mode}
-          <div class="export-option">
-          <button class="button" disabled={exporting} onclick={() => exportingSnapshot(mode as 'full' | 'redacted')} aria-busy={exporting && exportMode === mode}>
-            {#if exporting && exportMode === mode}<span class="export-spinner" aria-hidden="true"></span>{/if}
+          <button class="button" disabled={exporting} onclick={() => exportingSnapshot(mode as 'full' | 'redacted')} aria-busy={exporting && exportMode === mode}
+            data-tooltip={mode === 'full'
+              ? (lang === 'zh' ? '包含会话摘要和本地路径。' : 'Includes session summaries and local paths.')
+              : (lang === 'zh' ? '移除会话摘要和本地路径，匿名化设备与会话标识，保留用量和费用。' : 'Removes session summaries and local paths, anonymizes device and session IDs, and keeps usage and costs.')}>
+            {#if exporting && exportMode === mode}<span class="export-spinner" aria-hidden="true"></span>{:else}<Icon name={mode === 'full' ? 'export' : 'shield'} size={16} />{/if}
             {mode === 'full' ? (lang === 'zh' ? '完整导出' : 'Full export') : (lang === 'zh' ? '脱敏导出' : 'Redacted export')}
           </button>
-          {#if mode === 'full'}<small>{lang === 'zh' ? '包含会话摘要和本地路径' : 'Includes session summaries and local paths'}</small>{/if}
-          </div>
         {/each}
       </div>
     </div>
@@ -191,9 +192,30 @@
     </article>{/each}
 </section>
 <style>
-  h2 { margin: 0 0 20px; }
+  .device-settings { container-type: inline-size; }
+  .device-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+  .local-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 16px 24px; }
+  .device-settings :global(button) {
+    border-color: #a8cbbd;
+    background: var(--accent-bg);
+    color: var(--accent-strong);
+    font-weight: 600;
+    box-shadow: 0 1px 2px #103d2d12;
+  }
+  .device-settings :global(button:hover:not(:disabled)) {
+    border-color: #72ae96;
+    background: #d8f3e6;
+    box-shadow: 0 2px 4px #103d2d18;
+  }
+  .device-settings :global(button.primary) {
+    border-color: #007348;
+    background: #008653;
+    color: #fff;
+  }
+  .device-settings :global(button.primary:hover:not(:disabled)) { background: #006e44; }
+  .device-settings :global(button:active:not(:disabled)) { box-shadow: inset 0 1px 2px #103d2d24; }
+  h2 { margin: 0; }
   .snapshot-input { display: none; }
-  .remote-actions { margin-bottom: 22px; flex-wrap: wrap; }
   .remote-row:last-child { border-bottom: 0; padding-bottom: 0; }
   .remote-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
   .device-settings > .notice { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
@@ -207,18 +229,22 @@
   .local-sources { display: grid; gap: 6px; margin: 12px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--border); list-style: none; font-size: 12px; line-height: 18px; }
   .local-sources li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
   .local-sources li > span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
-  .export-options { align-self: flex-start; display: grid; gap: 8px; }
-  .export-options .remote-buttons { flex-wrap: wrap; }
-  .export-option { display: grid; gap: 8px; align-content: start; }
-  .export-option small { max-width: 180px; }
+  .export-options { display: flex; justify-content: flex-end; }
+  .remote-buttons { gap: 10px; }
+  .export-options .remote-buttons { align-items: start; }
   .remote-row form, .remote-row .notice { min-width: 0; }
   .remote-row form input { min-width: 0; }
+  @container (max-width: 460px) {
+    .local-device-row { grid-template-columns: minmax(0, 1fr); }
+    .export-options { justify-content: flex-start; }
+    .export-options .remote-buttons { flex-wrap: wrap; }
+  }
   @media (max-width: 600px) {
     .remote-row { flex-wrap: wrap; gap: 12px; }
     .remote-row > div:first-child { flex: 1 1 100%; }
     .remote-row form { flex-wrap: wrap; }
   }
-  .export-progress { flex-basis: 100%; margin: 2px 0 0; }
+  .export-progress { grid-column: 1 / -1; margin: 2px 0 0; }
   .export-caption { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
   .export-caption strong { font-variant-numeric: tabular-nums; }
   .export-track { height: 6px; overflow: hidden; border-radius: 6px; background: #8899aa24; }

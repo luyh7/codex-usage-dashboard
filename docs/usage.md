@@ -226,7 +226,7 @@ There is no automatic cross-machine synchronization. WSL and Windows discovery o
 
 Check the selected date range and filters, confirm that Codex has persisted local session logs, and verify the selected Codex homes. Use `--codex-home` when your logs are in a custom location.
 
-For stale data, choose **Settings → General → Force refresh**. The server validates file contents, rediscovers directories, rereads auxiliary evidence and imported snapshots, then publishes a completed view. Normal operation also expires directory listings after five seconds, checks SQLite commits through a retained read-only connection, and audits up to eight 1 MiB log chunks every two seconds. The time for a complete background audit depends on the number and size of logs. Session-title content is checked every thirty seconds and on relevant notifications.
+The dashboard updates automatically as local logs change. Background checks expire directory listings after five seconds, check SQLite commits through a retained read-only connection, and audit up to eight 1 MiB log chunks every two seconds. The time for a complete background audit depends on the number and size of logs. Session-title content is checked every thirty seconds and on relevant notifications.
 
 ### The cost differs from my subscription
 

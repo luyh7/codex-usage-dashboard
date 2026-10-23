@@ -95,6 +95,7 @@
   );
   const percent = (value: number | null) => (value === null ? '—' : `${number(value, lang)}%`);
   let roleTooltip = $derived({
+    followPointer: true,
     title: t.sessionComposition,
     rows: [
       {
@@ -108,6 +109,7 @@
     ],
   });
   let cacheTooltip = $derived({
+    followPointer: true,
     title: `${t.cache} · ${percent(hit)}`,
     rows: [
       { label: t.cached, value: `${number(usage?.cached_input_tokens, lang)} tokens` },
