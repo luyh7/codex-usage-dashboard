@@ -621,6 +621,7 @@ main:has(.metrics.show-models) .workspace {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.token-card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .detail-metrics {
   align-items: flex-end;
   margin: 14px 0 6px;
@@ -807,11 +808,13 @@ canvas {
   overflow-wrap: anywhere;
 }
 .event-scroll th:first-child {
-  width: 17%;
+  width: 14%;
 }
 .event-scroll th:nth-child(2) {
-  width: 33%;
+  width: 30%;
 }
+.event-scroll th:last-child { width: 11%; }
+.event-speed-cell { color: var(--muted); }
 .event-scroll td:first-child,
 .event-scroll th:first-child {
   padding-left: 0;
@@ -857,7 +860,7 @@ canvas {
   .event-scroll thead { display: none; }
   .event-scroll tbody tr {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px 8px;
     padding: 16px 0;
     border-bottom: 1px solid var(--border);
@@ -869,12 +872,12 @@ canvas {
     border: 0;
   }
   .event-scroll .event-model-cell {
-    grid-column: 1 / 4;
+    grid-column: 1 / 3;
     grid-row: 1;
     align-self: center;
   }
   .event-scroll .event-time {
-    grid-column: 4 / -1;
+    grid-column: 3;
     grid-row: 1;
     align-self: center;
     text-align: right;

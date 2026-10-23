@@ -12,6 +12,9 @@
   import ServiceTier from './ServiceTier.svelte';
   import RelativeTime from './RelativeTime.svelte';
   import UsageBreakdown from './UsageBreakdown.svelte';
+  import Speed from './Speed.svelte';
+  import SpeedHeading from './SpeedHeading.svelte';
+  import { eventSpeed } from '../lib/domain/speed';
   import { metricTooltip } from '../lib/domain/metricTooltip';
   import { segmentPriceTooltip } from '../lib/domain/usageBreakdown';
   let {
@@ -322,7 +325,6 @@
       <div class="detail-metrics">
         <div class="detail-cost">
           <small>{t.cost}</small><strong
-            data-tooltip={money(d.estimated_cost_usd, lang)}
             style:--value-length={d.estimated_cost_usd == null
               ? 8
               : displayMoney(d.estimated_cost_usd).length}
@@ -386,7 +388,7 @@
               <table>
                 <thead
                   ><tr
-                    ><th>{t.updated}</th><th>{t.model}</th><th class="numeric">Tokens</th><th class="numeric">{t.input}</th><th class="numeric">{t.cacheCounts}</th><th class="numeric">{t.output}</th><th class="numeric">{t.reasoningShort}</th></tr
+                    ><th>{t.updated}</th><th>{t.model}</th><th class="numeric">Tokens</th><th class="numeric">{t.input}</th><th class="numeric">{t.cacheCounts}</th><th class="numeric">{t.output}</th><th class="numeric">{t.reasoningShort}</th><th class="numeric"><SpeedHeading {lang} /></th></tr
                   ></thead
                 ><tbody
                   >{#each page.events as row}<tr
@@ -395,6 +397,7 @@
                         {#if ['fast', 'ultrafast'].includes(serviceTier(row.service_tier))}<ServiceTier tier={row.service_tier} />{/if}
                       </span></td>
                       {#each eventFields as field, i}<td class="numeric" data-tooltip={number(row.last_token_usage?.[field], lang)}><span class="event-field-label">{eventLabels[i]}</span><span class="event-field-value">{compactNumber(row.last_token_usage?.[field])}</span></td>{/each}
+                      <td class="numeric event-speed-cell"><span class="event-field-label"><SpeedHeading {lang} /></span><span class="event-field-value"><Speed value={eventSpeed(row)} {lang} compact /></span></td>
                       </tr
                     >{/each}</tbody
                 >

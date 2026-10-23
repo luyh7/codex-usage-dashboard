@@ -11,6 +11,7 @@
   import MetricSpark from './MetricSpark.svelte';
   import DailyUsage from './DailyUsage.svelte';
   import ModelBreakdown from './ModelBreakdown.svelte';
+  import Speed from './Speed.svelte';
   import { metricSeries } from '../lib/domain/metrics';
   import { dismissDetails } from '../lib/domain/dismiss';
   import { metricTooltip } from '../lib/domain/metricTooltip';
@@ -187,6 +188,7 @@
   <article class="token-card"
     in:fly={{ x: -12, duration: reducedMotion ? 0 : 230, easing: cubicOut }}
     out:fly={{ x: 12, duration: reducedMotion ? 0 : 150, easing: cubicOut }}>
+    <div class="token-card-heading">
     <details class="metric-breakdown" use:dismissDetails>
       <summary class="metric-label"
         >{t.tokens}<Icon name="down" size={13} /></summary
@@ -202,6 +204,8 @@
           >{/each}
       </div>
     </details>
+    <Speed value={summary?.estimated_speed} {lang} />
+    </div>
     <div class="metric-value">
       <strong
         data-tooltip={number(usage?.total_tokens, lang)}
