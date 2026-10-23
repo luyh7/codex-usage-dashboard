@@ -97,7 +97,7 @@ if(windows){
 }else if(mac){run('tar',['-xzf',previous.artifact,'-C',installed],root);}else{await cp(previous.artifact,host);await chmod(host,0o755);}
 await mkdir(path.join(root,'output/verification'),{recursive:true});
 const hostLog=await open(path.join(root,'output/verification',`updater-host-${target}.log`),'w');
-let child;const launch=()=>{child=spawn(host,windows||mac?[]:['--appimage-extract-and-run'],{env,cwd:dir,windowsHide:true,stdio:['ignore',hostLog.fd,hostLog.fd]});child.on('exit',(code,signal)=>console.log(JSON.stringify({updater_host_exit:code,signal,target})));return child;};
+let child;const launch=()=>{child=spawn(host,windows||mac?[]:['--appimage-extract-and-run'],{env:{...env,RUST_BACKTRACE:'1'},cwd:dir,windowsHide:true,stdio:['ignore',hostLog.fd,hostLog.fd]});child.on('exit',(code,signal)=>console.log(JSON.stringify({updater_host_exit:code,signal,target})));return child;};
 async function activate(action){
   const desktop=await json(path.join(runtime,'desktop.json'));
   return new Promise((resolve,reject)=>{const socket=net.connect(Number(desktop.address.split(':')[1]),'127.0.0.1');let reply='';socket.setTimeout(300000,()=>socket.destroy(Error('Updater command timeout')));socket.on('connect',()=>socket.write(JSON.stringify({token:desktop.token,action})+'\n'));socket.on('data',data=>reply+=data);socket.on('error',reject);socket.on('end',()=>{try{resolve(reply.trim()==='ok'?{ok:true}:reply.trim()?JSON.parse(reply):null);}catch(error){reject(error);}});});
@@ -106,15 +106,23 @@ async function healthy(buildId,timeout=90000){
   const deadline=Date.now()+timeout;while(Date.now()<deadline){try{const record=await json(path.join(runtime,'instance.json'));const value=await(await fetch('http://'+record.address+'/api/health',{signal:AbortSignal.timeout(1000)})).json();if(value.build_id===buildId&&value.index.phase==='ready')return{record,value,base:'http://'+record.address};}catch{}await sleep(100);}throw Error('Updated service readiness timeout');
 }
 async function hashes(){const values={};for(const file of [path.join(state,'preferences.json'),...await files(path.join(state,'remotes'))]){values[path.relative(state,file)]=createHash('sha256').update(await readFile(file)).digest('hex');}return values;}
-async function availableUpdate(){
+let navigationPreconditionRetries=0;
+async function trustedAction(action){
+  // The native driver can reach a recovering WKWebView before its page can
+  // invoke commands. Retry only that explicit precondition; never count it as
+  // a signature, version, network, or installation failure.
   for(let i=0;i<300;i++){
-    const result=await activate('test_update_check');
-    if(result?.result?.state==='available')return result;
-    // A recovered service can be ready before the WebView has navigated to it.
-    assert.match(result?.error||'',/untrusted desktop page/,JSON.stringify(result));
+    const result=await activate(action);
+    if(result?.error!=='untrusted desktop page')return result;
+    navigationPreconditionRetries++;
     await sleep(100);
   }
-  throw Error('Dashboard origin did not become ready for the update command');
+  throw Error('Dashboard origin did not become ready for '+action);
+}
+async function availableUpdate(){
+  const result=await trustedAction('test_update_check');
+  assert.equal(result?.result?.state,'available',JSON.stringify(result));
+  return result;
 }
 const report={platform:process.platform,target,test_product:true,ephemeral_signing:true,baseline_source_sha256:previous.source_sha256,checks:[]};
 try{
@@ -128,18 +136,18 @@ try{
   const ready=await availableUpdate();
   assert.equal(ready?.result?.version,'1.0.2','Wait for the real dashboard origin before native commands');
   for(const failure of ['offline','interrupted','bad-signature','wrong-version']){
-    mode=failure;const result=await activate(failure==='offline'?'test_update_check':'test_update_install');assert.equal(result?.ok,false,`${failure} must fail`);
+    mode=failure;const result=await trustedAction(failure==='offline'?'test_update_check':'test_update_install');assert.equal(result?.ok,false,`${failure} must fail`);
     assert.doesNotMatch(result.error,/untrusted desktop page/);
     assert.match(result.error,failure==='bad-signature'?/signature verification failed/i:failure==='wrong-version'?/signed for version/i:/fetch|decode|decoding|download|connection|body|release JSON/i,`${failure}: unexpected failure: ${result.error}`);
     current=await healthy(previous.info.build_id);assert.equal(current.record.pid,initialPid,`${failure} must leave service running`);assert.deepEqual(await hashes(),before);report.checks.push({case:failure,service_preserved:true,error:result.error});
   }
   const installedHash=createHash('sha256').update(await readFile(host)).digest('hex');
   const installAttempt=Date.now();
-  mode='invalid-package';const rejected=await activate('test_update_install');assert.equal(rejected?.ok,false);current=await healthy(previous.info.build_id);assert.notEqual(current.record.pid,initialPid);assert.deepEqual(await hashes(),before);assert.equal(createHash('sha256').update(await readFile(host)).digest('hex'),installedHash);
+  mode='invalid-package';const rejected=await trustedAction('test_update_install');assert.equal(rejected?.ok,false);current=await healthy(previous.info.build_id);assert.notEqual(current.record.pid,initialPid);assert.deepEqual(await hashes(),before);assert.equal(createHash('sha256').update(await readFile(host)).digest('hex'),installedHash);
   const windowPrefs=await json(path.join(state,'desktop-settings.json'));assert(windowPrefs.width>0&&windowPrefs.height>0);assert((await stat(path.join(state,'desktop-settings.json'))).mtimeMs>=installAttempt-1000,'Current host must save window state before installing');
   report.checks.push({case:'signed-invalid-installer-format',service_recovered:true,installed_file_unchanged:true,window_state_saved_before_install:true,error:rejected.error});
   mode='good';const check=await availableUpdate();assert.equal(check?.result?.version,'1.0.2');assert.equal(check.result.notes,'Signed local update fixture');
-  const updated=activate('test_update_install');await sleep(1000);
+  const updated=trustedAction('test_update_install');await sleep(1000);
   await updated.catch(error=>{if(!/ECONNRESET/.test(String(error)))throw error;});
   current=await healthy(next.info.build_id,120000);assert.equal(current.value.version,'1.0.2');assert.equal(current.value.device_short_code,device);assert.notEqual(current.record.pid,initialPid);assert.deepEqual(await hashes(),before);
   const summary=await(await fetch(current.base+'/api/summary?period=all')).json();assert.equal(summary.summary.usage.total_tokens,24000);
@@ -150,5 +158,6 @@ try{
   await sleep(1500);server.close();
   if(windows){const uninstaller=path.join(installed,'uninstall.exe');try{await stat(uninstaller);const result=spawnSync(uninstaller,['/S'],{env,windowsHide:true,timeout:120000});report.uninstall_exit=result.status;}catch{}}
   await hostLog.close();
+  report.navigation_precondition_retries=navigationPreconditionRetries;
   await mkdir(path.join(root,'output/verification'),{recursive:true});await save(path.join(root,'output/verification',`desktop-update-e2e-${process.platform}.json`),report);console.log(JSON.stringify(report));
 }

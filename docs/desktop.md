@@ -117,6 +117,10 @@ node --test tools/runtime.test.mjs tools/security.test.mjs tools/desktop-update.
 
 发行时将 `desktop/release.example.json` 复制到受保护的本地配置，填写更新**公钥**和端点，通过 `DESKTOP_RELEASE_CONFIG` 指向它。签名私钥只通过 `TAURI_SIGNING_PRIVATE_KEY` 和相应口令环境变量或 CI secret 提供；不要把私钥写入配置、仓库、日志或安装包。
 
+应用签名配置也放在同一受保护的发布覆盖文件中。Windows 在 `bundle.windows` 设置证书存储中的 `certificateThumbprint`、`digestAlgorithm: "sha256"` 和证书提供方的 `timestampUrl`；证书及私钥先由维护者安装到构建机的证书存储，具体服务型签名可使用 Tauri 的 `signCommand`。构建后分别对安装器、宿主和辅助程序执行 `signtool verify /pa /all`，任一漏签或校验失败都不作为可信发行包。配置依据见 [Tauri Windows 签名](https://v2.tauri.app/distribute/sign/windows/)。
+
+macOS 使用钥匙串中已有的 Developer ID Application 身份，通过 `bundle.macOS.signingIdentity` 或 `APPLE_SIGNING_IDENTITY` 指定。公证凭据使用 `APPLE_API_ISSUER`、`APPLE_API_KEY`（Key ID）和 `APPLE_API_KEY_PATH`（私钥文件路径），或 Apple ID 对应的三项凭据；不把值写入仓库。构建后检查整个 app、包内辅助程序以及公证票据：`codesign --verify --deep --strict <app>`、`spctl --assess --type execute --verbose <app>`、`xcrun stapler validate <app>`。具体证书导入和公证步骤见 [Tauri macOS 签名](https://v2.tauri.app/distribute/sign/macos/)。当前 PR 的 CI 固定使用 ad-hoc 开发签名，不消费正式证书或公证凭据；正式签名构建及凭据注入尚未实测，不能把这些配置说明算作验证通过。
+
 签名构建完成后，下载四份 `desktop-<Rust target>` 制品到同一目录，生成更新源：
 
 ```text
@@ -125,7 +129,7 @@ node tools/desktop-update.mjs <downloaded> <version> <https-base-url> <notes-fil
 
 该工具要求四种架构、相同版本的 build manifest 和每份更新签名，生成不冲突的制品名称、`latest.json` 与校验清单；不上传或发布。Windows 应用签名、macOS Developer ID 签名/公证和更新签名分别管理。开发 CI 的 ad-hoc 签名或本地测试更新密钥均不代表正式发行信任。
 
-`node tools/desktop-update-e2e.mjs build` / `run` 在 Windows 和 Linux AppImage 上构建并测试隔离更新产品，版本为 1.0.1 → 1.0.2。它使用本地源、临时密钥和 `desktop-tests` feature，所有测试数据留在忽略的 `output/` 内。测试接口只存在该 feature 构建中，没有加入 WebView 权限或生产默认配置。测试后必须重新执行正常 `bundle`，交付不带该 feature 的制品。
+`node tools/desktop-update-e2e.mjs build` / `run` 在 Windows、macOS 两架构和 Linux AppImage 上构建并测试隔离更新产品，版本为 1.0.1 → 1.0.2。它使用本地源、临时密钥和 `desktop-tests` feature，所有测试数据留在忽略的 `output/` 内。测试接口只存在该 feature 构建中，没有加入 WebView 权限或生产默认配置。测试后必须重新执行正常 `bundle`，交付不带该 feature 的制品。
 
 回退时保留用户配置、设备身份和 `remotes/`，重新安装已知可用的完整应用版本。不要混用旧宿主与新辅助程序。较新设置 schema 会明确拒绝读取；未来若增加不可逆配置迁移，发行前必须实现并验证备份/迁移与回退，再提供相应版本。当前版本没有迁移或删除既有业务目录。
 
