@@ -96,6 +96,9 @@ def main():
     for value in [None,[],{}, {'cache_write_tokens':3,'cache_write_input_tokens':8}, {'input_tokens':True,'cached_input_tokens':'3','total_tokens':4.9}]:
         case('usage-types',{'op':'normalize_usage','usage':value},d.normalize_usage(value))
     with tempfile.TemporaryDirectory(prefix='rust-reader-contract-') as temp:
+        # Both parsers must receive the same physical path before deriving UIDs:
+        # macOS aliases /var to /private/var; Windows may return an 8.3 temp path.
+        temp = str(Path(temp).resolve())
         ignored={'timestamp':'2026-10-01T00:00:00Z','type':'response_item','payload':{'type':'function_call_output','output':'x'*200_000}}
         contents=[b'\xef\xbb\xbf{"text":"ok"}\n{"text":"\xff"}\n{broken}\nnull\n[]\n\n{"partial":',
                   b'{"complete":true}',b' \t',b'{"object":1}\n \t',
