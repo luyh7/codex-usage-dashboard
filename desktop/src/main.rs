@@ -47,12 +47,44 @@ fn read_window(root: &std::path::Path) -> WindowSettings {
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
 }
+fn current_page_url(window: &WebviewWindow) -> std::result::Result<tauri::Url, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // WKWebView.URL can be nil while reconnecting. Wry 0.57.1's url()
+        // unwraps it on the main thread, terminating the entire application.
+        // Read the same native property without unwrapping; deny commands until
+        // a real page URL is available, retaining the exact-origin check below.
+        let (send, recv) = std::sync::mpsc::sync_channel(1);
+        window
+            .with_webview(move |webview| {
+                use objc2::{msg_send, rc::Retained, runtime::AnyObject};
+                use objc2_foundation::NSURL;
+                // Tauri executes this closure on the UI thread and keeps the
+                // WKWebView alive for its duration. No native pointer escapes.
+                let value = unsafe {
+                    let view = &*webview.inner().cast::<AnyObject>();
+                    let url: Option<Retained<NSURL>> = msg_send![view, URL];
+                    url.and_then(|url| url.absoluteString())
+                        .map(|url| url.to_string())
+                };
+                let _ = send.send(value);
+            })
+            .map_err(|e| e.to_string())?;
+        let value = recv
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|e| e.to_string())?
+            .ok_or("untrusted desktop page")?;
+        value.parse::<tauri::Url>().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    window.url().map_err(|e| e.to_string())
+}
 fn trusted(
     window: &WebviewWindow,
     state: &Desktop,
     bootstrap: bool,
 ) -> std::result::Result<(), String> {
-    let url = window.url().map_err(|e| e.to_string())?;
+    let url = current_page_url(window)?;
     let allowed = state
         .service
         .lock()
