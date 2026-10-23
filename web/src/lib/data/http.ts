@@ -1,3 +1,4 @@
+import { writeHeaders } from '../../../shared/write-token.js';
 import type {
   DashboardData,
   Query,
@@ -149,7 +150,7 @@ export class HttpDashboard implements DashboardData {
   private async post<T>(path: string, body: unknown): Promise<T> {
     const response = await this.transport(this.base + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...await writeHeaders(this.base, this.transport) },
       body: JSON.stringify(body),
     });
     const value = await response.json();
@@ -160,13 +161,13 @@ export class HttpDashboard implements DashboardData {
       throw new DataError(response.status, value.error || `HTTP ${response.status}`);
     return value;
   }
-  importSnapshot(snapshot: unknown, label?: string, allowCurrent = false) {
+  async importSnapshot(snapshot: unknown, label?: string, allowCurrent = false) {
     if (snapshot instanceof Blob) {
       const params = new URLSearchParams({ allow_current_device: String(allowCurrent) });
       if (label) params.set('label', label);
       return this.transport(this.base + '/api/remotes/import-file?' + params, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
+        headers: { 'Content-Type': 'application/octet-stream', ...await writeHeaders(this.base, this.transport) },
         body: snapshot,
       }).then(async response => {
         const value = await response.json();
@@ -208,8 +209,11 @@ export class HttpDashboard implements DashboardData {
     this.subscriptions.add(close);
     return close;
   }
-  exportUrl() {
-    return this.base + '/api/export.json.gz';
+  async forceRefresh() {
+    await this.post('/api/refresh', {});
+  }
+  exportUrl(mode: 'full' | 'redacted' = 'full') {
+    return this.base + '/api/export.json.gz' + (mode === 'redacted' ? '?mode=redacted' : '');
   }
   close() {
     this.cancel('');

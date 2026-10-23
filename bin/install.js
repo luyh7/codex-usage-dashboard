@@ -23,7 +23,12 @@ async function main() {
   // Finish artifact verification before replacing the installed skill.
   const binary=await installRuntime({manifest:flag<0?undefined:args[flag+1],offline:args.includes('--offline'),rollback:args.includes('--rollback-native'),runtimeRoot:path.join(target,'runtime')});
   copy(source,target);
-  for(const alias of ['cousash-open','cousash-export']) fs.rmSync(path.join(path.dirname(target),alias),{recursive:true,force:true});
+  // A legacy directory name does not establish ownership. Preserve its files,
+  // including user changes and symlinks; migration must never delete them.
+  for(const alias of ['cousash-open','cousash-export']) {
+    const legacy=path.join(path.dirname(target),alias);
+    if(fs.existsSync(legacy)) console.warn(`Preserved legacy skill: ${legacy}. Remove it manually if no longer needed.`);
+  }
   console.log(`Installed ${name}: ${target}\nInvoke $codex-usage-dashboard in Codex, or run:\n  "${binary}"`);
   if(args.includes('--shortcut')) cp.execFileSync(binary,['--shortcut'],{stdio:'inherit'});
   if(args.includes('--open')) cp.execFileSync(binary,[],{stdio:'inherit'});

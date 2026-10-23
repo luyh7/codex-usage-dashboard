@@ -64,6 +64,10 @@ jobs:
       - run: cargo build --release --examples --bin codex-usage-dashboard --locked
         env:
           COUSASH_REQUIRE_WEB: '1'
+      - name: Verify native API and installer safety
+        run: node --test tools/security.test.mjs
+        env:
+          AUDIT_BINARY: ${{ runner.os == 'Windows' && 'target/release/codex-usage-dashboard.exe' || 'target/release/codex-usage-dashboard' }}
       - name: Check standalone Windows runtime
         if: runner.os == 'Windows'
         shell: pwsh

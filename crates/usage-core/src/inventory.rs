@@ -120,6 +120,7 @@ pub struct InventoryFile {
     pub stamp: FileStamp,
 }
 struct Directory {
+    checked: Instant,
     stamp: FileStamp,
     files: Vec<PathBuf>,
     children: Vec<PathBuf>,
@@ -164,6 +165,7 @@ impl Inventory {
         };
         if let Some(cached) = self.directories.get(path)
             && cached.stamp == stamp
+            && cached.checked.elapsed() < Duration::from_secs(5)
         {
             return Ok(Some((cached.files.clone(), cached.children.clone())));
         }
@@ -195,6 +197,7 @@ impl Inventory {
         self.directories.insert(
             path.into(),
             Directory {
+                checked: Instant::now(),
                 stamp,
                 files: files.clone(),
                 children: children.clone(),
@@ -300,6 +303,25 @@ impl Inventory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missed_create_with_colliding_directory_stamp_expires() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("sessions");
+        fs::create_dir(&directory).unwrap();
+        let mut inventory = Inventory::new(vec![LogSource {
+            id: "fixture".into(),
+            label: "Synthetic".into(),
+            home: root.path().into(),
+        }]);
+        assert!(inventory.discover().unwrap().is_empty());
+        fs::write(directory.join("new.jsonl"), b"{}\n").unwrap();
+        let cached = inventory.directories.get_mut(&directory).unwrap();
+        cached.stamp = FileStamp::read(&directory).unwrap();
+        assert!(inventory.discover().unwrap().is_empty());
+        inventory.directories.get_mut(&directory).unwrap().checked =
+            Instant::now() - Duration::from_secs(6);
+        assert_eq!(inventory.discover().unwrap().len(), 1);
+    }
     #[test]
     fn missing_cached_plain_log_rediscovers_compressed_replacement() {
         let root = tempfile::tempdir().unwrap();

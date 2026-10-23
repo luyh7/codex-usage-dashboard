@@ -270,7 +270,8 @@ export interface DashboardData {
   renameRemote(code: string, label: string): Promise<void>;
   deleteRemote(code: string): Promise<void>;
   subscribe(onStatus: (status: IndexStatus) => void, onReconnect: () => void): () => void;
-  exportUrl(): string;
+  forceRefresh(): Promise<void>;
+  exportUrl(mode?: 'full' | 'redacted'): string;
   cancelDetails(): void;
   cancelGroups(): void;
   close(): void;

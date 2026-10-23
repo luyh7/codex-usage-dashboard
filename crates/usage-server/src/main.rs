@@ -2,6 +2,8 @@ mod config;
 mod http;
 mod launcher;
 mod network;
+mod redact;
+mod security;
 mod service;
 mod snapshot;
 use clap::Parser;
@@ -43,6 +45,9 @@ struct Args {
     /// Export lossless .json.gz by default; an explicit .json path writes legacy JSON.
     #[arg(long,num_args=0..=1,default_missing_value="")]
     export_snapshot: Option<String>,
+    /// Remove previews, paths and identifying metadata from a sharing snapshot.
+    #[arg(long, requires = "export_snapshot")]
+    redact: bool,
     #[arg(long)]
     build_info: bool,
     #[arg(long)]
@@ -58,8 +63,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
-    if args.port != 8765 {
-        return Err("this dashboard uses fixed port 8765".into());
+    if args.port != 8765 && !args.serve {
+        return Err("custom ports require --serve and an isolated COUSASH_CONFIG_DIR".into());
+    }
+    if args.port != 8765
+        && std::env::var("COUSASH_CONFIG_DIR")
+            .unwrap_or_default()
+            .is_empty()
+    {
+        return Err("custom ports require an isolated COUSASH_CONFIG_DIR".into());
     }
     if !args.serve && !args.once && args.export_snapshot.is_none() {
         return launcher::run(&args);
@@ -74,7 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Claim the fixed port before opening the index. A previous Windows/WSL
     // binding can outlive its process, and waiting must not hold the index lock.
     let listener = if args.serve {
-        let address: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
+        let address = SocketAddr::new(args.host.parse()?, args.port);
+        security::require_loopback(address)?;
         Some(network::bind(address).await?)
     } else {
         None
@@ -101,7 +114,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(path) = args.export_snapshot {
             let path = if path.is_empty() {
-                std::env::current_dir()?.join(format!("cousash-{}.json.gz", state.device))
+                std::env::current_dir()?.join(if args.redact {
+                    "cousash-shared.json.gz".to_owned()
+                } else {
+                    format!("cousash-{}.json.gz", state.device)
+                })
             } else {
                 usage_core::project::expand_home(&path)
             };
@@ -110,7 +127,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 std::env::current_dir()?.join(path)
             };
-            if path
+            if !args.redact {
+                eprintln!("Full export includes session summaries and local paths.");
+            }
+            if args.redact {
+                let value = state.redact(&state.export().map_err(|e| format!("{e:?}"))?);
+                if path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+                {
+                    config::atomic_json(&path, &value)?;
+                } else {
+                    snapshot::write_gzip(&path, &value)?;
+                }
+            } else if path
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
             {
@@ -158,25 +188,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = listener.expect("server listener was bound before indexing");
     let address = listener.local_addr()?;
     if args.open && !args.no_browser {
-        std::thread::spawn(|| {
-            let _ = launcher::open_browser();
+        std::thread::spawn(move || {
+            let _ = launcher::open_browser_url(&format!("http://{address}/"));
         });
     }
     println!("Codex Usage Dashboard: http://{address}/");
-    axum::serve(listener, http::router(state.clone()))
-        .with_graceful_shutdown({
-            let state = state.clone();
-            async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = state.shutdown.notified() => {},
-                }
-                state
-                    .events
-                    .send_replace(serde_json::json!({"phase":"shutdown"}));
+    axum::serve(
+        listener,
+        security::protect(http::router(state.clone()), address)?,
+    )
+    .with_graceful_shutdown({
+        let state = state.clone();
+        async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = state.shutdown.notified() => {},
             }
-        })
-        .await?;
+            state
+                .events
+                .send_replace(serde_json::json!({"phase":"shutdown"}));
+        }
+    })
+    .await?;
     let _ = state.sender.send(service::Command::Stop);
     let _ = worker.join();
     Ok(())

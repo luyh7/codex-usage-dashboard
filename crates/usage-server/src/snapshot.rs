@@ -22,6 +22,7 @@ use usage_core::{
 pub const MAX_BYTES: usize = 512 * 1024 * 1024;
 
 pub struct ExportJob {
+    pub redacted: bool,
     pub id: String,
     pub revision: u64,
     pub percent: AtomicUsize,

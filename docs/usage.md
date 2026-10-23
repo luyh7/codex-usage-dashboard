@@ -97,7 +97,13 @@ On Windows, use `runtime/codex-usage-dashboard.exe` inside the installed skill.
 | `--export-snapshot` | Export local data as a compressed snapshot |
 | `--codex-home <path>` | Select a Codex home; repeat for multiple homes |
 
-The application uses port **8765**. The launcher verifies managed process identity before reuse or replacement. An unrelated or unmanaged listener on that port is left running and reported as an error.
+The background launcher uses port **8765**. The launcher verifies managed process identity before reuse or replacement. An unrelated or unmanaged listener on that port is left running and reported as an error.
+
+For an isolated foreground instance, set `COUSASH_CONFIG_DIR` to a separate runtime directory and use `--serve --port <port>` (`0` selects an available port). The actual URL is printed at startup. The default launcher's `--stop` operates only on its managed instance on port 8765; stop a foreground instance with Ctrl+C.
+
+The HTTP server accepts loopback addresses only. It checks Host, Origin and browser request context, and requires a per-process write token for mutations. The dashboard handles this automatically. Local scripts can obtain the token from `GET /api/security/token` and send it as `X-Codex-Write-Token`, with `Content-Type: application/json` (or `application/octet-stream` for `/api/remotes/import-file`). Shutdown continues to require its separate launcher bearer token. Local processes are trusted; do not expose this service through an unauthenticated proxy.
+
+Installation preserves predecessor skill directories (`cousash-open`, `cousash-export`) and obsolete files inside an existing installation. Review and remove unused copies manually; the installer does not establish ownership from filenames.
 
 ## Reading the dashboard
 
@@ -141,7 +147,7 @@ The server defaults to `127.0.0.1`. Logs are not automatically uploaded. Exporti
 
 ### What the estimate means
 
-The dollar figure estimates the API-equivalent cost of usage recorded in local Codex logs. It does not represent subscription billing, remaining subscription quota, or a payment charge.
+The dollar figure estimates the API-equivalent cost of usage recorded in local Codex logs. OpenAI models use official OpenAI API prices as the estimate's basis. It does not represent subscription billing, remaining subscription quota, or a payment charge.
 
 The pricing table is bundled with the application. It uses effective dates so earlier usage retains its historical rate, and applies model-specific short/long-context and service-tier rules. It is not a live fetch of the latest public prices.
 
@@ -167,7 +173,7 @@ Temporary Codex side chats with `ephemeral: true` do not persist the session log
 
 ### Export
 
-On the source device, open **Settings → Device data** and choose **Export this device**, or run:
+On the source device, open **Settings → Device data** and choose **Full export**, or run:
 
 ```bash
 ~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --export-snapshot
@@ -181,7 +187,17 @@ cousash-mac-9f3a72c1.json.gz
 
 The legacy `cousash-` prefix is retained for compatibility. Gzip compression preserves statistics, session details, and token timeline events.
 
-The dashboard reports preparation, compression, and download progress. Concurrent exports share one job, and an unchanged local snapshot can reuse a completed export.
+Full export remains the default for syncing your own devices. It includes session summaries and local paths.
+
+Choose **Redacted export** for sharing, issue feedback, or public statistics. It removes message previews, titles, local paths, branch names, agent labels, tool names, device names, and arbitrary extra metadata. It retains usage, model names, timestamps, costs, and session relationships with stable pseudonymous IDs.
+
+```bash
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --export-snapshot --redact
+```
+
+The default redacted filename is `cousash-shared.json.gz`. The private `export-redaction.key` in the application's configuration directory keeps pseudonyms stable across exports and restarts; do not include that key in shared files. Re-importing redacted exports from the same configuration updates the same sessions. Full and redacted exports deliberately have different device identities: use one mode per source device in an aggregate to avoid counting both copies. Redacted exports retain statistical timing and model information, so they are not a guarantee of complete anonymity. Local logs and the local parsed cache remain unchanged.
+
+The dashboard reports preparation, compression, and download progress. Concurrent exports of the same mode share one job, and an unchanged local snapshot can reuse a completed export. Full and redacted jobs are kept separate.
 
 For an older dashboard that requires uncompressed JSON, pass an explicit `.json` destination:
 
@@ -189,7 +205,7 @@ For an older dashboard that requires uncompressed JSON, pass an explicit `.json`
 ~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --export-snapshot snapshot.json
 ```
 
-The `/api/export.json` endpoint also remains available.
+The `/api/export.json` endpoint also remains available. Add `?mode=redacted` to either export endpoint for the sharing format; omitting it keeps the full format.
 
 ### Import and manage
 
@@ -209,6 +225,8 @@ There is no automatic cross-machine synchronization. WSL and Windows discovery o
 ### No sessions appear
 
 Check the selected date range and filters, confirm that Codex has persisted local session logs, and verify the selected Codex homes. Use `--codex-home` when your logs are in a custom location.
+
+For stale data, choose **Settings → General → Force refresh**. The server validates file contents, rediscovers directories, rereads auxiliary evidence and imported snapshots, then publishes a completed view. Normal operation also expires directory listings after five seconds, checks SQLite commits through a retained read-only connection, and audits up to eight 1 MiB log chunks every two seconds. The time for a complete background audit depends on the number and size of logs. Session-title content is checked every thirty seconds and on relevant notifications.
 
 ### The cost differs from my subscription
 

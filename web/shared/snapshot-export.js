@@ -1,3 +1,4 @@
+import { writeHeaders } from './write-token.js';
 /**
  * @param {string} url
  * @param {(percent: number, phase: string) => void} onProgress
@@ -8,6 +9,7 @@ export async function downloadSnapshot(url, onProgress, options = {}) {
   const pause = options.pause || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const save = options.save || saveDownload;
   const base = url.replace(/\/api\/export\.json(?:\.gz)?(?:\?.*)?$/, '');
+  const redacted = new URLSearchParams(url.split('?')[1] || '').get('mode') === 'redacted';
   let percent = 0;
   const report = (value, phase) => { percent = Math.max(percent, Math.min(100, value)); onProgress(percent, phase); };
   async function request(path, init = {}) {
@@ -19,7 +21,9 @@ export async function downloadSnapshot(url, onProgress, options = {}) {
     return response;
   }
   report(0, 'preparing');
-  let job = await (await request('/api/export/start', { method: 'POST' })).json();
+  let job = await (await request('/api/export/start' + (redacted ? '?mode=redacted' : ''), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...await writeHeaders(base, fetcher) }, body: '{}',
+  })).json();
   while (true) {
     if (job.phase === 'error') throw new Error(job.error || 'Export failed');
     report(job.percent, job.phase === 'ready' ? 'downloading' : job.phase);
@@ -27,7 +31,7 @@ export async function downloadSnapshot(url, onProgress, options = {}) {
     await pause(150);
     job = await (await request('/api/export/progress?id=' + encodeURIComponent(job.id))).json();
   }
-  const response = await request('/api/export.json.gz?job=' + encodeURIComponent(job.id));
+  const response = await request('/api/export.json.gz?job=' + encodeURIComponent(job.id) + (redacted ? '&mode=redacted' : ''));
   const filename = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'cousash-snapshot.json.gz';
   const total = Number(response.headers.get('content-length'));
   const chunks = [];

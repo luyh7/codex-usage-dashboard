@@ -2,6 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { downloadSnapshot } from '../../../shared/snapshot-export.js';
 
+test('redacted mode stays attached to job creation and download', async () => {
+  const calls: string[] = [];
+  await downloadSnapshot('/api/export.json.gz?mode=redacted', () => {}, {
+    fetcher: (async input => {
+      const url = String(input); calls.push(url);
+      if (url.endsWith('/security/token')) return Response.json({token:'test'});
+      if (url.includes('/start')) return Response.json({id:'shared-job',phase:'ready',percent:95});
+      return new Response(new Uint8Array([1]));
+    }) as typeof fetch,
+    save: () => {},
+  });
+  assert(calls.includes('/api/export/start?mode=redacted'));
+  assert(calls.includes('/api/export.json.gz?job=shared-job&mode=redacted'));
+});
+
 test('export follows server work and downloaded bytes monotonically before saving', async () => {
   const states = [
     { id: 'job', phase: 'preparing', percent: 1 },
@@ -14,6 +29,7 @@ test('export follows server work and downloaded bytes monotonically before savin
   await downloadSnapshot('/api/export.json.gz', value => progress.push(value), {
     pause: async () => {},
     fetcher: (async (input, init) => {
+      if (String(input).endsWith('/api/security/token')) return Response.json({ token: 'fixture-token' });
       if (String(input).includes('.json.gz?job=')) {
         assert.equal(states.length, 0);
         const stream = new ReadableStream({ start(controller) {
@@ -22,7 +38,11 @@ test('export follows server work and downloaded bytes monotonically before savin
         } });
         return new Response(stream, { headers: { 'content-length': '6', 'content-disposition': 'attachment; filename="test.json.gz"' } });
       }
-      if (String(input).endsWith('/start')) assert.equal(init?.method, 'POST');
+      if (String(input).endsWith('/start')) {
+        assert.equal(init?.method, 'POST');
+        assert.equal(new Headers(init?.headers).get('X-Codex-Write-Token'), 'fixture-token');
+        assert.equal(new Headers(init?.headers).get('Content-Type'), 'application/json');
+      }
       return Response.json(states.shift());
     }) as typeof fetch,
     save: (blob, filename) => { assert.equal(filename, 'test.json.gz'); assert(progress.at(-1)! < 100); saved = blob; },
@@ -36,6 +56,7 @@ test('failed generation and incomplete downloads never report success or save', 
     const progress: number[] = [];
     await assert.rejects(downloadSnapshot('/api/export.json.gz', value => progress.push(value), {
       fetcher: (async input => {
+        if (String(input).endsWith('/api/security/token')) return Response.json({ token: 'fixture-token' });
         if (String(input).endsWith('/start')) return Response.json(failure === 'generation'
           ? { phase: 'error', error: 'Export failed' } : { id: 'job', phase: 'ready', percent: 95 });
         return new Response(new Uint8Array([1]), { headers: { 'content-length': '2' } });

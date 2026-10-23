@@ -102,7 +102,7 @@ try {
  assert.equal(await readFile(path.join(runtime,'manifest.json'),'utf8'),before);assert.equal((await health()).pid,pid);checks.push('checksum failure preserves install and running process');
  // Legacy installed files disappear only after a successful native upgrade.
  await writeFile(path.join(skill,'scripts/open_dashboard.py'),'obsolete');await mkdir(path.join(config,'remotes'),{recursive:true});await writeFile(path.join(config,'remotes/preserve.txt'),'sentinel');
- run(process.execPath,[...installArgs,'--force']);assert(!(await readdir(path.join(skill,'scripts'))).includes('open_dashboard.py'));assert.equal(await readFile(path.join(config,'remotes/preserve.txt'),'utf8'),'sentinel');checks.push('upgrade removes old scripts and preserves external user data');
+ run(process.execPath,[...installArgs,'--force']);assert.equal(await readFile(path.join(skill,'scripts/open_dashboard.py'),'utf8'),'obsolete');assert.equal(await readFile(path.join(config,'remotes/preserve.txt'),'utf8'),'sentinel');checks.push('upgrade preserves obsolete files and external user data');
  // Skills CLI updates can leave a previous runtime behind. Mock release transport
  // only; exercise the real ensure, verification, replacement and cleanup paths.
  run(binary,launchArgs);

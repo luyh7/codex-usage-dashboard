@@ -292,19 +292,22 @@ pub fn run(args: &Args) -> Result<()> {
     }
 }
 pub fn open_browser() -> Result<()> {
+    open_browser_url(URL)
+}
+pub fn open_browser_url(url: &str) -> Result<()> {
     let mut command;
     if cfg!(windows) {
         command = Command::new("cmd");
-        command.args(["/c", "start", "", URL]);
+        command.args(["/c", "start", "", url]);
     } else if cfg!(target_os = "macos") {
         command = Command::new("open");
-        command.arg(URL);
+        command.arg(url);
     } else if config::wsl() {
         command = Command::new("cmd.exe");
-        command.args(["/c", "start", "", URL]);
+        command.args(["/c", "start", "", url]);
     } else {
         command = Command::new("xdg-open");
-        command.arg(URL);
+        command.arg(url);
     }
     match command
         .stdin(Stdio::null())
@@ -314,7 +317,7 @@ pub fn open_browser() -> Result<()> {
     {
         Ok(_) => Ok(()),
         Err(_) => {
-            eprintln!("Open {URL} in your browser.");
+            eprintln!("Open {url} in your browser.");
             Ok(())
         }
     }
