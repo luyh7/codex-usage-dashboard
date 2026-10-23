@@ -15,7 +15,7 @@ Windows、macOS 两架构和 Linux 开发包均已在各自系统构建、启动
 | --- | --- | --- | --- | --- | --- |
 | Windows x64 | NSIS 已构建 | WebView2 看板、详情、设置、CLI 聚焦、导入、完整导出及取消、窄窗口键盘提示框 | 中文/空格目录、开始菜单、覆盖、移除及数据保留通过 | 隔离签名测试产品升级与失败恢复通过 | NotSigned，无正式证书 |
 | macOS arm64 | macOS 15 CI 生成 app/dmg | 宿主启动、重复/并发启动、隔离配置、窗口状态及 CLI 通过；人工 GUI 未验证 | app 解包运行；Applications/Finder 安装移除未验证 | 空 URL 崩溃修复后，严格六项更新/恢复检查通过 | ad-hoc 完整性校验通过；无 Developer ID/公证 |
-| macOS x64 | macOS 15 Intel CI 生成 app/dmg | 宿主启动、重复/并发启动、隔离配置、窗口状态及 CLI 通过；人工 GUI 未验证 | app 解包运行；Applications/Finder 安装移除未验证 | 崩溃修复后正确拒绝导航前命令，驱动等待调整后复验中 | ad-hoc 完整性校验通过；无 Developer ID/公证 |
+| macOS x64 | macOS 15 Intel CI 生成 app/dmg | 宿主启动、重复/并发启动、隔离配置、窗口状态及 CLI 通过；人工 GUI 未验证 | app 解包运行；Applications/Finder 安装移除未验证 | 空 URL 崩溃修复后，严格六项更新/恢复检查通过 | ad-hoc 完整性校验通过；无 Developer ID/公证 |
 | Linux AppImage x64 | Ubuntu 22.04 CI 基线包及 Ubuntu 26.04 本地包 | WSLg Wayland 真实 WebKit 看板、详情、设置、键盘提示、原生导出和快照导入；Ubuntu 22.04 Xvfb 启动/并发通过 | extract-and-run 与实际 FUSE 挂载均验证 | 隔离签名测试产品升级与失败恢复通过 | 未配置正式更新源/发行签名 |
 | Linux .deb x64 | Ubuntu 22.04 CI 基线包及 Ubuntu 26.04 本地包 | 安装后的真实宿主与服务烟测；Debian 12 用户环境 Xvfb 运行通过 | 两环境安装、重装、移除及数据保留通过 | 包渠道重装已验证；应用内为包管理器提示 | 未配置正式包仓库签名 |
 
@@ -25,16 +25,16 @@ Windows、macOS 两架构和 Linux 开发包均已在各自系统构建、启动
 - desktop/target/linux/x86_64-unknown-linux-gnu/release/bundle/appimage/Codex Usage Dashboard_1.0.1_amd64.AppImage
 - desktop/target/linux/x86_64-unknown-linux-gnu/release/bundle/deb/Codex Usage Dashboard_1.0.1_amd64.deb
 
-当前应用源码 0eac97a 的 CI 制品可直接下载，均为开发包：
+当前应用源码 a78cfc4 的 CI 制品可直接下载，均为开发包：
 
 | 目标 | 下载内容 |
 | --- | --- |
-| Windows x64 | [NSIS](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40001564001/artifacts/12523226311) |
-| macOS arm64 | [app / dmg](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40001564001/artifacts/12522139005) |
-| macOS x64 | [app / dmg](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40001564001/artifacts/12523118376) |
-| Linux x64，Ubuntu 22.04 构建基线 | [AppImage / deb](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40001564001/artifacts/12523036515) |
+| Windows x64 | [NSIS](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12526440061) |
+| macOS arm64 | [app / dmg](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12524958210) |
+| macOS x64 | [app / dmg](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12525742049) |
+| Linux x64，Ubuntu 22.04 构建基线 | [AppImage / deb](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12524584684) |
 
-两份 macOS ZIP 已下载到本机隔离缓存并对照 GitHub 的 ZIP 摘要，包内宿主/辅助程序的 Mach-O 架构、版本清单及 DMG 摘要均已检查，生产包不含测试控制接口。arm64 DMG SHA256 为 `2364f9972994164dd0320024211c853419d3ec2b34053dac30f698e1b28ec188`，x64 为 `d00d29b525b2f4a116d8e7c57ac684107f59830bd5ea8464631ca92bbc84bb66`；见 macos-package-aarch64-apple-darwin.json、macos-package-x86_64-apple-darwin.json。静态校验不算 Mac 实机验收，应用签名检查由对应 macOS CI 执行。
+两份 macOS ZIP 已下载到本机隔离缓存并对照 GitHub 的 ZIP 摘要，包内宿主/辅助程序的 Mach-O 架构、版本清单及 DMG 摘要均已检查，生产包不含测试控制接口。arm64 DMG SHA256 为 `4e126a55c63fdea34b558a9fa9cfeb97a5ad345344917f3fdb92da1bdb0b9227`，x64 为 `4d826ff596f4a8ea25272c34222138223b98f42f96f67308703133b57d3f9dfe`；见 macos-package-aarch64-apple-darwin.json、macos-package-x86_64-apple-darwin.json。静态校验不算 Mac 实机验收，应用签名检查由对应 macOS CI 执行。
 
 对应 release/artifacts.json 记录实际文件、大小和 SHA256。最终复核文件为未提交的 output/verification/final-windows.json、final-linux22.json：检查当前健康接口、当前 worktree 中对应随包程序的 --build-info、实际辅助程序身份和安装包 SHA256。Ubuntu 26.04 本地包的上一轮记录保留在 final-linux.json。AppImage 程序还逐字节对照最终 AppDir；打包器处理后的 ELF 不与 Cargo 原始文件直接混比。生产宿主不含 desktop-tests 控制接口。
 
@@ -54,11 +54,11 @@ Windows：11 Pro 10.0.22631，x64，WebView2 155.0.4283.62。Linux：WSLg Ubuntu
 - Windows 服务退出后恢复为新 PID；宿主崩溃后自己的辅助程序退出；其他 worktree 服务保留。
 - Windows/Linux 覆盖或重装后设置与导入文件 SHA256、设备身份不变；移除后仍能查询保留的 24K 虚构用量。
 
-[Native CI 40001563881](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40001563881) 的 Windows、macOS arm64/x64、Linux 四目标及发行候选组装全部通过；正式发布步骤跳过。[Desktop CI 39999105264](https://github.com/luyh7/codex-usage-dashboard/actions/runs/39999105264) 的 Windows/Ubuntu 22.04 通过，macOS 更新检查发现下述问题；两架构此前构建、启动、并发、格式/clippy、workspace 测试和包资源校验通过。
+[Native CI 40007971023](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007971023) 的 Windows、macOS arm64/x64、Linux 四目标及发行候选组装全部通过；正式发布步骤跳过。[Desktop CI 40007970892](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892) 四目标全部通过，包含前端检查和测试、打包、格式/all-feature clippy、workspace 测试、协议、宿主启动及并发检查；两个 Mac 目标还通过包资源、ad-hoc 签名和严格六项更新/恢复检查。两条流水线验证的应用源码均为 a78cfc4，包含下述空 URL 与大存档写入修复；最后的文档提交不改变应用源码。
 
 首次使用空的 `sessions/` 目录时，原接口仅凭目录存在报告来源可用。现按实际索引结果报告空目录，且首次无会话时自动打开既有设置页；Windows/WebView2 与 WSLg/WebKit 均实际看到空来源提示，Windows 来源选择取消不改变设置。回归集成测试同时覆盖此状态。证据：windows-first-run-empty.png、linux-first-run-empty.png。
 
-当前 Ubuntu 22.04 CI FUSE AppImage 也已实际中断自有服务并恢复：约 3.14 秒后出现新服务 PID/端口，宿主 PID、设置和导入文件哈希保持，统计仍为 24K；见 linux22-service-recovery.json。恢复后再次核对随包身份，最终 URL 使用恢复后的端口。
+此前 0eac97a 的 Ubuntu 22.04 CI FUSE AppImage 已实际中断自有服务并恢复：约 3.14 秒后出现新服务 PID/端口，宿主 PID、设置和导入文件哈希保持，统计仍为 24K；见 linux22-service-recovery.json。最终实例已换为 a78cfc4 的包并重新核对身份，恢复时间不冒充该新包的独立测量。
 
 Ubuntu 22.04 CI 制品已验证 ZIP SHA256 和包 SHA256，随后在 WSLg Ubuntu 26.04 上用 FUSE 运行，实际进程路径位于 `/tmp/.mount_…`；真实 WebKit 界面显示 24K 测试用量，见 ci-linux-provenance.json、final-linux22.json、linux22-fuse-dashboard.jpg。Debian 12 是 WSL 内核上的隔离用户环境，glibc 2.36、GTK 3.24.38、WebKitGTK 2.50.6；以 UID 1000 在 Xvfb 中运行同一 Ubuntu 22.04 `.deb`，通过宿主烟测、协议检查及重装/移除后 24K 用量、设置、设备身份和导入文件保留。见 debian12-installed-smoke.json、debian12-retention.json。这不等于独立 Debian 桌面的完整人工验收。
 
@@ -78,7 +78,7 @@ tools/desktop-update-e2e.mjs 使用独立产品标识、临时密钥、loopback 
 
 证据：desktop-update-e2e-win32.json、desktop-update-e2e-linux.json。最后回归的升级发起端使用当前宿主源码，两个报告的 baseline_source_sha256 与当前 main.rs、native.rs 内容哈希相同；目标是冻结的已签名 1.0.2 测试制品。测试密钥、运行文件和测试产品未加入 Git，测试权限未授予生产 WebView。正式开发包没有配置更新公钥/端点，界面明确显示未配置渠道。临时更新签名不等于应用签名或公证。
 
-macOS arm64 曾完整通过同样六项更新测试，报告见 ci-macos-arm64-update/desktop-update-e2e-darwin.json。后续复验捕获 Wry 0.57.1 对导航期间空 WKWebView.URL 执行 unwrap 的主线程 panic；原测试仅断言“存在错误”可能误认该错误为签名校验失败，现已要求错误确实对应签名、版本或网络原因，并保存宿主输出和退出状态。客户端改为在 UI 线程安全读取可空 URL，无有效页面时拒绝原生命令，仍要求精确服务来源。0eac97a 在 arm64 的严格六项测试通过；Intel 这一轮宿主正常退出，但在坏签名用例前遇到临时无 URL，原生命令正确返回 untrusted desktop page，驱动未等待导航而判失败。现对所有用例仅重试这个明确前置拒绝，仍要求真实签名/版本/网络错误；持久拒绝会超时失败，并记录重试次数，等待新的两架构 CI 结果。
+macOS 复验曾捕获 Wry 0.57.1 对导航期间空 WKWebView.URL 执行 unwrap 的主线程 panic；原测试仅断言“存在错误”可能误认该错误为签名校验失败，现已要求错误确实对应签名、版本或网络原因，并保存宿主输出和退出状态。客户端改为在 UI 线程安全读取可空 URL，无有效页面时拒绝原生命令，仍要求精确服务来源。驱动仅重试明确的 untrusted desktop page 导航前置拒绝，持久拒绝会超时失败，其余错误仍严格断言。最终 a78cfc4 在 arm64 与 Intel 均通过全部六项测试，宿主退出码均为 0；分别等待了 3 次、1 次导航前置拒绝，正确重启到 1.0.2，保留设置、设备身份和导入数据，统计仍为 24K。报告见 ci-macos-arm64-final、ci-macos-intel-final 中的 desktop-update-e2e-darwin.json；对应 [arm64 验证制品](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12525791514)、[Intel 验证制品](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12526721659)。这不代替 Mac 人工 GUI 验收。
 
 Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更新源仍需验证。恢复策略是保留业务目录、重新打开旧应用或重新安装完整版本，不宣称所有回退路径均已验证。
 
@@ -86,9 +86,9 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 
 合成负载：1,000 会话、100,000 条用量事件、12M tokens。Windows 冷启动约 5.70 秒、摘要中位数 1.6 ms；Linux 本机文件系统约 2.01 秒、1.4 ms。WSL 共享 C 盘的一次并行负载测试启动约 45.9 秒；文件系统和负载条件不同，不作直接跨系统比较。这不是大快照、长期运行或空闲资源的完整性能验收。
 
-进一步的真实 Windows/WebView2 与 Linux/WebKit 原生保存框验证使用 1,000 会话、100,000 条事件和 12M tokens：完整快照压缩约 2.5 MB、解压约 49 MB，脱敏快照解压约 47 MB，中文/空格路径保存后逐项核对会话、事件和统计；脱敏结果不含合成提示词、源目录或完整项目路径。双方导出的完整快照已通过系统文件选择框互相导入，合计 24M。证据见 large-native-*.json 与 large-linux-import-complete.jpg。
+进一步的真实 Windows/WebView2 与 Linux/WebKit 原生保存框验证使用 1,000 会话、100,000 条事件和 12M tokens：完整快照压缩约 2.5 MB、解压约 49 MB，脱敏快照解压约 47 MB，中文/空格路径保存后逐项核对会话、事件和统计；脱敏结果不含合成提示词、源目录或完整项目路径。双方导出的完整快照已通过系统文件选择框互相导入，合计 24M；脱敏导入也单独验证为本机加一份远端，共 2,000 会话、24M，关闭重开后保留。完整与脱敏导出的设备标识不同，同时导入会作为两份设备统计，测试中通过界面移除了重复的合成数据副本。证据见 large-native-*.json、large-import-*.json 和 large-linux-import-complete.jpg。
 
-该测试发现远端存档保存使用未缓冲 JSON 写入，约 85 MB 的存档重命名请求在 Windows I 盘耗时 34,645 ms。改用 256 KiB BufWriter，并在原有文件 sync/原子替换前显式 flush，同一存档复测为 2,228 ms（约 15.5 倍改善）；快照内容哈希不变，统计保持 24M。见 large-remote-write-before-buffering.json、large-remote-write-after-buffering.json。两次是同一机器/数据的单次测量，不作为所有磁盘或大文件的普遍性能承诺。共享核心此项修复的跨平台流水线复验另行执行。
+该测试发现远端存档保存使用未缓冲 JSON 写入，约 85 MB 的存档重命名请求在 Windows I 盘耗时 34,645 ms。改用 256 KiB BufWriter，并在原有文件 sync/原子替换前显式 flush，同一存档复测为 2,228 ms（约 15.5 倍改善）；快照内容哈希不变，统计保持 24M。见 large-remote-write-before-buffering.json、large-remote-write-after-buffering.json。两次是同一机器/数据的单次测量，不作为所有磁盘或大文件的普遍性能承诺。包含该修复的四目标 Native/Desktop 流水线均已通过；Windows/Linux 最新本地包已实际重开大数据配置并核对保留结果，最新 Ubuntu 22.04 CI deb 亦完成 Debian 12 重装/移除复验。
 
 当前 Linux AppImage 的另一次 30 秒空闲采样中，4 个宿主/服务/WebKit 进程及启动时间保持不变，CPU 共 0.05 秒（单核约 0.17%），RSS 合计约 736 MiB；见 desktop-idle-linux.json。此前进程集合变化的采样仍不算通过，此次也只覆盖 24K 小夹具。连续日志追加测试在 133 秒内执行 8 次写入，SSE 读取 41 次，用量由 12,000 增至 12,960，各次约 1.0–1.25 秒反映到摘要，宿主及服务 PID 保持；见 linux-live-log-growth.json，该轮 build ID 为 022fe586。
 
@@ -108,9 +108,9 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 
 截图属于对应图形轮次，最终二进制身份以最后复核 JSON 为准。
 
-2026-10-24 最后复核的隔离实例（虚构日志与导入快照，合计 24K）：Windows http://127.0.0.1:6658/?period=all，Linux/WSLg FUSE AppImage http://127.0.0.1:46039/?period=all。Windows build ID 为 `380c79d7548e73015a3fa3dda278bc2178da32f1d3b52e7f3f585edc080f9d11`；Linux 为 `f689588cebecc72cafd7dc5db117d2c0fd69f2b6746573db37922b54fff34a09`。Linux 使用当前应用源码 0eac97a 的 Ubuntu 22.04 CI 制品，随包辅助程序复制到本工作树 `output/verification/codex-usage-dashboard-linux22`，其 `--build-info` 与健康接口相同；实际宿主和辅助程序均与该制品 AppDir 逐字节匹配。Windows 同样核对本工作树的二进制和包。地址仅在对应验收实例仍运行时有效。Ubuntu 26.04 本地包的 `c5608b3e…` 验证实例已主动退出，最终地址采用较低构建基线的 CI 包。
+2026-10-24 最后复核的隔离实例（虚构日志与导入快照，合计 24K）：Windows http://127.0.0.1:14333/?period=all，Linux/WSLg FUSE AppImage http://127.0.0.1:46363/?period=all。Windows build ID 为 `e5433151949aeff601fe56202e846c1263103d3d9a99a5fcd9abb8ed9a8b7313`；Linux 为 `a24eac4c3ce62accb5acd7f5f71a37742ba98afbb476499aea7239641a9d1971`。Linux 使用应用源码 a78cfc4 的 Ubuntu 22.04 CI 制品，随包辅助程序复制到本工作树 `output/verification/codex-usage-dashboard-linux22`，其 `--build-info` 与健康接口相同；实际宿主和辅助程序均与该制品 AppDir 逐字节匹配。Windows 同样核对本工作树的二进制和包。最终文档提交不改变应用源码。地址仅在对应验收实例仍运行时有效。Ubuntu 26.04 本地包的 `26610f5c…` 大数据验证实例已主动退出，最终地址采用较低构建基线的 CI 包。
 
-当前工作树安装包 SHA256：Windows NSIS `18a5660b92f6acee414784708bb226db62f5ecf84bbd047b5804a4752f6b1af8`；Ubuntu 26.04 本地 AppImage `0c9c7900e92ca185adcc8a004bbf4513b53ee1971400e6d6750e11115b468eea`、`.deb` `58d9ef0e3e515599536a220aa82c6861150f195e9551d3ab9ab0b3a0bbd5b7b4`。实际文件与各平台 artifacts.json 已逐字节校验。较低基线的 Ubuntu 22.04 CI AppImage 为 `c58eaf7872c760f06cd5beab8488e3a48b38b376f232a607709044ffca247391`、`.deb` 为 `4689870e71f6de89d3bdb62e4f1a027c621ab4d18aaebf16c07a006676c5d327`；来自 [0eac97a 的 Linux 制品](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40001564001/artifacts/12523036515)，包内宿主和辅助程序、ZIP 摘要、包摘要均已核对，该最新 `.deb` 已重新完成上述 Debian 12 检查。
+当前工作树安装包 SHA256：Windows NSIS `c884a9d1e87922e870a6acabdfd80386977fe43c9d0aee36f732ea4057e10da9`；Ubuntu 26.04 本地 AppImage `360b6a30c0d55f94fa63d64160a04d04361158de3ff69ae16bbdb050bc7db0fe`、`.deb` `dd8f60c14bd863037d8e79cc00dfdc36c5ce7f17df5fabb86841243e5f663531`。实际文件与各平台 artifacts.json 已逐字节校验。较低基线的 Ubuntu 22.04 CI AppImage 为 `990ff6e80406566eddd5e8e957e17c505f10f731e67ac7a8febb0fb1d888dddc`、`.deb` 为 `e5c7a1f9aa5c196164f726c8502aec76f09eefdb162b520752cebc3b263c11f7`；来自 [a78cfc4 的 Linux 制品](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40007970892/artifacts/12524584684)，包内宿主和辅助程序、ZIP 摘要、包摘要均已核对，该最新 `.deb` 已重新完成上述 Debian 12 检查。
 
 ## 验收清单对照
 
@@ -136,18 +136,18 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 | 基础 16 | 最终健康身份与实际 URL | Windows、当前 Ubuntu 22.04 CI 包本地实例均已核对并提供地址；Mac CI 实例按测试退出，没有可持续访问的 Mac 实例 |
 | 日常 1 | 无开发工具用户安装与系统入口 | Windows、Ubuntu/WSLg、Debian 用户环境已有包检查；Mac Applications/Dock 和全新用户机器未验证 |
 | 日常 2 | 自动发现、空/无权限/自定义来源 | 协议及 Windows/Linux 首次空来源实际界面通过；Mac 文件选择和完整权限交互未验证 |
-| 日常 3 | 中文路径、原生文件、取消覆盖、大快照 | Windows/Linux 中文/空格路径、原生选择、取消及快照往返通过；Mac 文件界面与大快照未完整验收 |
+| 日常 3 | 中文路径、原生文件、取消覆盖、大快照 | Windows/Linux 中文/空格路径、原生选择、取消及约 49 MB 完整/47 MB 脱敏快照往返通过；Mac 文件界面及更大边界规模未验 |
 | 日常 4 | 托盘、关闭、登录启动与退出清理 | 按平台实现、拥有者退出和隔离 CI 通过；真实登录启动及 Mac Dock 未验证 |
 | 日常 5 | 窗口、多屏、高 DPI、键盘与响应 | 窗口尺寸往返、Windows/Linux 键盘及基础性能已有证据；多屏/高 DPI 硬件未验证 |
 | 日常 6 | 代表性启动、交互与空闲性能 | Windows/Linux 12M 合成负载与小夹具空闲采样已记录；Mac 和完整交互性能矩阵未完成 |
 | 日常 7 | 睡眠、服务退出及长期恢复 | Windows/Linux 自有服务恢复及日志持续追加通过；实际睡眠唤醒和长期运行未验证，已保留异常风险 |
 | 日常 8 | Mac Dock/Cmd+Q、Linux X11/Wayland/无托盘 | Mac 无实机；Linux WSLg、Xvfb 及 X11/Wayland 更新测试通过，独立桌面完整交互未验证 |
 | 日常 9 | 三端同夹具、路径权限及设备身份 | 四目标同夹具 12K、Unix 私有运行目录与协议测试通过；完整平台硬件矩阵仍受上述环境限制 |
-| 更新 1 | 四目标更新与 deb 包渠道 | Windows/Linux、Mac arm64 严格六项通过；Mac Intel 修复复验中；最新 deb 已重装/移除并保留数据 |
+| 更新 1 | 四目标更新与 deb 包渠道 | Windows、Linux AppImage 和 Mac 两架构严格六项均通过；最新 deb 已重装/移除并保留数据，应用内提示包渠道 |
 | 更新 2 | 网络/签名失败与安装恢复 | 当前测试覆盖四类拒绝及同步无效安装恢复；异步安装器失败、磁盘故障和所有回退路径未验证 |
-| 更新 3 | 升级/卸载保留设置、身份、快照 | Windows、Ubuntu/WSLg、Debian 通过；Mac arm64 升级通过，Intel 更新及 Finder 默认移除待验 |
+| 更新 3 | 升级/卸载保留设置、身份、快照 | Windows、Ubuntu/WSLg、Debian 通过；Mac 两架构升级保留通过，Finder 默认移除待验 |
 | 更新 4 | 可重复构建、签名/公证结果分列 | 四目标锁定依赖和 CI 已接入，ad-hoc 与临时更新签名有证据；缺正式证书/公证/发布源已单列 |
-| 更新 5 | 制品、路径、校验、说明及 Agensi 可选 | Windows/Linux 包和 CI 四目标制品已提供，最终 Intel 修复包待 CI；Agensi 没有成为任何客户端依赖 |
+| 更新 5 | 制品、路径、校验、说明及 Agensi 可选 | Windows/Linux 包和最终 CI 四目标包、校验与说明已提供；Agensi 没有成为任何客户端依赖 |
 
 ## 未验证项
 
@@ -155,7 +155,7 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 - Windows 10、无 WebView2 的全新机器和离线运行库安装。
 - 独立 Linux X11/Wayland 和无托盘桌面的完整交互；Ubuntu 22.04 CI、Debian 12 用户环境和 WSLg 的已验证范围见上文。
 - 各端全部提示框位置、层级、鼠标、键盘和模态场景；单元测试及部分截图不能替代完整矩阵。
-- 真实登录启动、多显示器切换、高 DPI、睡眠唤醒、长期运行、大快照与完整性能测量。
+- 真实登录启动、多显示器切换、高 DPI、睡眠唤醒、长期运行；Mac 大快照、更大文件边界和完整性能测量。Windows/Linux 约 49 MB 的已验证范围见上文。
 - 正式 Windows 证书、macOS Developer ID/公证及正式更新签名/发布资源。
 
 Agensi 未接入，也没有成为客户端、数据或更新依赖。开发包独立可用；完整跨平台验收和正式发行就绪仍须分别完成。

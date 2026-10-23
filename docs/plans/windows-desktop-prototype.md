@@ -1,6 +1,6 @@
 # Windows、macOS、Linux 桌面客户端实施计划
 
-状态：主体实现已落地；Windows、Linux 开发包已有运行、安装和更新证据，完整三端验收未完成。macOS 当前无可用验证环境，用户确认保留未验证项。实现与命令说明见 [桌面客户端](../desktop.md)，逐平台证据与缺口见 [验证记录](../desktop-verification.md)。下文工作树交接段保留规划时状态，当前任务在 `codex/cross-platform-desktop` 的独立 worktree 实施。
+状态：主体实现已落地；四目标构建、启动与测试源更新均通过，Windows、Linux 开发包已有真实界面、安装和大快照证据，完整三端验收未完成。macOS 两架构已在 CI 验证，但没有实机，用户确认保留人工交互未验证项。实现与命令说明见 [桌面客户端](../desktop.md)，逐平台证据与缺口见 [验证记录](../desktop-verification.md)。下文工作树交接段保留规划时状态，当前任务在 `codex/cross-platform-desktop` 的独立 worktree 实施。
 
 ## 目标
 
@@ -304,11 +304,11 @@ codex-usage-dashboard export --output <path> [--redact] [--json]
 
 更新与交付验收：
 
-- [ ] Windows、macOS、Linux AppImage 在测试源上的发现更新、下载、签名校验、安装和重启已端到端验证；`.deb` 已验证包渠道升级/重新安装及应用内提示，前后端版本匹配。
+- [x] Windows、macOS、Linux AppImage 在测试源上的发现更新、下载、签名校验、安装和重启已端到端验证；`.deb` 已验证包渠道升级/重新安装及应用内提示，前后端版本匹配。
 - [ ] 离线、下载中断、错误签名和升级失败不会破坏已有可运行版本；有经过验证的恢复/回退路径。
 - [ ] 升级及默认卸载保留用户设置、设备身份和导入快照，不影响其他工作树或用户应用。
-- [ ] 三端四种架构的交付包有可重复执行的构建流程；逐平台记录应用签名、公证、更新签名的验证结果和所缺资源，不混淆开发包与正式发行包。
-- [ ] 交付安装包与应用路径、版本、校验信息和使用说明；Agensi 未接入时上述功能仍全部独立可用。
+- [x] 三端四种架构的交付包有可重复执行的构建流程；逐平台记录应用签名、公证、更新签名的验证结果和所缺资源，不混淆开发包与正式发行包。
+- [x] 交付安装包与应用路径、版本、校验信息和使用说明；Agensi 未接入时上述功能仍全部独立可用。
 
 每次交付附上此类平台状态表，填写实际证据位置；不能仅填一个总的“通过”：
 
@@ -316,7 +316,7 @@ codex-usage-dashboard export --output <path> [--redact] [--json]
 | --- | --- | --- | --- | --- | --- |
 | Windows x64 | NSIS 开发包已构建 | Windows 11 / WebView2 已验证主要流程 | 安装、覆盖、卸载保留数据通过 | 隔离签名测试源通过 | 未签名 |
 | macOS arm64 | macOS 15 CI app/dmg 已构建 | 启动、并发、窗口状态和 CLI 通过；实机 GUI 未验证 | app 解包运行；Applications/Finder 未验证 | 空 URL 修复后严格六项更新/恢复检查通过 | ad-hoc 校验通过；无正式签名/公证 |
-| macOS x64 | macOS 15 Intel CI app/dmg 已构建 | 启动、并发、窗口状态和 CLI 通过；实机 GUI 未验证 | app 解包运行；Applications/Finder 未验证 | 崩溃修复后无复发；驱动导航等待调整后复验中 | ad-hoc 校验通过；无正式签名/公证 |
+| macOS x64 | macOS 15 Intel CI app/dmg 已构建 | 启动、并发、窗口状态和 CLI 通过；实机 GUI 未验证 | app 解包运行；Applications/Finder 未验证 | 空 URL 修复后严格六项更新/恢复检查通过 | ad-hoc 校验通过；无正式签名/公证 |
 | Linux x64 AppImage | Ubuntu 22.04 CI 及 Ubuntu 26.04 本地包已构建 | WSLg / WebKitGTK 已验证主要流程；Ubuntu 22.04 Xvfb 烟测通过 | extract-and-run 与 FUSE 均通过 | 隔离签名测试源通过 | 未配置正式发行签名 |
 | Linux x64 `.deb` | Ubuntu 22.04 CI 及 Ubuntu 26.04 本地包已构建 | Ubuntu/WSLg 和 Debian 12 用户环境安装后宿主烟测通过 | 安装、重装、移除保留数据通过 | 重装通过；应用内提示包渠道 | 未配置正式包仓库签名 |
 
