@@ -18,7 +18,7 @@ const screenshot = async name => { const path = `${output}/${name}.png`; await p
 const layout = () => page.evaluate(() => Object.fromEntries(['.page-header', '.metrics', '.browser-pane', '.detail-panel'].map(selector => { const el = document.querySelector(selector); const box = el?.getBoundingClientRect(); return [selector, box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null]; })));
 const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight);
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&session=main&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&session=main&timezone=Asia%2FShanghai');
   await page.locator('.cost-bar').waitFor();
   await page.evaluate(() => document.fonts.ready);
   assert.equal(await page.locator('.metrics .metric-spark').count(), 2);

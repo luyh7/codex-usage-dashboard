@@ -1,4 +1,4 @@
-// Production HTML is intercepted in the browser at port 8765. No second server.
+// Historical HTML from pinned Git history is intercepted in the browser at port 8765. No second server.
 import { chromium } from 'playwright';
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 
 const root = new URL('../../../', import.meta.url).pathname;
 const here = new URL('.', import.meta.url).pathname;
-const source = root + 'web/classic/index.html';
-const html = await readFile(source, 'utf8');
+const source = 'c42f0e8ae948d4cde392fafa9894681a1200b17d:skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py';
+const html = execFileSync('git', ['show', source], {cwd:root, encoding:'utf8', maxBuffer:4e6}).split('HTML = r"""')[1].split('"""')[0];
 const script = await readFile(here + 'dist/probe.js', 'utf8');
 const hook = `
 window.probe = {
@@ -49,7 +49,7 @@ const dirs = await readdir(cache);
 const chromiumDir = dirs.filter(x=>/^chromium-\d+$/.test(x)).sort().at(-1);
 const browser = await chromium.launch({ executablePath: cache + '/' + chromiumDir + '/chrome-linux64/chrome', headless:true });
 const results=[];
-const report={ environment:{browser:await browser.version(),viewport:{width:1440,height:1000},timezone:'Asia/Shanghai',svelte:JSON.parse(await readFile(here+'node_modules/svelte/package.json','utf8')).version,source_sha256:createHash('sha256').update(await readFile(source)).digest('hex')},
+const report={ environment:{browser:await browser.version(),viewport:{width:1440,height:1000},timezone:'Asia/Shanghai',svelte:JSON.parse(await readFile(here+'node_modules/svelte/package.json','utf8')).version,source_sha256:createHash('sha256').update(html).digest('hex')},
  method:{samples:15,warmups:2,network:'all dashboard requests intercepted, synthetic data only',timing:'JS + DOM update + forced layout; next requestAnimationFrame callback delay separately recorded (not a paint-completion measurement)',framework:'Svelte keyed HTML probe shares exact production grouping/markup; not a full Svelte app rewrite',unchanged:'forced render microbenchmark; current production already skips rendering on HTTP 204',candidate_bundle_bytes:Buffer.byteLength(script)},results};
 await mkdir(here+'../results',{recursive:true});
 const save=()=>writeFile(here+'../results/frontend.json',JSON.stringify(report,null,2));

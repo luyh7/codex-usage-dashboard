@@ -76,7 +76,7 @@ const retained = async (anchor, structured = true) => {
 const leave = async () => { await page.mouse.move(900, 60); await page.locator('h1').click(); };
 try {
   await page.clock.install();
-  await page.goto('http://127.0.0.1:8765/svelte?view=sessions&period=today&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?view=sessions&period=today&timezone=Asia%2FShanghai');
   await bar(11).waitFor();
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(750);

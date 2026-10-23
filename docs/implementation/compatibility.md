@@ -43,12 +43,13 @@ restored exactly; no `updated_at` fields are omitted.
 
 ## Existing HTTP and snapshot interfaces
 
-The original `/api/sessions`, `/api/session`, `/api/daily-usage`, `/api/remotes`,
+The classic-only `/api/sessions` and `/api/session` routes have been removed.
+`/api/daily-usage`, `/api/remotes`,
 `/api/remotes/import`, `/api/remotes/rename`, `/api/remotes/delete` and
 `/api/export.json` paths retain their original response shapes. A matching list
 snapshot token returns 204 without a body. Detail with an unpublished token
 returns 409 `{error: "snapshot stale", code: "snapshot_stale"}`. Missing detail
-is 404. The complete event timeline remains in legacy detail and export.
+is 404. The complete event timeline remains in `/api/v2/chart` and snapshot exports.
 
 Export keeps `schema: "cousash.remote-snapshot"`, `version: 1`, device identity,
 `snapshot` summaries/details/daily usage, and the `cousash-<device>.json` filename.
@@ -135,10 +136,10 @@ fields on legacy routes, including period slicing. Summary-only archives remain
 visible in the all-period list and return 404 for unavailable details.
 
 Health adds PID, configured Codex homes and, for managed Rust launches, a random
-instance ID. `implementation=rust`, `ui=legacy`, protocol version 1 and capability
-flags identify the host. The original UI is served at `/`, `/index.html`, and
-`/legacy`; the Svelte candidate remains at `/svelte`. Rust build ID hashes core/server sources, manifests,
-pricing assets, the bundled legacy UI and Svelte sources/build assets. The binary's
+instance ID. `implementation=rust`, `ui=svelte`, protocol version 1 and capability
+flags identify the host. The Svelte UI is served at `/` and `/index.html`;
+`/legacy` returns 404 and old `/svelte` bookmarks redirect to `/` with their query intact.
+Rust build ID hashes core/server sources, manifests, pricing assets and Svelte sources/build assets. The binary's
 `--build-info` is compared against both health and the install manifest.
 Python is no longer a supported runtime. Optional differential tests load the
 frozen reference from Git history; all installed commands execute Rust.

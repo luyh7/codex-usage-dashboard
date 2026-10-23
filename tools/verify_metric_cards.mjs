@@ -28,7 +28,7 @@ async function leave() {
   assert.equal(await tooltip.count(), 0, 'Tooltip dismisses on pointer exit');
 }
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
   await page.locator('.daily-bar').first().waitFor();
   await page.evaluate(() => document.fonts.ready);
   assert.equal((await page.locator('.daily-usage').innerText()).trim(), '');

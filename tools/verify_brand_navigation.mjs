@@ -24,8 +24,10 @@ page.on('request', request => {
 });
 const check = label => { report.checks.push(label); console.log(label); };
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai&sort=updated');
+  await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai&sort=updated');
   await page.locator('.project-heading').first().waitFor();
+  assert.equal(new URL(page.url()).pathname, '/');
+  assert.equal(await page.locator('a[href="/legacy"], a[href="/svelte"]').count(), 0);
   await page.evaluate(() => { window.__originalApp = document.querySelector('.app-shell'); });
   const initialRequests = report.listingRequests;
   const initialUrl = page.url();

@@ -74,7 +74,7 @@ const changeZone = timezone => page.evaluate(timezone => {
   history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate'));
 }, timezone);
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?view=sessions&period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?view=sessions&period=week&timezone=Asia%2FShanghai');
   await page.locator('.index-status').waitFor();
   await emit({ phase: 'parsing', revision: 0, completed: 10, total: 128 });
   await page.waitForFunction(() => document.querySelector('.index-status')?.textContent.includes('10/128'));

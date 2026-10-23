@@ -38,7 +38,7 @@ page.on('pageerror', error => errors.push(String(error)));
 const output = 'output/verification/settings-page';
 await mkdir(output, { recursive: true });
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&session=main&view=sessions&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&session=main&view=sessions&timezone=Asia%2FShanghai');
   await page.locator('.sessions-table').waitFor();
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('heading', { name: '设置', exact: true }).waitFor();
@@ -83,7 +83,7 @@ try {
   await page.keyboard.press('Enter');
   assert.equal(new URL(page.url()).searchParams.get('timezone'), 'UTC');
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cousash:v2:timezone'))), 'UTC');
-  await page.goto('http://127.0.0.1:8765/svelte?page=settings');
+  await page.goto('http://127.0.0.1:8765/?page=settings');
   await zone.waitFor();
   assert.equal(await zone.innerText(), '协调世界时 (UTC+00:00)');
   await zone.click();

@@ -1,8 +1,8 @@
 # 原生 Rust：安装、发布与回退
 
 Rust 是唯一运行方式。生产 Python 后端、启动器、导出、桌面快捷方式和安装脚本已删除。
-首页保持原版界面，来自 `web/classic/index.html`；Svelte 页面保留在 `/svelte`。
-两套静态页面都由 Rust 服务提供。运行不需要 Python、Node 或 Rust 工具链。
+首页 `/` 直接提供重构后的 Svelte 页面；经典页面及其专属接口已删除。
+Rust 程序只嵌入新版资源，直接运行不需要 Python、Node 或 Rust 工具链。
 
 ## 构建与离线安装
 
@@ -22,12 +22,15 @@ npm 默认安装到 `~/.agents/skills/codex-usage-dashboard`；显式设置 `COD
 技能文件缺少原生程序时，可在技能目录运行：
 
 ```bash
-node scripts/install_runtime.mjs
+node scripts/install_runtime.mjs --ensure
 # 或离线安装
 node scripts/install_runtime.mjs --manifest /path/to/manifest.json --offline
 ```
 
-在线安装读取 `native.json` 指定版本的 GitHub Release manifest 和相邻平台文件。
+在线安装读取 `native.json` 指定的 `1.0.1` GitHub Release manifest 和相邻平台文件。
+每次调用 skill 都先执行 `--ensure`，校验版本、SHA256、build ID 与 `ui: svelte`；
+skills CLI 更新遗留的旧 runtime 会自动替换，匹配版本无需联网。
+新安装与升级均清理旧 Python 脚本。经典界面的制品会被拒绝。
 不支持的平台、下载失败或缺少版本均报错，不提供替代后端。
 当前本地工作没有推送或发布；新用户的默认在线安装需等对应制品正式发布。
 
@@ -50,6 +53,12 @@ runtime/codex-usage-dashboard --once --json
 等进程退出、索引锁和 8765 释放后启动新版。并发启动由文件锁串行化。
 未知或非托管监听者不终止、不强杀、不换端口。旧 Python 服务须手动正常关闭后迁移。
 `--serve` 用于显式服务器绑定；默认后台启动仅绑定 `127.0.0.1:8765`。
+
+Windows 在连接探测未发现监听者、但绑定仍返回 WSAEADDRINUSE 时，会在固定端口上
+最多等待 5 分钟，供先前 Windows/WSL TCP 绑定回收；发现可连接的监听者即报错。
+等待绑定时尚未打开索引，启动器的总超时为 6 分钟，等待期间输出日志路径。
+后台进程不会继承调用方的标准输入输出管道，避免 Node/skill 在收到启动地址后仍等待 EOF。
+本机观察到的 WSL 镜像绑定行为与[微软的 localhost 实现说明](https://github.com/microsoft/WSL/blob/master/doc/docs/technical-documentation/localhost.md)一致。
 
 一次性导出使用临时索引，可与常驻服务并存。`--once` 包含已导入远端数据；
 导出只含本机数据。原日志、设备身份、用户配置和手工导入快照保持原位置。
@@ -77,11 +86,12 @@ npm 更新成功后删除旧安装目录中已知的 Python 脚本，保留外�
 node tools/verify_native.mjs --replace-worktree
 ```
 
-本地 Linux/WSL 验收将 PATH 设置为空，覆盖首次离线安装、缺失制品、原版页面、
-重复/并发启动、导出、来源切换、校验失败保留旧安装、升级清理旧脚本、原生回退、
+本地 Linux/WSL 验收将 PATH 设置为空，覆盖首次离线安装、缺失制品、根路径新版及静态资源、旧书签跳转、
+重复/并发启动、导出、来源切换、校验失败保留旧安装、升级清理旧脚本、skills CLI 更新后的 runtime 替换、原生回退、
 SSE 下退出和陌生端口不终止。结果见 `native-only-linux-x64.json`。
-Windows GNU 制品已交叉编译并在真实 Windows 进程中完成 build-info 与离线安装。
-本机 Windows 端 8765 返回 WSAEADDRINUSE；独立 Node 监听器也返回 EADDRINUSE，
-因此服务启动验收受主机端口占用阻挡，没有终止无法确认身份的进程。记录见
-`native-only-windows-x64.json`（status=blocked，非通过）。Windows/macOS 完整验收仍需对应 CI。
+Windows `1.0.1` MSVC 制品已在原生 Windows 进程中完成上述全部生命周期验收，
+并增加真实 socket 回归：绑定存在但尚无监听者时先等待，释放后仍在 8765 启动。
+标准输出被捕获的 Node/skill 调用也会正常返回，结果见 `native-only-windows-x64.json`（passed=true）。
+Windows Chromium 已验证根路径概览、设置、导航历史、快照管理和 320px/390px 布局。
+macOS 完整验收仍需对应 CI；本地验收不代表已发布 GitHub Release。
 Python 仅用于可选的历史差分测试，不是构建、打包、安装或运行的前提。

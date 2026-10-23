@@ -18,7 +18,7 @@ try {
   if (live.metric_trend.complete) {
     assert.equal(live.metric_trend.points.reduce((total, point) => total + point.usage.total_tokens, 0), live.page.summary.usage.total_tokens);
   }
-  await page.goto(`${origin}/svelte?period=today&timezone=Asia%2FShanghai`);
+  await page.goto(`${origin}/?period=today&timezone=Asia%2FShanghai`);
   await page.locator('.daily-bar').first().waitFor();
   assert.equal(await page.locator('.daily-bar').count(), live.metric_trend.points.length);
   assert.equal(await page.locator('.daily-usage').getAttribute('aria-label'), '每小时用量');
@@ -47,7 +47,7 @@ try {
       generated_at: '2026-10-22T01:00:00Z', codex_sources: [], remotes: [], current_device_short_code: 'hourly',
     } });
   });
-  await page.goto(`${origin}/svelte?period=custom&start=2026-10-21&end=2026-10-21&timezone=Asia%2FShanghai`);
+  await page.goto(`${origin}/?period=custom&start=2026-10-21&end=2026-10-21&timezone=Asia%2FShanghai`);
   await page.locator('.cost-point rect').last().waitFor();
   assert.equal(await page.locator('.daily-bar').count(), 24);
   assert.equal(await page.locator('.cost-point rect').count(), 25);
@@ -66,7 +66,7 @@ try {
   assert.equal(await page.locator('.daily-column').nth(7).evaluate(el => el === document.activeElement), true);
   assert.equal(await page.locator('.cost-point rect').nth(9).getAttribute('data-cost'), '0.4');
   report.checks.push('A historical day shows 24 hourly bars with accurate pointer and keyboard tooltips; the cumulative cost curve stays inert behind the model toggle');
-  await page.goto(`${origin}/svelte?period=week&timezone=Asia%2FShanghai`);
+  await page.goto(`${origin}/?period=week&timezone=Asia%2FShanghai`);
   await page.locator('.daily-bar').first().waitFor();
   assert.equal(await page.locator('.daily-bar').count(), 7);
   assert.equal(await page.locator('.cost-spark text, .spark-axis').count(), 0);

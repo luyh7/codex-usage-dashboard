@@ -62,7 +62,7 @@ const frame = () => canvas.evaluate(el => el.__draw);
 const labels = async () => (await frame()).labels.map(row => row[0]);
 const navigate = async (next = mode, zone = 'Asia/Shanghai') => {
   mode = next;
-  await page.goto(`${origin}/svelte?period=week&session=main&timezone=${encodeURIComponent(zone)}`);
+  await page.goto(`${origin}/?period=week&session=main&timezone=${encodeURIComponent(zone)}`);
   await page.locator('.detail-panel[aria-busy="false"]').waitFor();
   await page.evaluate(() => document.fonts.ready);
   if (mode !== 'empty') await page.waitForFunction(() => document.querySelector('.usage-chart canvas')?.__draw?.labels.length > 0);

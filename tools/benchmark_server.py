@@ -32,7 +32,8 @@ def start(variant,home,config):
         while True:
             if proc.poll() is not None:raise RuntimeError(f'{variant} exited {proc.returncode}')
             try:
-                status,value=request('/api/sessions?period=all')
+                status,value=request('/api/sessions?period=all' if variant=='python' else '/api/v2/sessions?period=all')
+                if variant!='python' and status==200:value={**value['page'],'sessions':value['page']['items']}
                 if status==200:break
             except OSError:pass
             if time.monotonic()>deadline:raise RuntimeError('startup timeout')

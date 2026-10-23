@@ -30,7 +30,7 @@ const errors = [];
 page.on('pageerror', error => errors.push(String(error)));
 const modes = locator => locator.locator('.session-metadata [data-service-tier]').evaluateAll(nodes => nodes.map(node => node.dataset.serviceTier));
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week');
+  await page.goto('http://127.0.0.1:8765/?period=week');
   const group = page.locator('.task-group').filter({ has: page.locator('.task-row .title-text', { hasText: '重构登录流程' }) });
   await group.locator('.task-row').waitFor();
   assert.deepEqual(await modes(group.locator('.task-row')), ['fast', 'ultrafast']);

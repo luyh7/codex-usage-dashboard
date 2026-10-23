@@ -24,7 +24,7 @@ const detail = page.locator('.detail-panel');
 const selected = () => new URL(page.url()).searchParams.get('session');
 const ready = () => page.waitForFunction(() => document.querySelector('.detail-panel')?.getAttribute('aria-busy') === 'false');
 const navigate = async (extra = '') => {
-  await page.goto(`${origin}/svelte?view=sessions&period=week${extra}`);
+  await page.goto(`${origin}/?view=sessions&period=week${extra}`);
   await page.locator('.sessions-table [data-uid="main"]').waitFor();
 };
 const open = async () => {

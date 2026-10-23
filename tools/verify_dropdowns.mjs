@@ -27,7 +27,7 @@ const bounds = async role => {
   return list;
 };
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
   await page.locator('.task-row').first().waitFor();
   assert.equal(await page.locator('select').count(), 0, 'No native selects remain in the current UI');
   // Global filters now expose direct choices; their behavior is covered by verify_global_filters.mjs.

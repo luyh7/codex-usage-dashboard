@@ -28,7 +28,7 @@ const bounds = async locator => {
   assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height, JSON.stringify(box));
 };
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
   await page.locator('.task-row').first().waitFor();
   await page.evaluate(() => document.fonts.ready);
   assert.ok((await page.locator('.global-filters').boundingBox()).y < await metricsTop());
@@ -144,7 +144,7 @@ try {
   const english = await browser.newContext({ viewport: { width: 320, height: 844 }, reducedMotion: 'reduce' });
   await installMintFixture(english, { language: 'en' });
   const enPage = await english.newPage();
-  await enPage.goto('http://127.0.0.1:8765/svelte?period=week');
+  await enPage.goto('http://127.0.0.1:8765/?period=week');
   await enPage.locator('.task-row').first().waitFor();
   await enPage.locator('.filter-toggle').click();
   await enPage.getByRole('dialog', { name: 'Filters' }).waitFor();

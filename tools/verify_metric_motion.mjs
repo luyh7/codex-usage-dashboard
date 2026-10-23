@@ -37,7 +37,7 @@ const style = (selector, property) => page.locator(selector).evaluate((node, pro
 const publish = async () => { generation++; await page.evaluate(generation => window.__publishRevision(generation), generation); };
 const leave = async () => { await page.locator('h1').hover(); await page.waitForTimeout(260); };
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?view=sessions&period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?view=sessions&period=week&timezone=Asia%2FShanghai');
   await page.locator('.cost-reveal').waitFor();
   await page.evaluate(() => document.fonts.ready);
   const clips = await page.locator('.cost-reveal').evaluate(node => {

@@ -1,6 +1,7 @@
 mod config;
 mod http;
 mod launcher;
+mod network;
 mod service;
 mod snapshot;
 use clap::Parser;
@@ -53,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.build_info {
         println!(
             "{}",
-            serde_json::json!({"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION")})
+            serde_json::json!({"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"ui":env!("COUSASH_UI")})
         );
         return Ok(());
     }
@@ -70,6 +71,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "UTC".into())
         .parse()?;
     let sources = config::sources(&args.codex_home, !args.no_auto_windows);
+    // Claim the fixed port before opening the index. A previous Windows/WSL
+    // binding can outlive its process, and waiting must not hold the index lock.
+    let listener = if args.serve {
+        let address: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
+        Some(network::bind(address).await?)
+    } else {
+        None
+    };
     // One-shot commands must coexist with the server's exclusive writer. They
     // share read-only sources/remotes and use a private disposable index.
     let once_index = (args.once || args.export_snapshot.is_some())
@@ -138,12 +147,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = worker.join();
         return Ok(());
     }
-    let address: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
-    let listener = tokio::net::TcpListener::bind(address).await.map_err(|e| {
-        format!(
-            "port 8765 unavailable; identify and stop the existing dashboard before retrying: {e}"
-        )
-    })?;
+    let listener = listener.expect("server listener was bound before indexing");
+    let address = listener.local_addr()?;
     if args.open && !args.no_browser {
         std::thread::spawn(|| {
             let _ = launcher::open_browser();
@@ -158,6 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ = tokio::signal::ctrl_c() => {},
                     _ = state.shutdown.notified() => {},
                 }
+                state.events.send_replace(serde_json::json!({"phase":"shutdown"}));
             }
         })
         .await?;

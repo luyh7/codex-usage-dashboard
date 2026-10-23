@@ -42,12 +42,33 @@ async function verify(binary, manifest) {
   await chmod(binary, 0o755);
   const info = JSON.parse(execFileSync(binary, ['--build-info'], {encoding:'utf8', timeout:10000, windowsHide:true}));
   if (info.version !== manifest.version || info.build_id !== entry.build_id) throw Error('Native artifact build identity mismatch');
+  if (info.ui !== 'svelte') throw Error('Native artifact does not contain the current dashboard; the classic runtime cannot be installed');
+}
+async function cleanup(runtimeRoot) {
+  const scripts = path.join(path.dirname(runtimeRoot), 'scripts');
+  for (const obsolete of ['codex_usage_dashboard.py','open_dashboard.py','dashboard_runtime.py','install_runtime.py','install_desktop_shortcut.py','export_snapshot.py','__pycache__']) {
+    await rm(path.join(scripts, obsolete), {recursive:true, force:true});
+  }
+}
+export async function ensureRuntime() {
+  const config = JSON.parse(await readFile(path.join(skillRoot, 'native.json'), 'utf8'));
+  const runtimeRoot = path.join(skillRoot, 'runtime');
+  const binary = path.join(runtimeRoot, binaryName());
+  try {
+    const manifest = JSON.parse(await readFile(path.join(runtimeRoot, 'manifest.json'), 'utf8'));
+    if (manifest.version !== config.version) throw Error('Installed runtime needs an update');
+    await verify(binary, manifest);
+  } catch {
+    return installRuntime();
+  }
+  await cleanup(runtimeRoot);
+  return binary;
 }
 export async function installRuntime({manifest: source, offline = false, rollback = false, runtimeRoot = path.join(skillRoot,'runtime')} = {}) {
   await mkdir(runtimeRoot, {recursive:true, mode:0o700});
   const current = path.join(runtimeRoot,'manifest.json');
   const previous = path.join(runtimeRoot,'manifest.previous.json');
-  let manifest, bytes;
+  let manifest, bytes, expectedVersion;
   if (rollback) {
     manifest = JSON.parse(await readFile(previous,'utf8'));
     bytes = await readFile(path.join(runtimeRoot,entryFor(manifest).file));
@@ -55,11 +76,13 @@ export async function installRuntime({manifest: source, offline = false, rollbac
     if (!source) {
       if (offline) throw Error('--offline requires --manifest pointing to a local release manifest');
       const config = JSON.parse(await readFile(path.join(skillRoot,'native.json'),'utf8'));
+      expectedVersion = config.version;
       source = `https://github.com/${config.repository}/releases/download/v${config.version}/manifest.json`;
     }
     const remote = source.startsWith('https://');
     if (offline && remote) throw Error('Offline installation requires local files');
     manifest = JSON.parse(remote ? await download(source, 1024*1024) : await readFile(source,'utf8'));
+    if (expectedVersion && manifest.version !== expectedVersion) throw Error('Published runtime version does not match this skill');
     const entry = entryFor(manifest);
     bytes = remote ? await download(new URL(entry.file,source).href,256*1024*1024) : await readFile(path.join(path.dirname(path.resolve(source)),entry.file));
   }
@@ -81,6 +104,7 @@ export async function installRuntime({manifest: source, offline = false, rollbac
     await atomic(stable,bytes,0o755); replaced=true;
     if (oldManifest) await atomic(previous,oldManifest);
     await atomic(current,JSON.stringify(manifest,null,2)+'\n');
+    await cleanup(runtimeRoot);
     return stable;
   } catch(error) {
     if (replaced) {
@@ -94,7 +118,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const args=process.argv.slice(2); const index=args.indexOf('--manifest');
   try {
     if(index>=0 && (!args[index+1] || args[index+1].startsWith('--'))) throw Error('--manifest requires a path or HTTPS URL');
-    console.log(await installRuntime({manifest:index>=0?args[index+1]:undefined,offline:args.includes('--offline'),rollback:args.includes('--rollback')}));
+    console.log(await (args.includes('--ensure')
+      ? ensureRuntime()
+      : installRuntime({manifest:index>=0?args[index+1]:undefined,offline:args.includes('--offline'),rollback:args.includes('--rollback')})));
   } catch(error) {
     console.error(`Native installation failed: ${error.message}\nInstall a published native release, or build from source and pass --manifest /path/to/manifest.json --offline. No alternative backend is installed.`);
     process.exitCode=1;

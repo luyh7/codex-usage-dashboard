@@ -4,14 +4,14 @@
     "app": "codex-usage-dashboard",
     "protocol_version": 1,
     "implementation": "rust",
-    "ui": "legacy",
+    "ui": "svelte",
     "timezone": "UTC",
-    "source_sha256": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
-    "build_id": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
-    "version": "0.2.0",
-    "pid": 106754,
+    "source_sha256": "5b482ad2a76039e5fc056fd922737fdd275e9bc14ca1a4a06a522645fac116ce",
+    "build_id": "5b482ad2a76039e5fc056fd922737fdd275e9bc14ca1a4a06a522645fac116ce",
+    "version": "0.3.0",
+    "pid": 711014,
     "codex_homes": [
-      "/tmp/rust-http-contract-xdwxmz7x/home"
+      "/tmp/rust-http-contract-x7iszwic/home"
     ],
     "instance_id": "",
     "features": [
@@ -37,8 +37,8 @@
         "unchanged_files": 0,
         "normalized_components": 1,
         "component_hits": 0,
-        "transaction_ms": 23.537079,
-        "last_refresh_ms": 57.93575,
+        "transaction_ms": 27.352342,
+        "last_refresh_ms": 65.84021800000001,
         "events_written": 10003
       },
       "watch_roots": 2,
@@ -46,17 +46,15 @@
     }
   },
   "list_keys": [
-    "snapshot_token",
-    "generated_at",
-    "codex_home",
-    "codex_sources",
+    "page",
     "period",
-    "summary",
-    "sessions",
-    "daily_usage",
-    "daily_usage_complete",
+    "generated_at",
+    "codex_sources",
+    "remotes",
     "current_device_short_code",
-    "remotes"
+    "current_device",
+    "facets",
+    "metric_trend"
   ],
   "detail_keys": [
     "uid",
@@ -127,8 +125,9 @@
     "duration_ms_total",
     "duration_ms_avg",
     "time_to_first_token_ms_avg",
-    "timeline",
-    "tasks"
+    "tasks",
+    "revision",
+    "has_subagents"
   ],
   "export_keys": [
     "schema",
@@ -140,7 +139,7 @@
   "checks": [
     "build-health",
     "watcher-excludes-plugin-cache-subtrees",
-    "legacy-list-detail-golden",
+    "paged-list-detail-golden",
     "10003-events-complete-chart-and-paging",
     "date-boundaries",
     "export-v1-device-id",

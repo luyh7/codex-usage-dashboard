@@ -8,7 +8,7 @@ import time
 import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
-BINARY = ROOT / 'target/release/codex-usage-dashboard'
+BINARY = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target')) / 'release/codex-usage-dashboard'
 _last_env = None
 
 def verify(restart=True, codex_home=None, config_home=None):
@@ -34,7 +34,8 @@ def verify(restart=True, codex_home=None, config_home=None):
     with urllib.request.urlopen('http://127.0.0.1:8765/', timeout=3) as response:
         html = response.read()
     assert health['implementation'] == 'rust' and health['build_id'] == expected['build_id']
-    assert html == (ROOT / 'web/classic/index.html').read_bytes()
+    assert health['ui'] == 'svelte'
+    assert html == (ROOT / 'web/dist/index.html').read_bytes()
     return {'health_ok': True, 'worktree_html_match': True, 'build_id': health['build_id']}
 
 if __name__ == '__main__': print(json.dumps(verify('--check' not in sys.argv)))

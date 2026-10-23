@@ -10,7 +10,7 @@ const stats=samples=>({p50_ms:[...samples].sort((a,b)=>a-b)[Math.floor(samples.l
 try{
  const context=await browser.newContext({viewport:{width:1440,height:1000},locale:'en-US',timezoneId:'UTC'});await context.addInitScript(()=>localStorage.setItem('cousash:v2:language','"en"'));const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
  report.health=await(await fetch(base+'/api/health')).json();assert(report.health.implementation==='rust');
- await page.goto(base+'/svelte?period=all&view=sessions&timezone=UTC');await page.locator('.sessions-table tbody tr').first().waitFor();
+ await page.goto(base+'/?period=all&view=sessions&timezone=UTC');await page.locator('.sessions-table tbody tr').first().waitFor();
  // Each sample searches a different row, so unchanged content cannot satisfy it.
  const search=[];
  for(let i=0;i<17;i++){

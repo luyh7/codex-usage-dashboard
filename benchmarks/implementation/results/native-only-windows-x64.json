@@ -1,20 +1,26 @@
 {
-  "status": "blocked",
+  "passed": true,
   "platform": "windows-x64",
-  "build_id": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
-  "toolchain": "x86_64-pc-windows-gnu, actual Windows processes via WSL interop",
-  "passed_checks": [
-    "native executable build-info",
-    "offline installation with no Python on PATH",
+  "version": "1.0.1",
+  "ui": "svelte",
+  "build_id": "c40630ea2322ec0938f0c1d312f46ac89da586830e5fe200c559ba0a626bf33d",
+  "python_on_path": false,
+  "checks": [
     "missing offline artifact fails without fallback",
-    "installed skill contains no Python scripts"
-  ],
-  "blocking_check": "binding 127.0.0.1:8765",
-  "error": "WSAEADDRINUSE (10048); independent Windows Node server also returns EADDRINUSE after the Linux dashboard is stopped. Owner not established; no unrelated process or host setting changed.",
-  "not_verified": [
-    "Windows server launch/lifecycle",
-    "Windows browser",
-    "MSVC",
-    "macOS"
+    "fresh offline install ships no Python backend or launcher",
+    "root and index serve current UI and assets; classic routes removed; old bookmarks redirect",
+    "skill readiness check reuses matching runtime offline",
+    "same build and source scope reuse",
+    "concurrent launches serialize",
+    "standalone export and once coexist with server without Python",
+    "default CLI and HTTP gzip exports retain complete session details",
+    "checksum failure preserves install and running process",
+    "upgrade removes old scripts and preserves external user data",
+    "skills CLI update replaces stale runtime with the skill release and cleans old backend",
+    "verified native-only rollback",
+    "source changes replace managed process",
+    "Windows waits for an invisible previous binding, then launches on the same port",
+    "authenticated stop closes SSE and releases writer/port",
+    "foreign port owner remains running"
   ]
 }

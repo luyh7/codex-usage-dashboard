@@ -1,4 +1,4 @@
-use crate::{config, service::State};
+use crate::service::State;
 use axum::{
     Router,
     body::Bytes,
@@ -127,15 +127,6 @@ fn current_device(state: &State, published: &crate::service::Published) -> Value
     }).collect();
     json!({"device_short_code":state.device,"label":state.hostname,"session_count":published.local.sessions.len(),"sources":sources})
 }
-async fn sessions(
-    Extract(state): Extract<Arc<State>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Response {
-    blocking(state.clone(),move||{
-    let(view,published)=state.view(&params,false)?;if text(&params,"snapshot_token")==view.revision{return Ok(StatusCode::NO_CONTENT.into_response())}
-    Ok(response(StatusCode::OK,&json!({"snapshot_token":view.revision,"generated_at":view.generated_at,"codex_home":config::homes_display(&state.sources),"codex_sources":published.sources,"period":view.period,"summary":view.summary()?,"facets":view.facets()?,"sessions":view.wire_summaries()?,"daily_usage":view.daily_usage,"daily_usage_complete":view.period.key=="all","current_device_short_code":state.device,"current_device":current_device(&state,&published),"remotes":published.remotes})))
-}).await
-}
 async fn paged(
     Extract(state): Extract<Arc<State>>,
     Query(params): Query<HashMap<String, String>>,
@@ -184,22 +175,6 @@ async fn projects(
             )?;
         }
         Ok(response(StatusCode::OK, &page))
-    })
-    .await
-}
-async fn detail(
-    Extract(state): Extract<Arc<State>>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Response {
-    blocking(state.clone(), move || {
-        let (view, _) = state.view(&params, !text(&params, "snapshot_token").is_empty())?;
-        if let Some(value) = view.legacy_detail(text(&params, "id"))? {
-            return Ok(response(StatusCode::OK, &value));
-        }
-        Ok(response(
-            StatusCode::OK,
-            view.query_session_detail(text(&params, "id"))?,
-        ))
     })
     .await
 }
@@ -438,17 +413,8 @@ async fn subscribe(Extract(state): Extract<Arc<State>>) -> impl IntoResponse {
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 include!(concat!(env!("OUT_DIR"), "/assets.rs"));
-async fn legacy_page() -> impl IntoResponse {
-    (
-        [
-            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        include_str!(concat!(env!("OUT_DIR"), "/legacy.html")),
-    )
-}
 async fn static_file(uri: axum::http::Uri) -> Response {
-    let path = if uri.path() == "/svelte" {
+    let path = if uri.path() == "/" {
         "/index.html"
     } else {
         uri.path()
@@ -464,23 +430,23 @@ async fn static_file(uri: axum::http::Uri) -> Response {
         )
             .into_response();
     }
-    if uri.path() == "/" {
-        legacy_page().await.into_response()
-    } else {
-        StatusCode::NOT_FOUND.into_response()
-    }
+    StatusCode::NOT_FOUND.into_response()
+}
+async fn previous_entry(uri: axum::http::Uri) -> impl IntoResponse {
+    let location = uri
+        .query()
+        .map_or_else(|| "/".into(), |query| format!("/?{query}"));
+    axum::response::Redirect::permanent(&location)
 }
 pub fn router(state: Arc<State>) -> Router {
     Router::new()
-        .route("/", get(legacy_page))
-        .route("/index.html", get(legacy_page))
-        .route("/svelte", get(static_file))
-        .route("/legacy", get(legacy_page))
+        .route("/", get(static_file))
+        .route("/index.html", get(static_file))
+        .route("/svelte", get(previous_entry))
+        .route("/svelte/", get(previous_entry))
         .fallback(static_file)
         .route("/api/health", get(health))
         .route("/api/shutdown", post(shutdown))
-        .route("/api/sessions", get(sessions))
-        .route("/api/session", get(detail))
         .route("/api/daily-usage", get(daily))
         .route("/api/v2/sessions", get(paged))
         .route("/api/v2/project-tasks", get(projects))
@@ -493,7 +459,6 @@ pub fn router(state: Arc<State>) -> Router {
         .route("/api/export.json.gz", get(export_gzip))
         .route("/api/export/start", post(start_export))
         .route("/api/export/progress", get(export_progress))
-        .route("/snapshot-export.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], include_str!("../../../web/shared/snapshot-export.js")) }))
         .route("/api/remotes", get(remotes))
         .route(
             "/api/remotes/import-file",

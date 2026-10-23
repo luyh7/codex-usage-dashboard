@@ -127,7 +127,7 @@
     <div>
       <div class="device-name"><b>{localDevice?.label || t.thisDevice}</b>{#if localDevice?.label}<span class="device-kind local-kind">{t.thisDevice}</span>{/if}</div>
       {#if localDevice}<small>{localDevice.device_short_code} · {number(localDevice.session_count, lang)} {t.sessions}</small>{/if}
-      {#if localDevice?.sources?.length}
+      {#if localDevice?.sources && localDevice.sources.length > 1}
         <ul class="local-sources">
           {#each localDevice.sources as source (source.id)}
             <li><span>{source.label}</span><span>{number(source.session_count, lang)} {t.sessions}</span></li>

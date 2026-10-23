@@ -18,7 +18,7 @@ const check = message => { checks.push(message); console.log(message); };
 const shot = name => page.screenshot({ path: `${output}/${name}.png` });
 const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight);
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
   await page.locator('.task-row').first().waitFor();
   await page.evaluate(() => document.fonts.ready);
   assert.equal(await page.locator('h1').innerText(), '用量概览');

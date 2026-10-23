@@ -50,7 +50,7 @@ const observe = () => page.evaluate(() => {
   window.__ringObserver.observe(document.querySelector('.metrics'), { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['d'] });
 });
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week');
+  await page.goto('http://127.0.0.1:8765/?period=week');
   await page.locator('.session-agent-segment').waitFor();
   await settled();
   assert.equal(await page.locator('.session-main-segment').getAttribute('stroke-dasharray'), null, 'A full base circle prevents white seams');

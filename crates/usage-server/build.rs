@@ -31,11 +31,8 @@ fn main() {
     ] {
         collect(&root.join(path), &mut hash);
     }
-    let legacy = root.join("web/classic/index.html");
-    collect(&legacy, &mut hash);
     collect(&root.join("web/shared"), &mut hash);
     let out = env::var("OUT_DIR").unwrap();
-    fs::copy(legacy, Path::new(&out).join("legacy.html")).unwrap();
     web_assets(root, Path::new(&out), &mut hash);
     println!("cargo:rustc-env=COUSASH_BUILD_ID={:x}", hash.finalize());
 }
@@ -43,8 +40,11 @@ fn main() {
 fn web_assets(root: &Path, out: &Path, hash: &mut Sha256) {
     let web = root.join("web");
     let dist = web.join("dist");
-    println!("cargo:rerun-if-env-changed=COUSASH_REQUIRE_WEB");
     println!("cargo:rerun-if-changed={}", dist.display());
+    assert!(
+        dist.join("index.html").is_file(),
+        "build the dashboard first: npm ci --prefix web && npm run build --prefix web"
+    );
     let mut rows = String::from("pub static ASSETS: &[(&str,&str,&[u8])] = &[\n");
     if dist.join("index.html").is_file() {
         for path in [
@@ -93,15 +93,8 @@ fn web_assets(root: &Path, out: &Path, hash: &mut Sha256) {
                 path.canonicalize().unwrap().to_string_lossy()
             ));
         }
-        // The original dashboard is the default; Svelte remains at /svelte.
-        println!("cargo:rustc-env=COUSASH_UI=legacy");
-    } else {
-        assert!(
-            env::var_os("COUSASH_REQUIRE_WEB").is_none(),
-            "build web/dist before release packaging"
-        );
-        println!("cargo:rustc-env=COUSASH_UI=legacy");
     }
+    println!("cargo:rustc-env=COUSASH_UI=svelte");
     rows.push_str("];\n");
     fs::write(out.join("assets.rs"), rows).unwrap();
 }

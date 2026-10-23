@@ -4,10 +4,12 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 const [input,output,tag]=process.argv.slice(2);
 if(!input||!output||!tag) throw Error('Usage: node tools/merge_release.mjs INPUT OUTPUT vVERSION');
-const version=tag.replace(/^v/,'');const combined={version,protocol_version:1,platforms:{}};const sums=[];
+const version=tag.replace(/^v/,'');const combined={version,protocol_version:1,ui:'svelte',platforms:{}};const sums=[];
+const config=JSON.parse(await readFile(new URL('../skills/codex-usage-dashboard/native.json',import.meta.url),'utf8'));
+if(config.version!==version)throw Error('Tag/skill version mismatch');
 await mkdir(output,{recursive:true});
 async function walk(dir){for(const entry of await readdir(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())await walk(file);else if(entry.name==='manifest.json'){
- const manifest=JSON.parse(await readFile(file,'utf8'));if(manifest.version!==version||manifest.protocol_version!==1)throw Error('Tag/manifest version mismatch');
+ const manifest=JSON.parse(await readFile(file,'utf8'));if(manifest.version!==version||manifest.protocol_version!==1||manifest.ui!=='svelte')throw Error('Tag/manifest version or dashboard mismatch');
  for(const [key,value] of Object.entries(manifest.platforms)){
   if(combined.platforms[key])throw Error(`Duplicate platform: ${key}`);
   if(path.basename(value.file)!==value.file)throw Error('Invalid artifact path');

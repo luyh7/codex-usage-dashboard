@@ -230,6 +230,24 @@ pub fn run(args: &Args) -> Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::{
+            Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation},
+            System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE},
+        };
+        // Command::spawn inherits more than the redirected standard handles on
+        // Windows. Keeping the caller's pipes open in the detached server makes
+        // Node/skill launchers wait forever for EOF even after this process exits.
+        for stream in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            unsafe {
+                let handle = GetStdHandle(stream);
+                if !handle.is_null()
+                    && handle != INVALID_HANDLE_VALUE
+                    && SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) == 0
+                {
+                    return Err(std::io::Error::last_os_error().into());
+                }
+            }
+        }
         child.creation_flags(0x08000000 | 0x00000200); // NO_WINDOW | NEW_PROCESS_GROUP
     }
     let mut child = child.spawn()?;
@@ -237,7 +255,9 @@ pub fn run(args: &Args) -> Result<()> {
         &root().join("launcher-process.json"),
         &json!({"pid":child.id(),"build_id":env!("COUSASH_BUILD_ID"),"instance_id":instance,"shutdown_token":token}),
     )?;
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + crate::network::STARTUP_TIMEOUT;
+    let progress_at = Instant::now() + Duration::from_secs(2);
+    let mut reported_wait = false;
     loop {
         if let Some(status) = child.try_wait()? {
             return Err(format!("Dashboard exited ({status}); see {}", log.display()).into());
@@ -258,6 +278,10 @@ pub fn run(args: &Args) -> Result<()> {
         }
         if Instant::now() > deadline {
             return Err(format!("Dashboard startup timed out; see {}", log.display()).into());
+        }
+        if !reported_wait && Instant::now() >= progress_at {
+            eprintln!("Waiting for the dashboard on port 8765; see {}", log.display());
+            reported_wait = true;
         }
         thread::sleep(Duration::from_millis(100));
     }

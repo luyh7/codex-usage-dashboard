@@ -90,6 +90,7 @@
       : '',
   );
   let summary = $derived(listing?.page.summary || null);
+  let showEnvironment = $derived((listing?.codex_sources.length ?? 0) > 1);
   let filterChips = $derived(
     [
       ['search', query.search],
@@ -585,6 +586,7 @@
             {#each listing.page.items as Project[] as project (project.key)}
               <ProjectBlock
                 {project}
+                {showEnvironment}
                 {query}
                 {revision}
                 {data}
@@ -630,7 +632,7 @@
                             onclick={() => openDetail(row.uid)}
                             ><span class="conversation-title-line"><span class="title-text" data-tooltip={row.title || row.session_id} data-tooltip-overflow>{row.title || row.session_id}</span><RelativeTime value={activityTime(row)} {lang} zone={query.timezone} /></span><small
                               class="conversation-meta"
-                              ><span class="environment-badge" data-environment={row.environment}>{row.environment}</span><ArchiveTag source={row.source} {lang} /><span class="conversation-project" data-tooltip={row.project} data-tooltip-overflow>{row.project}</span>{#if row.is_subagent}<span class="role-tag">{t.agentLabel}</span>{/if}</small
+                              >{#if showEnvironment}<span class="environment-badge" data-environment={row.environment}>{row.environment}</span>{/if}<ArchiveTag source={row.source} {lang} /><span class="conversation-project" data-tooltip={row.project} data-tooltip-overflow>{row.project}</span>{#if row.is_subagent}<span class="role-tag">{t.agentLabel}</span>{/if}</small
                               ><SessionMetadata sessions={[row]} {lang} /></button
                           >
                         </div></td
@@ -673,6 +675,7 @@
           />{/if}
       </section>
       {#if selected}<DetailPanel
+          {showEnvironment}
           projectView={mode === 'projects'}
           {bundle}
           loading={detailLoading}
@@ -692,9 +695,7 @@
     </div>
     {/if}
     <footer>
-      <span><Icon name="shield" size={14} />{t.localOnly} · {t.estimatedHint}</span><a
-        href="/legacy">{t.classic}</a
-      >
+      <span><Icon name="shield" size={14} />{t.localOnly} · {t.estimatedHint}</span>
     </footer>
   </main>
 </div>

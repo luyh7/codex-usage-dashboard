@@ -16,6 +16,7 @@
   import { segmentPriceTooltip } from '../lib/domain/usageBreakdown';
   let {
     bundle,
+    showEnvironment,
     projectView,
     loading,
     error,
@@ -28,6 +29,7 @@
     onerror,
   }: {
     bundle: DetailBundle | null;
+    showEnvironment: boolean;
     projectView: boolean;
     loading: boolean;
     error: string;
@@ -312,7 +314,7 @@
         <ArchiveTag source={d.source} {lang} />
         <span class="detail-project-tag"><Icon name="folder" size={14} /><span data-tooltip={d.project} data-tooltip-overflow>{d.project}</span></span>
         <SessionMetadata sessions={[d]} {lang} />
-        <span class="environment-badge" data-environment={d.environment}>{d.environment}</span>
+        {#if showEnvironment}<span class="environment-badge" data-environment={d.environment}>{d.environment}</span>{/if}
       </div>
       <div class="detail-metrics">
         <div class="detail-cost">

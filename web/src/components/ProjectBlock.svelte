@@ -11,6 +11,7 @@
   import CacheHit from './CacheHit.svelte';
   let {
     project,
+    showEnvironment,
     query,
     revision,
     data,
@@ -24,6 +25,7 @@
     onerror,
   }: {
     project: Project;
+    showEnvironment: boolean;
     query: Query;
     revision: string;
     data: DashboardData;
@@ -118,7 +120,7 @@
           size={28}
         /></span
       ><span class="project-name"
-        ><span class="conversation-title-line"><span class="title-text" data-tooltip={project.label || project.key} data-tooltip-overflow>{project.label || project.key}</span><span class="project-environments">{#each project.environments as environment}<span class="environment-badge" data-environment={environment}>{environment}</span>{/each}</span></span><small class="project-meta"
+        ><span class="conversation-title-line"><span class="title-text" data-tooltip={project.label || project.key} data-tooltip-overflow>{project.label || project.key}</span>{#if showEnvironment}<span class="project-environments">{#each project.environments as environment}<span class="environment-badge" data-environment={environment}>{environment}</span>{/each}</span>{/if}</span><small class="project-meta"
           ><AnimatedValue
             value={project.session_count}
             format={(value) => number(Math.round(value), lang)}

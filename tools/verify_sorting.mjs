@@ -18,7 +18,7 @@ const menu = page.locator('.sort-menu [role="menu"]');
 const check = message => { checks.push(message); console.log(message); };
 const waitDirection = ascending => page.waitForFunction(ascending => document.querySelector('.sort-direction')?.getAttribute('aria-pressed') === String(ascending), ascending);
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
   await page.locator('.task-row').first().waitFor();
   await waitDirection(false);
   assert.equal(await direction.getAttribute('aria-label'), '降序');

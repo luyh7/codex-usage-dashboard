@@ -87,7 +87,7 @@ async function hide() {
   assert.equal(await page.locator('.token-card, .sessions-card, .cache-card').count(), 3);
 }
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
   await page.waitForFunction(() => document.querySelector('.cost-toggle')?.disabled === false);
   await page.locator('h1').hover();
   assert.equal(await border.evaluate(el => getComputedStyle(el).opacity), '0');

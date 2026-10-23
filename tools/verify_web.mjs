@@ -7,8 +7,8 @@ let inspectedPage;const errors=[];
 const report={checks:[],browser:await browser.version(),port:8765,implementation:'rust+svelte',unavailable:['Windows native','macOS']};
 try{
  const context=await browser.newContext({viewport:{width:1440,height:1000},locale:'en-US',timezoneId:'UTC'});await context.addInitScript(()=>{localStorage.setItem('cousash:v2:language','"en"');const Original=EventSource;window.__streams=[];window.EventSource=class extends Original{constructor(...args){super(...args);window.__streams.push(this)}}});const page=await context.newPage();inspectedPage=page;page.on('pageerror',e=>errors.push(String(e)));
- const health=await (await context.request.get(origin+'/api/health')).json();assert.equal(health.implementation,'rust');assert.equal(health.ui,'legacy');report.build_id=health.build_id;
- await page.goto(origin+'/svelte?period=all&timezone=UTC');await page.locator('.task-row .session-title').first().waitFor();
+ const health=await (await context.request.get(origin+'/api/health')).json();assert.equal(health.implementation,'rust');assert.equal(health.ui,'svelte');report.build_id=health.build_id;
+ await page.goto(origin+'/?period=all&timezone=UTC');await page.locator('.task-row .session-title').first().waitFor();
  assert.equal(await page.locator('.metrics article').count(),4);assert.equal(await page.locator('.project-block').count(),1);
  const title=page.locator('.task-row .session-title').first();await title.focus();await page.keyboard.press('Enter');await page.locator('.event-scroll tbody tr').first().waitFor();assert.equal(await page.locator('.event-scroll tbody tr').count(),100);
  const first=await page.locator('.event-scroll tbody tr:first-child td').first().getAttribute('title');await page.locator('.detail-panel .pager').getByRole('button',{name:'Next',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.detail-panel .pager span')?.textContent.startsWith('101'));assert.notEqual(await page.locator('.event-scroll tbody tr:first-child td').first().getAttribute('title'),first);

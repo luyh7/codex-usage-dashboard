@@ -18,13 +18,13 @@ const bounds=async locator=>{
   assert.ok(box && box.x>=0 && box.y>=0 && box.x+box.width<=width && box.y+box.height<=height,JSON.stringify(box));
 };
 const appearance=locator=>locator.evaluate(el=>{ const s=getComputedStyle(el);return [s.backgroundColor,s.borderColor,s.borderRadius,s.padding,s.boxShadow,s.fontSize,s.lineHeight];});
-await page.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+await page.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
 await page.locator('.project-block').first().waitFor();
 await page.evaluate(()=>document.fonts.ready);
 assert.equal(await page.locator('[title]').count(),0);
 const timingPage=await context.newPage();
 await timingPage.emulateMedia({reducedMotion:'no-preference'});
-await timingPage.goto('http://127.0.0.1:8765/svelte?period=week&timezone=Asia%2FShanghai');
+await timingPage.goto('http://127.0.0.1:8765/?period=week&timezone=Asia%2FShanghai');
 await timingPage.locator('.project-block').first().waitFor();
 await timingPage.clock.install();
 await timingPage.clock.pauseAt(new Date(Date.now()+1000));

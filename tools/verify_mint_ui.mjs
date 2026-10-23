@@ -29,7 +29,7 @@ try {
   await mkdir(output, { recursive: true });
   report.health = await (await context.request.get(origin + '/api/health')).json();
   assert.equal(report.health.app, 'codex-usage-dashboard');
-  await page.goto(origin + '/svelte?period=week&session=main&timezone=Asia%2FShanghai');
+  await page.goto(origin + '/?period=week&session=main&timezone=Asia%2FShanghai');
   await own().waitFor(); await page.locator('.cost-bar').waitFor();
   await page.evaluate(() => document.fonts.ready);
   assert.equal(await page.locator('h1').innerText(), '用量概览');
@@ -231,7 +231,7 @@ try {
   await page.getByText('No remote snapshots imported',{exact:true}).waitFor();
   assert.equal(fixture.writes(),4);
   await page.locator('dialog').getByRole('button',{name:'Close',exact:true}).click();
-  await page.goto(origin+'/svelte?period=week&view=sessions&session=unknown');
+  await page.goto(origin+'/?period=week&view=sessions&session=unknown');
   await page.locator('.chart-empty').waitFor();
   assert.equal(await page.locator('.cost-bar').count(),0);
   assert.equal((await page.locator('.detail-cost strong').innerText()).trim(),'未知');

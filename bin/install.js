@@ -23,8 +23,6 @@ async function main() {
   // Finish artifact verification before replacing the installed skill.
   const binary=await installRuntime({manifest:flag<0?undefined:args[flag+1],offline:args.includes('--offline'),rollback:args.includes('--rollback-native'),runtimeRoot:path.join(target,'runtime')});
   copy(source,target);
-  // Remove obsolete shipped implementations after successful native install.
-  for(const obsolete of ['codex_usage_dashboard.py','open_dashboard.py','dashboard_runtime.py','install_runtime.py','install_desktop_shortcut.py','export_snapshot.py','__pycache__']) fs.rmSync(path.join(target,'scripts',obsolete),{recursive:true,force:true});
   for(const alias of ['cousash-open','cousash-export']) fs.rmSync(path.join(path.dirname(target),alias),{recursive:true,force:true});
   console.log(`Installed ${name}: ${target}\nInvoke $codex-usage-dashboard in Codex, or run:\n  "${binary}"`);
   if(args.includes('--shortcut')) cp.execFileSync(binary,['--shortcut'],{stdio:'inherit'});

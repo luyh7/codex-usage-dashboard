@@ -8,10 +8,10 @@ import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import {gunzipSync} from 'node:zlib';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {binaryName,platformKey} from '../skills/codex-usage-dashboard/scripts/install_runtime.mjs';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const worktree=path.join(root,'target/release',binaryName());
+const worktree=path.join(process.env.CARGO_TARGET_DIR || path.join(root,'target'),'release',binaryName());
 const base='http://127.0.0.1:8765';
 const replace=process.argv.includes('--replace-worktree');
 const occupied=()=>new Promise(resolve=>{const socket=net.connect(8765,'127.0.0.1');socket.once('connect',()=>{socket.destroy();resolve(true)});socket.once('error',()=>resolve(false))});
@@ -46,8 +46,21 @@ try {
  const rows=[{type:'session_meta',payload:{id:'native-only-fixture',model:'gpt-5',cwd:path.join(tmp,'project')}},{timestamp:'2026-10-01T00:00:00Z',type:'event_msg',payload:{type:'token_count',info:{total_token_usage:{input_tokens:10,output_tokens:2,total_tokens:12}}}}];
  await writeFile(path.join(codex,'sessions/rollout-native.jsonl'),rows.map(r=>JSON.stringify(r)).join('\n')+'\n');
  run(binary,launchArgs);await until(async()=> (await health()).index.phase==='ready');
- let h=await health();assert.equal(h.build_id,entry.build_id);assert.equal(h.implementation,'rust');assert.equal(h.ui,'legacy');
- assert.equal(await(await fetch(base,{headers:{Connection:'close'}})).text(),await readFile(path.join(root,'web/classic/index.html'),'utf8'));checks.push('native launch with empty PATH, correct build and original UI');
+ let h=await health();assert.equal(h.build_id,entry.build_id);assert.equal(h.implementation,'rust');assert.equal(h.ui,'svelte');
+ const page=await(await fetch(base,{headers:{Connection:'close'}})).text();
+ assert.equal(page,await readFile(path.join(root,'web/dist/index.html'),'utf8'));
+ assert.equal(await(await fetch(base+'/index.html')).text(),page);
+ for(const asset of [...page.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)])assert.equal((await fetch(base+asset[1])).status,200);
+ assert.equal((await fetch(base+'/legacy')).status,404);
+ for(const route of ['/api/sessions','/api/session','/snapshot-export.js'])assert.equal((await fetch(base+route)).status,404);
+ for(const old of ['/svelte','/svelte/']) {
+   const redirected=await fetch(base+old+'?page=settings&timezone=Asia%2FShanghai',{redirect:'manual'});
+   assert.equal(redirected.status,308);assert.equal(redirected.headers.get('location'),'/?page=settings&timezone=Asia%2FShanghai');
+ }
+ checks.push('root and index serve current UI and assets; classic routes removed; old bookmarks redirect');
+ const ensure=path.join(skill,'scripts/install_runtime.mjs');
+ assert.equal(run(process.execPath,[ensure,'--ensure']).trim(),binary);
+ assert.equal((await health()).pid,h.pid);checks.push('skill readiness check reuses matching runtime offline');
  const pid=h.pid;run(binary,launchArgs);assert.equal((await health()).pid,pid);checks.push('same build and source scope reuse');
  // Two concurrent invocations must still resolve to one server.
  await Promise.all([1,2].map(()=>new Promise((resolve,reject)=>{const p=spawn(binary,launchArgs,{env,cwd:tmp,stdio:'ignore'});p.on('error',reject);p.on('exit',code=>code===0?resolve():reject(Error(`launcher exit ${code}`)))})));
@@ -69,17 +82,60 @@ try {
  // Legacy installed files disappear only after a successful native upgrade.
  await writeFile(path.join(skill,'scripts/open_dashboard.py'),'obsolete');await mkdir(path.join(config,'remotes'),{recursive:true});await writeFile(path.join(config,'remotes/preserve.txt'),'sentinel');
  run(process.execPath,[...installArgs,'--force']);assert(!(await readdir(path.join(skill,'scripts'))).includes('open_dashboard.py'));assert.equal(await readFile(path.join(config,'remotes/preserve.txt'),'utf8'),'sentinel');checks.push('upgrade removes old scripts and preserves external user data');
- run(binary,launchArgs);run(process.execPath,[path.join(skill,'scripts/install_runtime.mjs'),'--rollback']);run(binary,launchArgs);checks.push('verified native-only rollback');
+ // Skills CLI updates can leave a previous runtime behind. Mock release transport
+ // only; exercise the real ensure, verification, replacement and cleanup paths.
+ run(binary,launchArgs);
+ const stale=structuredClone(manifest);stale.version='0.2.0';
+ await writeFile(path.join(runtime,'manifest.json'),JSON.stringify(stale));
+ await writeFile(path.join(skill,'scripts/open_dashboard.py'),'obsolete');
+ const transport=path.join(tmp,'release-transport.mjs');
+ await writeFile(transport,`import {readFile} from 'node:fs/promises';\nconst manifest=${JSON.stringify(manifest)};\nconst artifact=${JSON.stringify(path.join(root,'dist/release',entry.file))};\nglobalThis.fetch=async url=>{if(!String(url).includes('/v'+manifest.version+'/'))throw Error('Wrong release requested');return {ok:true,url:String(url),body:[String(url).endsWith('/manifest.json')?Buffer.from(JSON.stringify(manifest)):await readFile(artifact)]}};\n`);
+ assert.equal(run(process.execPath,['--import',pathToFileURL(transport).href,ensure,'--ensure']).trim(),binary);
+ assert.equal(JSON.parse(await readFile(path.join(runtime,'manifest.json'),'utf8')).version,manifest.version);
+ assert(!(await readdir(path.join(skill,'scripts'))).includes('open_dashboard.py'));
+ run(binary,launchArgs);assert.equal((await health()).ui,'svelte');
+ checks.push('skills CLI update replaces stale runtime with the skill release and cleans old backend');
+ run(process.execPath,installArgs);run(binary,launchArgs);run(process.execPath,[path.join(skill,'scripts/install_runtime.mjs'),'--rollback']);run(binary,launchArgs);checks.push('verified native-only rollback');
  // Explicit source changes must replace the service even for the same build.
  const oldPid=(await health()).pid;const empty=path.join(tmp,'empty');await mkdir(empty);
  run(binary,['--no-browser','--codex-home',empty,'--no-auto-windows']);assert.notEqual((await health()).pid,oldPid);assert.deepEqual((await health()).codex_homes,[process.platform==='win32'?path.toNamespacedPath(empty):empty]);checks.push('source changes replace managed process');
+ if(process.platform==='win32') {
+  run(binary,['--stop']);
+  const powershell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const holder=spawn(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(root,'tools/fixtures/windows_port_hold.ps1')],{env,stdio:['pipe','pipe','pipe'],windowsHide:true});
+  let output='',errors='';holder.stdout.on('data',data=>output+=data);holder.stderr.on('data',data=>errors+=data);
+  const holderDone=new Promise((resolve,reject)=>{holder.once('error',reject);holder.once('exit',code=>code===0?resolve():reject(Error(`Port holder failed: ${errors}`)))});
+  holderDone.catch(()=>{});
+  try {
+   await until(async()=>{if(holder.exitCode!==null)throw Error(errors);return output.includes('holding')});
+   assert(!await occupied(),'bound socket must be invisible to connection probes');
+   const probe=net.createServer();
+   const bindError=await new Promise(resolve=>{probe.once('error',resolve);probe.listen(8765,'127.0.0.1',()=>probe.close(()=>resolve(null)))});
+   assert.equal(bindError?.code,'EADDRINUSE','fixture must retain the real Windows binding');
+   const launch=spawn(binary,launchArgs,{env,cwd:tmp,stdio:'ignore',windowsHide:true});
+   const launchDone=new Promise((resolve,reject)=>{launch.once('error',reject);launch.once('exit',code=>code===0?resolve():reject(Error(`Delayed launcher exit ${code}`)))});
+   launchDone.catch(()=>{});
+   await until(async()=>{
+    if(launch.exitCode!==null)throw Error(`Delayed launcher exit ${launch.exitCode}`);
+    return (await readFile(path.join(config,'dashboard.log'),'utf8')).includes('Waiting for Windows to release port 8765');
+   });
+   assert.equal(launch.exitCode,null,'launcher must wait for release instead of failing');
+   holder.stdin.end('\n');await holderDone;await launchDone;
+   assert.equal((await health()).build_id,entry.build_id);
+   assert((await readFile(path.join(config,'dashboard.log'),'utf8')).includes('Waiting for Windows to release port 8765'));
+   checks.push('Windows waits for an invisible previous binding, then launches on the same port');
+  } finally {
+   if(holder.exitCode===null)holder.stdin.end('\n');
+   await holderDone;
+  }
+ }
  const stream=await fetch(base+'/api/revisions');const reader=stream.body.getReader();await reader.read();run(binary,['--stop']);await reader.cancel();assert(!await occupied());checks.push('authenticated stop closes SSE and releases writer/port');
  // Child process invocation cannot block this Node HTTP handler: run async here.
  const foreign=http.createServer((req,res)=>{res.end(JSON.stringify({app:'unrelated'}))});await new Promise(r=>foreign.listen(8765,'127.0.0.1',r));
  try {const code=await new Promise((resolve,reject)=>{const child=spawn(binary,launchArgs,{env,cwd:tmp,stdio:'ignore'});child.on('error',reject);child.on('exit',resolve)});assert.notEqual(code,0);assert(await occupied())}
  finally {await new Promise(r=>foreign.close(r))}
  checks.push('foreign port owner remains running');
- const report={passed:true,platform:platformKey(),build_id:entry.build_id,python_on_path:false,checks};
+ const report={passed:true,platform:platformKey(),version:manifest.version,ui:manifest.ui,build_id:entry.build_id,python_on_path:false,checks};
  await mkdir(path.join(root,'benchmarks/implementation/results'),{recursive:true});await writeFile(path.join(root,'benchmarks/implementation/results',`native-only-${platformKey()}.json`),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
 } catch(error) { console.error('Completed checks:',checks); console.error(await readFile(path.join(config,'dashboard.log'),'utf8').catch(()=>'')); throw error; } finally {
  if(await occupied()) {try{run(binary,['--stop'])}catch(e){console.error(e.message)}}

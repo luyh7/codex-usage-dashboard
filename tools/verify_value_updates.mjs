@@ -76,7 +76,7 @@ const publish = async () => {
   await page.evaluate(revision => window.__publishIndexStatus({ phase: 'ready', revision }), generation);
 };
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=week&session=main&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=week&session=main&timezone=Asia%2FShanghai');
   await page.locator('.agent-row.own').waitFor();
   await page.locator('.cost-bar').waitFor();
   await page.locator('.calendar-trigger').click();

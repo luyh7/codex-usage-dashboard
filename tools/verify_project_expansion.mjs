@@ -42,7 +42,7 @@ const pinned = async block => {
   assert.ok(Math.abs(delta) < 2, `Project heading sticks below columns: ${delta}`);
 };
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?period=all&timezone=Asia%2FShanghai');
+  await page.goto('http://127.0.0.1:8765/?period=all&timezone=Asia%2FShanghai');
   await checkCount(0, 5);
   assert.equal(await page.locator('.project-block').count(), 33, 'Every project is present beyond the old 30-project page');
   assert.equal(await page.locator('.pager').count(), 0);

@@ -42,7 +42,7 @@ const selected = async (group, names) => {
 const commit = () => panel.getByRole('button', { name: '确定', exact: true }).click();
 const reopen = () => page.locator('.filter-toggle').click();
 try {
-  await page.goto('http://127.0.0.1:8765/svelte?view=sessions&period=week');
+  await page.goto('http://127.0.0.1:8765/?view=sessions&period=week');
   await expectRows(4); await page.waitForLoadState('networkidle');
   await reopen();
   assert.equal(await panel.getByText('全局筛选', { exact: true }).count(), 0);

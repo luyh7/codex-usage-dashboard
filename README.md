@@ -7,9 +7,9 @@ It reads your local Codex session logs and opens a browser dashboard for per-con
 > Currently only supports OpenAI Codex. It is not a Claude Code, Cursor, Continue, or generic OpenAI API dashboard.
 <img width="1830" height="1041" alt="Codex Usage Dashboard project view" src="assets/codex-usage-dashboard.png" />
 
-The dashboard runs exclusively as a native Rust executable; Python is not required. The default page preserves the original layout and styling. The Svelte candidate remains available at `/svelte`.
+The dashboard uses a native Rust backend and a Svelte interface at `http://127.0.0.1:8765/`. The classic interface and Python runtime have been removed.
 
-Development on `codex/rust-svelte-redesign` contains the Rust migration and Clear Mint Svelte redesign. These changes are not released on `main`. See the [Windows development handoff](docs/development/windows-handoff.md) for checkout, build and verification instructions, and [approved designs](docs/design/README.md) for the UI reference.
+See the [Windows development handoff](docs/development/windows-handoff.md) for checkout, build and verification instructions, and [approved designs](docs/design/README.md) for the UI reference.
 
 ## Why This Exists
 
@@ -27,7 +27,7 @@ Recommended global Codex install:
 npx skills add luyh7/codex-usage-dashboard -g -a codex -y
 ```
 
-Invoke `$codex-usage-dashboard`, or select **Codex Usage Dashboard** in the skill picker. On first use, the skill installs the matching native release if needed. This installation step requires Node 18+ and a published release; later launches run the Rust executable directly.
+Invoke `$codex-usage-dashboard`, or select **Codex Usage Dashboard** in the skill picker. The skill checks its runtime on every invocation and installs the matching native release when missing or outdated, including after a skills CLI update. This check requires Node 18+; downloads require a published release. The verified executable opens the dashboard at the root URL. Direct native launches need no Node.
 
 ## Install With npx
 
@@ -81,7 +81,7 @@ The skills CLI may select its own skill location. Inside the installed skill:
 ```text
 SKILL.md
 native.json
-scripts/install_runtime.mjs     # installation only
+scripts/install_runtime.mjs     # install/update/readiness check
 runtime/codex-usage-dashboard   # .exe on Windows; sole runtime entry
 runtime/manifest.json
 ```
@@ -98,7 +98,7 @@ node bin/install.js --runtime-manifest dist/release/manifest.json --offline
 ```
 
 Building requires Rust and Node; running the installed binary requires neither.
-The build embeds `web/classic/index.html` and the Svelte assets directly.
+The build embeds only the Svelte dashboard assets. Build `web/dist` before running Cargo; builds fail when the dashboard assets are missing.
 See [release and rollback](docs/implementation/release-and-rollback.md) for
 platform acceptance status and offline distribution.
 
