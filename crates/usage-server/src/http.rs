@@ -265,14 +265,32 @@ async fn daily(
 ) -> Response {
     blocking(state.clone(),move||{params.insert("period".into(),"all".into());let(view,_)=state.view(&params,false)?;Ok(response(StatusCode::OK,&json!({"generated_at":view.generated_at,"daily_usage":view.daily_usage,"daily_usage_complete":true}))) }).await
 }
-async fn export(Extract(state): Extract<Arc<State>>) -> Response {
+async fn export(
+    Extract(state): Extract<Arc<State>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let redacted = match export_mode(&params) {
+        Ok(v) => v,
+        Err(e) => return error(e),
+    };
     blocking(state.clone(), move || {
-        let mut result = response(StatusCode::OK, &state.export()?);
+        let value = state.export()?;
+        let mut result = response(
+            StatusCode::OK,
+            &if redacted {
+                state.redact(&value)
+            } else {
+                value
+            },
+        );
         result.headers_mut().insert(
             header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"cousash-{}.json\"", state.device)
-                .parse()
-                .unwrap(),
+            format!(
+                "attachment; filename=\"{}.json\"",
+                export_filename(&state, redacted)
+            )
+            .parse()
+            .unwrap(),
         );
         Ok(result)
     })
@@ -287,13 +305,30 @@ async fn remotes(Extract(state): Extract<Arc<State>>) -> Response {
         Err(e) => error(e),
     }
 }
-fn gzip_response(state: &State, bytes: Bytes) -> Response {
+fn export_mode(params: &HashMap<String, String>) -> Result<bool, QueryError> {
+    match params.get("mode").map(String::as_str).unwrap_or("full") {
+        "full" => Ok(false),
+        "redacted" => Ok(true),
+        _ => Err(QueryError::Invalid("invalid export mode".into())),
+    }
+}
+fn export_filename(state: &State, redacted: bool) -> String {
+    if redacted {
+        "cousash-shared".into()
+    } else {
+        format!("cousash-{}", state.device)
+    }
+}
+fn gzip_response(state: &State, bytes: Bytes, redacted: bool) -> Response {
     (
         [
             (header::CONTENT_TYPE, "application/gzip".to_owned()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"cousash-{}.json.gz\"", state.device),
+                format!(
+                    "attachment; filename=\"{}.json.gz\"",
+                    export_filename(state, redacted)
+                ),
             ),
             (header::CACHE_CONTROL, "no-store".to_owned()),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
@@ -306,11 +341,18 @@ async fn export_gzip(
     Extract(state): Extract<Arc<State>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
+    let redacted = match export_mode(&params) {
+        Ok(v) => v,
+        Err(e) => return error(e),
+    };
     if let Some(id) = params.get("job") {
         let jobs = state.exports.lock().unwrap();
-        if let Some(job) = jobs.iter().find(|job| &job.id == id) {
+        if let Some(job) = jobs
+            .iter()
+            .find(|job| &job.id == id && job.redacted == redacted)
+        {
             if let Some(Ok(bytes)) = job.result.lock().unwrap().as_ref() {
-                return gzip_response(&state, bytes.clone());
+                return gzip_response(&state, bytes.clone(), redacted);
             }
             return response(
                 StatusCode::CONFLICT,
@@ -324,12 +366,24 @@ async fn export_gzip(
     }
     blocking(state.clone(), move || {
         let view = state.local_view()?;
-        let bytes = crate::snapshot::gzip(&state.export_document(&view, None)?)?;
-        Ok(gzip_response(&state, bytes.into()))
+        let document = state.export_document(&view, None)?;
+        let bytes = if redacted {
+            crate::snapshot::gzip(&state.redact(&serde_json::to_value(document)?))?
+        } else {
+            crate::snapshot::gzip(&document)?
+        };
+        Ok(gzip_response(&state, bytes.into(), redacted))
     })
     .await
 }
-async fn start_export(Extract(state): Extract<Arc<State>>) -> Response {
+async fn start_export(
+    Extract(state): Extract<Arc<State>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let redacted = match export_mode(&params) {
+        Ok(v) => v,
+        Err(e) => return error(e),
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
     let published = match state.publication() {
         Ok(p) => p,
@@ -338,14 +392,18 @@ async fn start_export(Extract(state): Extract<Arc<State>>) -> Response {
     let mut jobs = state.exports.lock().unwrap();
     if let Some(job) = jobs.iter().rev().find(|job| {
         let result = job.result.lock().unwrap();
-        result.is_none()
-            || (job.revision == published.local.revision && matches!(result.as_ref(), Some(Ok(_))))
+        job.redacted == redacted
+            && (result.is_none()
+                || (job.revision == published.local.revision
+                    && matches!(result.as_ref(), Some(Ok(_)))))
     }) {
         return response(StatusCode::OK, &job.status());
     }
     let job = Arc::new(crate::snapshot::ExportJob {
+        redacted,
         id: format!(
-            "{}-{}",
+            "{}-{}-{}",
+            if redacted { "shared" } else { "full" },
             published.local.revision,
             chrono::Utc::now().timestamp_micros()
         ),
@@ -376,7 +434,13 @@ async fn start_export(Extract(state): Extract<Arc<State>>) -> Response {
                 state.zone,
                 &usage_core::PriceSchedule::bundled(),
             )?;
-            Ok(crate::snapshot::gzip(&state.export_document(&view, Some(&job.percent))?)?.into())
+            let document = state.export_document(&view, Some(&job.percent))?;
+            Ok(if redacted {
+                crate::snapshot::gzip(&state.redact(&serde_json::to_value(document)?))?
+            } else {
+                crate::snapshot::gzip(&document)?
+            }
+            .into())
         })();
         let mut completed = job.result.lock().unwrap();
         *completed = Some(result.map_err(|e| format!("{e:?}")));
@@ -395,6 +459,24 @@ async fn export_progress(
             StatusCode::NOT_FOUND,
             &json!({"error":"export expired; please retry"}),
         ),
+    }
+}
+async fn refresh(Extract(state): Extract<Arc<State>>) -> Response {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if state
+        .sender
+        .try_send(crate::service::Command::Refresh(tx))
+        .is_err()
+    {
+        return response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &json!({"error":"index worker is busy"}),
+        );
+    }
+    match rx.await {
+        Ok(Ok(value)) => response(StatusCode::OK, &value),
+        Ok(Err(e)) => error(QueryError::Core(e)),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
 async fn mutate(
@@ -513,6 +595,7 @@ pub fn router(state: Arc<State>) -> Router {
         .route("/svelte/", get(previous_entry))
         .fallback(static_file)
         .route("/api/health", get(health))
+        .route("/api/refresh", post(refresh))
         .route("/api/shutdown", post(shutdown))
         .route("/api/daily-usage", get(daily))
         .route("/api/v2/sessions", get(paged))

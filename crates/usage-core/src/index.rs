@@ -19,11 +19,11 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const SCHEMA_VERSION: &str = "1";
-const PARSER_VERSION: &str = "3";
+const PARSER_VERSION: &str = "4";
 const MARKER_BYTES: u64 = 4096;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventIndex {
@@ -81,6 +81,7 @@ impl Snapshot {
 }
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct IndexMetrics {
+    pub audit_bytes: u64,
     pub full_parses: u64,
     pub incremental_parses: u64,
     pub persistent_hits: u64,
@@ -113,6 +114,7 @@ struct Markers {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedFile {
+    content: crate::content::Fingerprint,
     stamp: FileStamp,
     kind: String,
     source_id: String,
@@ -126,6 +128,14 @@ struct Component {
 }
 
 pub struct Index {
+    dirty: HashSet<PathBuf>,
+    force: bool,
+    audit_cursor: usize,
+    audit_chunks: HashMap<String, usize>,
+    next_audit: Instant,
+    database_changes: runtime::ChangeMonitor,
+    next_auxiliary_check: Instant,
+    auxiliary_contents: Vec<(String, String)>,
     config: IndexConfig,
     connection: Connection,
     _lock: File,
@@ -380,6 +390,14 @@ impl Index {
             String::new()
         };
         Ok(Self {
+            dirty: HashSet::new(),
+            force: false,
+            audit_cursor: 0,
+            audit_chunks: HashMap::new(),
+            next_audit: Instant::now(),
+            database_changes: runtime::ChangeMonitor::default(),
+            next_auxiliary_check: Instant::now(),
+            auxiliary_contents: Vec::new(),
             inventory: Inventory::new(config.sources.clone()),
             config,
             connection,
@@ -400,6 +418,14 @@ impl Index {
     }
     pub fn invalidate(&mut self, path: &Path) {
         self.inventory.invalidate(path);
+        self.dirty.insert(path.into());
+        self.next_auxiliary_check = Instant::now();
+    }
+    pub fn force_refresh(&mut self) {
+        self.force = true;
+        self.inventory.invalidate_all();
+        self.next_auxiliary_check = Instant::now();
+        self.auxiliary.clear();
     }
     pub fn replace_pricing(&mut self, json: &str) -> Result<(), Error> {
         self.pricing = PriceSchedule::from_json(json)?;
@@ -407,7 +433,7 @@ impl Index {
         self.auxiliary.clear();
         Ok(())
     }
-    fn auxiliary_signature(&self) -> Result<String, Error> {
+    fn auxiliary_signature(&mut self) -> Result<String, Error> {
         let mut stamps = Vec::new();
         for source in &self.config.sources {
             for name in ["session_index.jsonl", "logs_2.sqlite", "logs_2.sqlite-wal"] {
@@ -418,7 +444,75 @@ impl Index {
                 ));
             }
         }
-        fingerprint(&(stamps, &self.pricing_fingerprint))
+        let generation = self
+            .database_changes
+            .poll(self.config.sources.iter().map(|s| s.home.clone()));
+        if Instant::now() >= self.next_auxiliary_check {
+            self.auxiliary_contents = self
+                .config
+                .sources
+                .iter()
+                .map(|source| {
+                    let path = source.home.join("session_index.jsonl");
+                    let digest = match FileStamp::read(&path) {
+                        Ok(stamp) => crate::content::Fingerprint::read(&path, stamp.size, None)
+                            .map(|f| f.digest),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+                        Err(e) => Err(e.into()),
+                    }?;
+                    Ok((source.id.clone(), digest))
+                })
+                .collect::<Result<_, Error>>()?;
+            self.next_auxiliary_check = Instant::now() + Duration::from_secs(30);
+        }
+        fingerprint(&(
+            stamps,
+            generation,
+            &self.auxiliary_contents,
+            &self.pricing_fingerprint,
+        ))
+    }
+    fn content_changes(&mut self, inventory: &[InventoryFile]) -> Result<HashSet<String>, Error> {
+        let mut changed = HashSet::new();
+        for file in inventory {
+            let key = file_key(file);
+            if let Some(cached) = self.files.get(&key)
+                && cached.stamp == file.stamp
+                && (self.force || self.dirty.contains(&file.path))
+                && crate::content::Fingerprint::read(&file.path, file.stamp.size, None)?.digest
+                    != cached.content.digest
+            {
+                changed.insert(key);
+            }
+        }
+        if !inventory.is_empty() && Instant::now() >= self.next_audit {
+            // Round-robin files and chunks: active logs cannot starve history.
+            // At most 8 MiB per two seconds, independent of watcher frequency.
+            for _ in 0..inventory.len().min(8) {
+                self.audit_cursor %= inventory.len();
+                let file = &inventory[self.audit_cursor];
+                self.audit_cursor += 1;
+                let key = file_key(file);
+                if let Some(cached) = self.files.get(&key)
+                    && cached.stamp == file.stamp
+                    && !cached.content.chunks.is_empty()
+                {
+                    let cursor = self.audit_chunks.entry(key.clone()).or_default();
+                    *cursor %= cached.content.chunks.len();
+                    self.metrics.audit_bytes += (cached.content.len
+                        - *cursor as u64 * crate::content::CHUNK)
+                        .min(crate::content::CHUNK);
+                    if !cached.content.matches_chunk(&file.path, *cursor)? {
+                        changed.insert(key);
+                    }
+                    *cursor += 1;
+                }
+            }
+            self.next_audit = Instant::now() + Duration::from_secs(2);
+        }
+        self.audit_chunks
+            .retain(|key, _| self.files.contains_key(key));
+        Ok(changed)
     }
     pub fn refresh(
         &mut self,
@@ -433,7 +527,9 @@ impl Index {
         });
         let inventory = self.inventory.discover()?;
         let auxiliary = self.auxiliary_signature()?;
-        let unchanged = auxiliary == self.auxiliary
+        let content_changed = self.content_changes(&inventory)?;
+        let unchanged = content_changed.is_empty()
+            && auxiliary == self.auxiliary
             && inventory.len() == self.files.len()
             && inventory.iter().all(|file| {
                 self.files
@@ -441,6 +537,8 @@ impl Index {
                     .is_some_and(|cached| cached.stamp == file.stamp && cached.kind == file.kind)
             });
         if unchanged {
+            self.force = false;
+            self.dirty.clear();
             self.metrics.last_refresh_ms = started.elapsed().as_secs_f64() * 1000.;
             progress(IndexProgress {
                 phase: "ready",
@@ -455,9 +553,11 @@ impl Index {
         for (i, file) in inventory.iter().enumerate() {
             let key = file_key(file);
             let cached = self.files.get(&key);
-            if let Some(cached) =
-                cached.filter(|cached| cached.stamp == file.stamp && cached.kind == file.kind)
-            {
+            if let Some(cached) = cached.filter(|cached| {
+                cached.stamp == file.stamp
+                    && cached.kind == file.kind
+                    && !content_changed.contains(&key)
+            }) {
                 next.insert(key, cached.clone());
                 self.metrics.unchanged_files += 1;
                 continue;
@@ -469,10 +569,13 @@ impl Index {
                 revision: self.snapshot.revision,
             });
             let append = cached.filter(|cached| {
-                !crate::reader::is_compressed(&file.path)
+                !self.force
+                    && !content_changed.contains(&key)
+                    && !crate::reader::is_compressed(&file.path)
                     && cached.stamp.same_identity(&file.stamp)
                     && file.stamp.size > cached.stamp.size
                     && matches_prefix(&file.path, cached)
+                    && cached.content.append_tail_matches(&file.path)
             });
             let base = append.map(|cached| cached.parsed.as_ref().clone());
             let parsed = parser::parse_file(
@@ -500,10 +603,16 @@ impl Index {
                 self.metrics.full_parses += 1;
             }
             let markers = markers(&file.path, parsed.state.parsed_end_offset)?;
+            let content = crate::content::Fingerprint::read(
+                &file.path,
+                file.stamp.size,
+                append.map(|old| &old.content),
+            )?;
             changed.insert(key.clone());
             next.insert(
                 key,
                 CachedFile {
+                    content,
                     stamp: file.stamp.clone(),
                     kind: file.kind.clone(),
                     source_id: file.source.id.clone(),
@@ -572,9 +681,16 @@ impl Index {
             live_components.insert(key.clone());
             let mut stamps: Vec<_> = group
                 .iter()
-                .map(|i| (&present[*i].path, &present[*i].stamp, &present[*i].kind))
+                .map(|i| {
+                    (
+                        &present[*i].path,
+                        &present[*i].stamp,
+                        &present[*i].kind,
+                        &next[&file_key(present[*i])].content.digest,
+                    )
+                })
                 .collect();
-            stamps.sort_by_key(|(path, _, _)| *path);
+            stamps.sort_by_key(|(path, _, _, _)| *path);
             let evidence: Vec<_> = identities
                 .iter()
                 .map(|(source, id)| {
@@ -787,6 +903,8 @@ impl Index {
         tx.commit()?;
         self.metrics.transaction_ms = commit_started.elapsed().as_secs_f64() * 1000.;
         self.files = next;
+        self.dirty.clear();
+        self.force = false;
         self.auxiliary = auxiliary;
         self.snapshot = snapshot.clone();
         self.metrics.last_refresh_ms = started.elapsed().as_secs_f64() * 1000.;
@@ -842,6 +960,66 @@ mod tests {
             .iter()
             .map(|s| s.detail.total_token_usage.total_tokens)
             .sum()
+    }
+    #[test]
+    fn identical_metadata_rewrites_converge_and_keep_old_publication() {
+        for trigger in ["audit", "hint", "force"] {
+            let f = Fixture::new();
+            let mut index = Index::open(f.config.clone()).unwrap();
+            index.refresh(|_| {}).unwrap();
+            let old = index.snapshot();
+            let changed = fs::read_to_string(&f.path).unwrap().replace(":10", ":30");
+            fs::write(&f.path, changed).unwrap();
+            // Deterministically emulate a filesystem returning colliding metadata.
+            index.files.values_mut().next().unwrap().stamp = FileStamp::read(&f.path).unwrap();
+            index.next_audit = Instant::now() + Duration::from_secs(3600);
+            assert!(index.refresh(|_| {}).unwrap().is_none());
+            assert_eq!(total(&index), 10);
+            match trigger {
+                "audit" => index.next_audit = Instant::now(),
+                "hint" => index.invalidate(&f.path),
+                _ => index.force_refresh(),
+            }
+            index.refresh(|_| {}).unwrap();
+            assert_eq!(total(&index), 30, "{trigger}");
+            assert_eq!(old.sessions[0].detail.total_token_usage.total_tokens, 10);
+            assert_eq!(index.metrics.full_parses, 2);
+            drop(index);
+            let mut restarted = Index::open(f.config).unwrap();
+            restarted.force_refresh();
+            assert!(restarted.refresh(|_| {}).unwrap().is_none());
+            assert_eq!(total(&restarted), 30);
+            assert_eq!(restarted.metrics.full_parses, 0);
+        }
+    }
+    #[test]
+    fn audits_are_bounded_and_reach_interior_chunks() {
+        let f = Fixture::new();
+        // A large skipped record places the token event beyond the first chunk.
+        let bytes = fs::read_to_string(&f.path).unwrap();
+        fs::write(
+            &f.path,
+            format!(
+                "{}\n{bytes}",
+                json!({"padding":"x".repeat(3 * crate::content::CHUNK as usize)})
+            ),
+        )
+        .unwrap();
+        let mut index = Index::open(f.config).unwrap();
+        index.refresh(|_| {}).unwrap();
+        fs::write(
+            &f.path,
+            fs::read_to_string(&f.path).unwrap().replace(":10", ":30"),
+        )
+        .unwrap();
+        index.files.values_mut().next().unwrap().stamp = FileStamp::read(&f.path).unwrap();
+        for _ in 0..4 {
+            let before = index.metrics.audit_bytes;
+            index.next_audit = Instant::now();
+            index.refresh(|_| {}).unwrap();
+            assert!(index.metrics.audit_bytes - before <= crate::content::CHUNK);
+        }
+        assert_eq!(total(&index), 30);
     }
     #[test]
     fn append_restart_and_immutable_revision() {

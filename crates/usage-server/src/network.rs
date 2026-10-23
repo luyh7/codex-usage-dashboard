@@ -25,13 +25,15 @@ pub async fn bind(address: SocketAddr) -> io::Result<TcpListener> {
                     return Err(io::Error::new(
                         error.kind(),
                         format!(
-                            "port 8765 unavailable: {error}. Another listener, a Windows port reservation, or a previous WSL binding may own it; no process was terminated and no alternate port was used"
+                            "port {} unavailable: {error}. Another listener, a Windows port reservation, or a previous WSL binding may own it; no process was terminated and no alternate port was used",
+                            address.port()
                         ),
                     ));
                 }
                 if !waiting {
                     eprintln!(
-                        "Waiting for Windows to release port 8765 after the previous listener exited (up to 5 minutes)."
+                        "Waiting for Windows to release port {} after the previous listener exited (up to 5 minutes).",
+                        address.port()
                     );
                     waiting = true;
                 }

@@ -16,16 +16,17 @@
     changed: () => void;
   } = $props();
   let exporting = $state(false), exportPercent = $state(0), exportPhase = $state('');
+  let exportMode = $state<'full' | 'redacted'>('full');
   let fileInput: HTMLInputElement;
   const exportLabels = {
     zh: { preparing: '准备快照', compressing: '正在压缩', downloading: '正在下载', complete: '已导出' },
     en: { preparing: 'Preparing snapshot', compressing: 'Compressing', downloading: 'Downloading', complete: 'Exported' },
   };
-  async function exportingSnapshot() {
+  async function exportingSnapshot(mode: 'full' | 'redacted' = 'full') {
     if (exporting) return;
-    exporting = true; error = ''; exportPercent = 0; exportPhase = 'preparing';
+    exporting = true; exportMode = mode; error = ''; exportPercent = 0; exportPhase = 'preparing';
     try {
-      await downloadSnapshot(data.exportUrl(), (percent, phase) => { exportPercent = percent; exportPhase = phase; });
+      await downloadSnapshot(data.exportUrl(mode), (percent, phase) => { exportPercent = percent; exportPhase = phase; });
     } catch (e) { error = String(e); exportPhase = ''; }
     finally { exporting = false; }
   }
@@ -135,11 +136,18 @@
         </ul>
       {/if}
     </div>
-    <div class="remote-buttons">
-      <button class="button" disabled={exporting} onclick={exportingSnapshot} aria-busy={exporting}>
-        {#if exporting}<span class="export-spinner" aria-hidden="true"></span>{/if}
-        {t.export}{#if exporting}<span class="export-button-percent">{exportPercent}%</span>{/if}
-      </button>
+    <div class="export-options">
+      <div class="remote-buttons">
+        {#each ['full', 'redacted'] as mode}
+          <div class="export-option">
+          <button class="button" disabled={exporting} onclick={() => exportingSnapshot(mode as 'full' | 'redacted')} aria-busy={exporting && exportMode === mode}>
+            {#if exporting && exportMode === mode}<span class="export-spinner" aria-hidden="true"></span>{/if}
+            {mode === 'full' ? (lang === 'zh' ? '完整导出' : 'Full export') : (lang === 'zh' ? '脱敏导出' : 'Redacted export')}
+          </button>
+          {#if mode === 'full'}<small>{lang === 'zh' ? '包含会话摘要和本地路径' : 'Includes session summaries and local paths'}</small>{/if}
+          </div>
+        {/each}
+      </div>
     </div>
     {#if exportPhase}<div class="export-progress" aria-live="polite">
       <div class="export-caption"><span>{exportLabels[lang][exportPhase as keyof typeof exportLabels.zh]}</span><strong>{exportPercent}%</strong></div>
@@ -199,7 +207,10 @@
   .local-sources { display: grid; gap: 6px; margin: 12px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--border); list-style: none; font-size: 12px; line-height: 18px; }
   .local-sources li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
   .local-sources li > span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
-  .local-device-row > .remote-buttons { align-self: flex-start; }
+  .export-options { align-self: flex-start; display: grid; gap: 8px; }
+  .export-options .remote-buttons { flex-wrap: wrap; }
+  .export-option { display: grid; gap: 8px; align-content: start; }
+  .export-option small { max-width: 180px; }
   .remote-row form, .remote-row .notice { min-width: 0; }
   .remote-row form input { min-width: 0; }
   @media (max-width: 600px) {
@@ -210,7 +221,6 @@
   .export-progress { flex-basis: 100%; margin: 2px 0 0; }
   .export-caption { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
   .export-caption strong { font-variant-numeric: tabular-nums; }
-  .export-button-percent { margin-left: 6px; font-variant-numeric: tabular-nums; }
   .export-track { height: 6px; overflow: hidden; border-radius: 6px; background: #8899aa24; }
   .export-track span { display: block; height: 100%; background: #34b89b; border-radius: inherit; transition: width 180ms ease-out; }
   .export-spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: export-spin .8s linear infinite; }

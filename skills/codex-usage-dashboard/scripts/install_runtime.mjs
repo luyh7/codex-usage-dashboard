@@ -44,12 +44,6 @@ async function verify(binary, manifest) {
   if (info.version !== manifest.version || info.build_id !== entry.build_id) throw Error('Native artifact build identity mismatch');
   if (info.ui !== 'svelte') throw Error('Native artifact does not contain the current dashboard; the classic runtime cannot be installed');
 }
-async function cleanup(runtimeRoot) {
-  const scripts = path.join(path.dirname(runtimeRoot), 'scripts');
-  for (const obsolete of ['codex_usage_dashboard.py','open_dashboard.py','dashboard_runtime.py','install_runtime.py','install_desktop_shortcut.py','export_snapshot.py','__pycache__']) {
-    await rm(path.join(scripts, obsolete), {recursive:true, force:true});
-  }
-}
 export async function ensureRuntime() {
   const config = JSON.parse(await readFile(path.join(skillRoot, 'native.json'), 'utf8'));
   const runtimeRoot = path.join(skillRoot, 'runtime');
@@ -61,7 +55,6 @@ export async function ensureRuntime() {
   } catch {
     return installRuntime();
   }
-  await cleanup(runtimeRoot);
   return binary;
 }
 export async function installRuntime({manifest: source, offline = false, rollback = false, runtimeRoot = path.join(skillRoot,'runtime')} = {}) {
@@ -104,7 +97,6 @@ export async function installRuntime({manifest: source, offline = false, rollbac
     await atomic(stable,bytes,0o755); replaced=true;
     if (oldManifest) await atomic(previous,oldManifest);
     await atomic(current,JSON.stringify(manifest,null,2)+'\n');
-    await cleanup(runtimeRoot);
     return stable;
   } catch(error) {
     if (replaced) {

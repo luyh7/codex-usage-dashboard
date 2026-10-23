@@ -26,12 +26,14 @@ pub struct Published {
     pub remotes: Vec<Metadata>,
 }
 pub enum Command {
+    Refresh(oneshot::Sender<Result<Value, Error>>),
     Wake(Vec<PathBuf>),
     Remote(String, Value, oneshot::Sender<Result<Value, Error>>),
     Stop,
 }
 type CachedView = (String, Arc<View>, Arc<Published>);
 pub struct State {
+    redaction_key: [u8; 32],
     pub shutdown: tokio::sync::Notify,
     pub current: RwLock<Option<Arc<Published>>>,
     pub status: RwLock<Value>,
@@ -46,6 +48,9 @@ pub struct State {
     pub exports: Mutex<VecDeque<Arc<crate::snapshot::ExportJob>>>,
 }
 impl State {
+    pub fn redact(&self, value: &Value) -> Value {
+        crate::redact::Redactor(&self.redaction_key).document(value)
+    }
     pub fn publication(&self) -> Result<Arc<Published>, QueryError> {
         self.current
             .read()
@@ -179,6 +184,7 @@ pub fn start(
     let initial = json!({"phase":"loading","completed":0,"total":0,"revision":0});
     let (events, _) = watch::channel(initial.clone());
     let state = Arc::new(State {
+        redaction_key: crate::redact::load_key(&root)?,
         shutdown: tokio::sync::Notify::new(),
         current: RwLock::new(None),
         status: RwLock::new(initial),
@@ -359,6 +365,11 @@ fn run_worker(
         let mut stop = false;
         for command in commands {
             match command {
+                Command::Refresh(reply) => {
+                    index.force_refresh();
+                    store = Store::new(root.join("remotes"), shared.device.clone(), zone);
+                    pending.push((reply, Ok(json!({"ok":true}))));
+                }
                 Command::Stop => stop = true,
                 Command::Wake(paths) => {
                     for path in paths {

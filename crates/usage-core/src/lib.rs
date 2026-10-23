@@ -1,6 +1,7 @@
 //! Host-independent Codex usage domain. HTTP, UI and process lifecycle live in
 //! adapters. Counters use checked signed 64-bit arithmetic; malformed or
 //! overflowing input is reported instead of silently wrapping.
+mod content;
 pub mod index;
 pub mod inventory;
 pub mod normalize;

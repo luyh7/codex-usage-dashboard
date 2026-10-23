@@ -110,9 +110,88 @@ pub fn service_tiers(home: &Path, threads: &BTreeSet<String>) -> BTreeMap<String
     read(home, threads).unwrap_or_default()
 }
 
+/// data_version is meaningful only across reads on the same connection.
+/// Reopen when the file identity changes; never create a missing source DB.
+#[derive(Default)]
+pub struct ChangeMonitor {
+    connections: BTreeMap<std::path::PathBuf, (crate::inventory::FileStamp, Connection, i64)>,
+    generation: u64,
+}
+impl ChangeMonitor {
+    pub fn poll(&mut self, homes: impl Iterator<Item = std::path::PathBuf>) -> u64 {
+        for home in homes {
+            let path = home.join("logs_2.sqlite");
+            let stamp = crate::inventory::FileStamp::read(&path).ok();
+            let reusable = self
+                .connections
+                .get(&path)
+                .zip(stamp.as_ref())
+                .is_some_and(|((old, _, _), new)| old.same_identity(new));
+            if !reusable {
+                if self.connections.remove(&path).is_some() {
+                    self.generation += 1;
+                }
+                if let Some(stamp) = stamp
+                    && let Ok(connection) = Connection::open_with_flags(
+                        &path,
+                        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                    )
+                {
+                    let _ = connection.busy_timeout(time::Duration::from_millis(200));
+                    if let Ok(version) =
+                        connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+                    {
+                        self.connections.insert(path, (stamp, connection, version));
+                        self.generation += 1;
+                    }
+                }
+            } else if let Some((_, connection, previous)) = self.connections.get_mut(&path) {
+                match connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0)) {
+                    Ok(version) => {
+                        if version != *previous {
+                            *previous = version;
+                            self.generation += 1;
+                        }
+                    }
+                    Err(_) => {
+                        self.connections.remove(&path);
+                        self.generation += 1;
+                    }
+                }
+            }
+        }
+        self.generation
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retained_connection_detects_same_size_commits_without_watcher() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("logs_2.sqlite");
+        let writer = Connection::open(&path).unwrap();
+        writer.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE sample(value TEXT); INSERT INTO sample VALUES ('aaaa');").unwrap();
+        let mut monitor = ChangeMonitor::default();
+        let poll =
+            |monitor: &mut ChangeMonitor| monitor.poll(std::iter::once(root.path().to_path_buf()));
+        let before = poll(&mut monitor);
+        assert_eq!(poll(&mut monitor), before);
+        writer
+            .execute_batch("UPDATE sample SET value='bbbb';")
+            .unwrap();
+        assert!(poll(&mut monitor) > before);
+        let after = poll(&mut monitor);
+        assert_eq!(poll(&mut monitor), after);
+        // A dropped/reopened monitor starts from the current committed DB.
+        drop(monitor);
+        drop(writer);
+        std::fs::remove_file(&path).unwrap();
+        let mut monitor = ChangeMonitor::default();
+        assert_eq!(poll(&mut monitor), 0);
+        assert!(!path.exists());
+    }
     #[test]
     fn quoted_content_cannot_supply_settings() {
         assert_eq!(

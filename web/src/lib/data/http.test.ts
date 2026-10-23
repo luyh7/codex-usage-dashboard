@@ -73,7 +73,9 @@ test('snapshot files upload unchanged with encoded labels and confirmation on re
   let calls = 0;
   const data = new HttpDashboard('', (async (input, init) => {
     const url = new URL(String(input), 'http://localhost');
+    if (url.pathname === '/api/security/token') return Response.json({ token: 'fixture-token' });
     assert.equal(url.pathname, '/api/remotes/import-file');
+    assert.equal(new Headers(init?.headers).get('X-Codex-Write-Token'), 'fixture-token');
     assert.equal(init?.body, file);
     assert.equal(init?.method, 'POST');
     if (calls++ === 0) {
@@ -90,13 +92,29 @@ test('snapshot files upload unchanged with encoded labels and confirmation on re
   assert.equal(data.exportUrl(), '/api/export.json.gz');
 });
 
+test('force refresh uses authenticated writes and full export remains the default', async () => {
+  let refreshed = false;
+  const data = new HttpDashboard('', (async (input, init) => {
+    if (input === '/api/security/token') return Response.json({token:'test'});
+    assert.equal(input, '/api/refresh');
+    assert.equal(init?.method, 'POST');
+    assert.equal(new Headers(init?.headers).get('X-Codex-Write-Token'), 'test');
+    refreshed = true; return Response.json({ok:true});
+  }) as typeof fetch);
+  await data.forceRefresh(); assert(refreshed);
+  assert.equal(data.exportUrl(), '/api/export.json.gz');
+  assert.equal(data.exportUrl('redacted'), '/api/export.json.gz?mode=redacted');
+});
+
 test('invalid snapshot file errors surface and legacy object imports stay compatible', async () => {
   const broken = new HttpDashboard('', (async () =>
     Response.json({ error: 'invalid gzip checksum' }, { status: 400 })) as typeof fetch);
   await assert.rejects(broken.importSnapshot(new Blob(['broken'])), /invalid gzip checksum/);
   const snapshot = { schema: 'cousash.remote-snapshot', version: 1 };
   const legacy = new HttpDashboard('', (async (input, init) => {
+    if (input === '/api/security/token') return Response.json({ token: 'fixture-token' });
     assert.equal(input, '/api/remotes/import');
+    assert.equal(new Headers(init?.headers).get('X-Codex-Write-Token'), 'fixture-token');
     assert.deepEqual(JSON.parse(String(init?.body)), { snapshot, label: 'Legacy', allow_current_device: false });
     return Response.json({ ok: true });
   }) as typeof fetch);
