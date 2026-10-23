@@ -155,7 +155,7 @@
       <div class="export-track" role="progressbar" aria-label={t.export} aria-valuemin="0" aria-valuemax="100" aria-valuenow={exportPercent}><span style:width={`${exportPercent}%`}></span></div>
     </div>{/if}
   </article>
-  {#if !remotes.length}<p class="muted">
+  {#if !remotes.length}<p class="muted remote-empty">
       {t.remoteEmpty}
     </p>{/if}{#each remotes as remote (remote.device_short_code)}<article class="remote-row imported-device-row">
       <div>
@@ -217,6 +217,7 @@
   h2 { margin: 0; }
   .snapshot-input { display: none; }
   .remote-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .remote-empty { margin: 0; padding-top: 17px; border-top: 1px solid var(--border); }
   .remote-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
   .device-settings > .notice { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
   .device-settings > .notice > p { flex-basis: 100%; margin-bottom: 0; }
