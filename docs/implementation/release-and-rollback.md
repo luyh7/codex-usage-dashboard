@@ -6,7 +6,7 @@ Rust 程序只嵌入新版资源，直接运行不需要 Python、Node 或 Rust 
 
 ## 构建与离线安装
 
-开发机需要 Rust 和 Node 18+：
+开发机需要 Rust stable 和 Node.js 24+（安装 skill 的运行检查只需要 Node.js 18+）：
 
 ```bash
 node tools/package_release.mjs
@@ -32,7 +32,12 @@ node scripts/install_runtime.mjs --manifest /path/to/manifest.json --offline
 skills CLI 更新遗留的旧 runtime 会自动替换，匹配版本无需联网。
 新安装与升级均清理旧 Python 脚本。经典界面的制品会被拒绝。
 不支持的平台、下载失败或缺少版本均报错，不提供替代后端。
-当前本地工作没有推送或发布；新用户的默认在线安装需等对应制品正式发布。
+发布前可以通过离线制品完成安装验收；新用户的默认在线安装需等对应 Release 正式发布。
+
+同一 Release 可执行文件也支持直接下载运行，无需 skill、Node、Python 或 Rust。
+Windows 下载 `.exe`；macOS/Linux 下载对应架构的文件并授予执行权限。
+运行后仍通过浏览器使用本地面板。手动更新前先用旧程序的 `--stop` 退出。
+发布目标为 `linux-x64`、`windows-x64`、`darwin-x64`、`darwin-arm64`，两种 Mac 架构分别原生验收。
 
 ## 启动、退出、导出
 
@@ -78,9 +83,13 @@ npm 更新成功后删除旧安装目录中已知的 Python 脚本，保留外�
 
 ## 发布与验收
 
-`.github/workflows/native.yml` 在 Linux、Windows、macOS 构建和测试原生制品。
-版本标签触发通过后的 Release 发布，并合并各平台 manifest；制品版本必须与标签一致。
-普通分支和 PR 仅上传 CI artifacts。未执行的 CI 不算平台验收通过。
+`.github/workflows/native.yml` 在 Ubuntu 22.04、Windows 2022、macOS 15 Intel 和 Apple Silicon 上构建并测试。
+PR、main 推送和手动运行都会合并四个平台制品，生成 `release-candidate` CI artifact，不创建 Release。
+开发分支的普通推送不触发工作流；通过 PR 运行验收。
+只有 `v*` 标签的 push 事件才允许发布，且必须通过全部验收、标签版本检查和 main 祖先检查。
+发布使用 `docs/releases/v1.0.1.md` 的说明，不提前手动创建同名 Release。
+合并工具拒绝缺失/重复平台、校验失败、版本不匹配和非空输出目录。未执行的 CI 不算验收通过。
+完整操作边界见[发布准备清单](../releases/prepare-1.0.1.md)。
 
 ```bash
 node tools/verify_native.mjs --replace-worktree

@@ -110,11 +110,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 std::env::current_dir()?.join(path)
             };
-            if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json")) {
+            if path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+            {
                 config::atomic_json(&path, &state.export().map_err(|e| format!("{e:?}"))?)?;
             } else {
                 let view = state.local_view().map_err(|e| format!("{e:?}"))?;
-                snapshot::write_gzip(&path, &state.export_document(&view, None).map_err(|e| format!("{e:?}"))?)?;
+                snapshot::write_gzip(
+                    &path,
+                    &state
+                        .export_document(&view, None)
+                        .map_err(|e| format!("{e:?}"))?,
+                )?;
             }
             println!("{}", path.display());
         } else {
@@ -163,7 +171,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ = tokio::signal::ctrl_c() => {},
                     _ = state.shutdown.notified() => {},
                 }
-                state.events.send_replace(serde_json::json!({"phase":"shutdown"}));
+                state
+                    .events
+                    .send_replace(serde_json::json!({"phase":"shutdown"}));
             }
         })
         .await?;

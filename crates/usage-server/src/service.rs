@@ -144,8 +144,17 @@ impl State {
     }
 }
 impl State {
-    pub fn export_document<'a>(&self, view: &'a View, progress: Option<&'a std::sync::atomic::AtomicUsize>) -> Result<crate::snapshot::Document<'a>, QueryError> {
-        crate::snapshot::document(view, json!({"short_code":self.device,"label":self.hostname,"platform":config::platform(),"hostname":self.hostname}), &self.sources, progress)
+    pub fn export_document<'a>(
+        &self,
+        view: &'a View,
+        progress: Option<&'a std::sync::atomic::AtomicUsize>,
+    ) -> Result<crate::snapshot::Document<'a>, QueryError> {
+        crate::snapshot::document(
+            view,
+            json!({"short_code":self.device,"label":self.hostname,"platform":config::platform(),"hostname":self.hostname}),
+            &self.sources,
+            progress,
+        )
     }
 }
 fn update_status(state: &State, status: Value, notify: bool) {

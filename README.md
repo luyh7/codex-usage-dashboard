@@ -1,6 +1,6 @@
 # Codex Usage Dashboard
 
-Codex Usage Dashboard is a Codex-only skill for viewing local OpenAI Codex usage.
+Codex Usage Dashboard shows local OpenAI Codex usage. Install it as a Codex skill or run the standalone executable; both use the same native program and browser dashboard.
 
 It reads your local Codex session logs and opens a browser dashboard for per-conversation usage: total tokens, output tokens, estimated dollar cost, cache hit rate, turns, model, reasoning effort, tool calls, and token-count timeline. It can also import JSON snapshots exported from other devices, so each machine can show local realtime usage plus manually imported remote usage.
 
@@ -50,6 +50,30 @@ Install and open immediately:
 npx github:luyh7/codex-usage-dashboard -- --open
 ```
 
+## Download and Run
+
+Download the executable for your platform from [GitHub Releases](https://github.com/luyh7/codex-usage-dashboard/releases). The skill installer downloads these same files automatically; manual downloads need no skill, Node.js, Python, or Rust.
+
+| Platform | Filename contains |
+| --- | --- |
+| Windows x64 | `windows-x64` (ends in `.exe`) |
+| Linux x64, glibc (built on Ubuntu 22.04) | `linux-x64` |
+| macOS Intel | `darwin-x64` |
+| macOS Apple Silicon | `darwin-arm64` |
+
+On Windows, save the `.exe` in a permanent folder and run it. On macOS/Linux, rename the downloaded executable to `codex-usage-dashboard`, then run:
+
+```bash
+chmod +x ./codex-usage-dashboard
+./codex-usage-dashboard
+```
+
+The program starts in the background and opens `http://127.0.0.1:8765/` in your browser. Keep the file in place while it runs. Use the same executable with `--stop` to stop it or `--shortcut` to create an optional shortcut. To update a manual installation, stop the old program before replacing it.
+
+Release files are not code-signed or notarized, so Windows or macOS may require explicit approval through the operating system's security settings. Linux ARM, Windows ARM, and musl/Alpine are not currently included. GitHub's **Source code** archives do not contain the executable.
+
+`manifest.json` serves the skill installer. To verify a manual download against `SHA256SUMS`, use `Get-FileHash .\<downloaded-file>.exe -Algorithm SHA256` in PowerShell, `sha256sum <downloaded-file>` on Linux, or `shasum -a 256 <downloaded-file>` on macOS, and compare the hash for that exact filename.
+
 ## Features
 
 - Per-conversation Codex usage from local session logs.
@@ -89,15 +113,15 @@ runtime/manifest.json
 Downloads use the versioned GitHub Release declared in `native.json`, with SHA256
 and build identity verification. Missing, unsupported or invalid artifacts fail
 installation; there is no Python fallback. A repository checkout alone does not
-include generated native artifacts. Until a matching release is published, build
-and install locally:
+include generated native artifacts. For development or before the matching
+release is published, build and install locally:
 
 ```bash
 node tools/package_release.mjs
 node bin/install.js --runtime-manifest dist/release/manifest.json --offline
 ```
 
-Building requires Rust and Node; running the installed binary requires neither.
+Building requires Rust stable and Node.js 24+; Windows builds also need Visual Studio C++ Build Tools and the Windows SDK. Running the installed binary requires none of these tools.
 The build embeds only the Svelte dashboard assets. Build `web/dist` before running Cargo; builds fail when the dashboard assets are missing.
 See [release and rollback](docs/implementation/release-and-rollback.md) for
 platform acceptance status and offline distribution.
@@ -120,12 +144,17 @@ unmanaged listener on 8765 is left running and reported as an error.
 
 ## Developer Checks
 
-`cargo test --workspace`, `npm run check --prefix web`, and
-`node tools/verify_native.mjs` cover the native implementation. The native verifier
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace --locked`, `npm run check --prefix web`, `npm test --prefix web`,
+and `node --test tools/release.test.mjs` cover the implementation and release assembly.
+After packaging with `node tools/package_release.mjs`, run
+`node tools/verify_native.mjs --replace-worktree` to verify both installation routes on port 8765 and restore the worktree dashboard. The native verifier
 uses an empty PATH to prove launch/export/stop do not invoke Python or Node.
 Python is used only by optional historical differential tests under `tools/`,
 `tests/`, and `benchmarks/`; their oracle is read from pinned Git history into a
 temporary directory and is never installed or used as an application backend.
+The release CI also runs this differential check on every supported platform.
+See the [release checklist](docs/releases/prepare-1.0.1.md) and [1.0.1 notes](docs/releases/v1.0.1.md).
 
 ## Manual Multi-Device Usage
 

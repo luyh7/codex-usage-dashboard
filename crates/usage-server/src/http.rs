@@ -39,8 +39,14 @@ fn error(error: QueryError) -> Response {
             StatusCode::CONFLICT,
             json!({"error":"snapshot stale","code":"snapshot_stale"}),
         ),
-        QueryError::Missing => (StatusCode::NOT_FOUND, json!({"error":"session not found","code":"session_not_found"})),
-        QueryError::DetailsMissing => (StatusCode::NOT_FOUND, json!({"error":"snapshot does not contain session details","code":"details_missing"})),
+        QueryError::Missing => (
+            StatusCode::NOT_FOUND,
+            json!({"error":"session not found","code":"session_not_found"}),
+        ),
+        QueryError::DetailsMissing => (
+            StatusCode::NOT_FOUND,
+            json!({"error":"snapshot does not contain session details","code":"details_missing"}),
+        ),
         QueryError::Invalid(e) => (
             if e == "index is loading" {
                 StatusCode::SERVICE_UNAVAILABLE
@@ -120,7 +126,9 @@ fn filter(p: &HashMap<String, String>) -> Filter {
 fn current_device(state: &State, published: &crate::service::Published) -> Value {
     let mut counts = HashMap::<&str, usize>::new();
     for session in &published.local.sessions {
-        *counts.entry(session.detail.environment_id.as_str()).or_default() += 1;
+        *counts
+            .entry(session.detail.environment_id.as_str())
+            .or_default() += 1;
     }
     let sources: Vec<_> = state.sources.iter().map(|source| {
         json!({"id":source.id,"label":source.label,"session_count":counts.get(source.id.as_str()).copied().unwrap_or(0)})
@@ -187,9 +195,12 @@ async fn metadata(
         if text(&params, "check_filters") == "true"
             && !view.session_matches(&filter(&params), text(&params, "id"))?
         {
-            return Ok(response(StatusCode::NOT_FOUND, &json!({
-                "error":"session excluded by filters", "code":"session_filtered_out"
-            })));
+            return Ok(response(
+                StatusCode::NOT_FOUND,
+                &json!({
+                    "error":"session excluded by filters", "code":"session_filtered_out"
+                }),
+            ));
         }
         let detail = view.query_session_detail(text(&params, "id"))?;
         let has_subagents = view.summaries().any(|session| {
@@ -277,49 +288,94 @@ async fn remotes(Extract(state): Extract<Arc<State>>) -> Response {
     }
 }
 fn gzip_response(state: &State, bytes: Bytes) -> Response {
-    ([
-        (header::CONTENT_TYPE, "application/gzip".to_owned()),
-        (header::CONTENT_DISPOSITION, format!("attachment; filename=\"cousash-{}.json.gz\"", state.device)),
-        (header::CACHE_CONTROL, "no-store".to_owned()),
-        (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
-    ], bytes).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, "application/gzip".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"cousash-{}.json.gz\"", state.device),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+        ],
+        bytes,
+    )
+        .into_response()
 }
-async fn export_gzip(Extract(state): Extract<Arc<State>>, Query(params): Query<HashMap<String, String>>) -> Response {
+async fn export_gzip(
+    Extract(state): Extract<Arc<State>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
     if let Some(id) = params.get("job") {
         let jobs = state.exports.lock().unwrap();
         if let Some(job) = jobs.iter().find(|job| &job.id == id) {
-            if let Some(Ok(bytes)) = job.result.lock().unwrap().as_ref() { return gzip_response(&state, bytes.clone()); }
-            return response(StatusCode::CONFLICT, &json!({"error":"export is not ready"}));
+            if let Some(Ok(bytes)) = job.result.lock().unwrap().as_ref() {
+                return gzip_response(&state, bytes.clone());
+            }
+            return response(
+                StatusCode::CONFLICT,
+                &json!({"error":"export is not ready"}),
+            );
         }
-        return response(StatusCode::NOT_FOUND, &json!({"error":"export expired; please retry"}));
+        return response(
+            StatusCode::NOT_FOUND,
+            &json!({"error":"export expired; please retry"}),
+        );
     }
     blocking(state.clone(), move || {
         let view = state.local_view()?;
         let bytes = crate::snapshot::gzip(&state.export_document(&view, None)?)?;
         Ok(gzip_response(&state, bytes.into()))
-    }).await
+    })
+    .await
 }
 async fn start_export(Extract(state): Extract<Arc<State>>) -> Response {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let published = match state.publication() { Ok(p) => p, Err(e) => return error(e) };
+    let published = match state.publication() {
+        Ok(p) => p,
+        Err(e) => return error(e),
+    };
     let mut jobs = state.exports.lock().unwrap();
     if let Some(job) = jobs.iter().rev().find(|job| {
         let result = job.result.lock().unwrap();
-        result.is_none() || (job.revision == published.local.revision && matches!(result.as_ref(), Some(Ok(_))))
-    }) { return response(StatusCode::OK, &job.status()); }
+        result.is_none()
+            || (job.revision == published.local.revision && matches!(result.as_ref(), Some(Ok(_))))
+    }) {
+        return response(StatusCode::OK, &job.status());
+    }
     let job = Arc::new(crate::snapshot::ExportJob {
-        id: format!("{}-{}", published.local.revision, chrono::Utc::now().timestamp_micros()),
-        revision: published.local.revision, percent: AtomicUsize::new(1), result: std::sync::Mutex::new(None),
+        id: format!(
+            "{}-{}",
+            published.local.revision,
+            chrono::Utc::now().timestamp_micros()
+        ),
+        revision: published.local.revision,
+        percent: AtomicUsize::new(1),
+        result: std::sync::Mutex::new(None),
     });
     jobs.push_back(job.clone());
-    while jobs.len() > 3 { jobs.pop_front(); }
+    while jobs.len() > 3 {
+        jobs.pop_front();
+    }
     let status = job.status();
     drop(jobs);
     tokio::task::spawn_blocking(move || {
         let result = (|| -> Result<Bytes, QueryError> {
             // Capture one publication so concurrent log updates cannot mix export revisions.
-            let period = usage_core::query::Period::bounds("all", None, None, state.zone, usage_core::timestamp::parse(&published.local.generated_at).unwrap_or_else(chrono::Utc::now))?;
-            let view = usage_core::view::View::new(&published.local, period, state.zone, &usage_core::PriceSchedule::bundled())?;
+            let period = usage_core::query::Period::bounds(
+                "all",
+                None,
+                None,
+                state.zone,
+                usage_core::timestamp::parse(&published.local.generated_at)
+                    .unwrap_or_else(chrono::Utc::now),
+            )?;
+            let view = usage_core::view::View::new(
+                &published.local,
+                period,
+                state.zone,
+                &usage_core::PriceSchedule::bundled(),
+            )?;
             Ok(crate::snapshot::gzip(&state.export_document(&view, Some(&job.percent))?)?.into())
         })();
         let mut completed = job.result.lock().unwrap();
@@ -328,14 +384,25 @@ async fn start_export(Extract(state): Extract<Arc<State>>) -> Response {
     });
     response(StatusCode::OK, &status)
 }
-async fn export_progress(Extract(state): Extract<Arc<State>>, Query(params): Query<HashMap<String, String>>) -> Response {
+async fn export_progress(
+    Extract(state): Extract<Arc<State>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
     let jobs = state.exports.lock().unwrap();
     match jobs.iter().find(|job| Some(&job.id) == params.get("id")) {
         Some(job) => response(StatusCode::OK, &job.status()),
-        None => response(StatusCode::NOT_FOUND, &json!({"error":"export expired; please retry"})),
+        None => response(
+            StatusCode::NOT_FOUND,
+            &json!({"error":"export expired; please retry"}),
+        ),
     }
 }
-async fn mutate(state: Arc<State>, action: &str, body: Bytes, file_options: Option<HashMap<String, String>>) -> Response {
+async fn mutate(
+    state: Arc<State>,
+    action: &str,
+    body: Bytes,
+    file_options: Option<HashMap<String, String>>,
+) -> Response {
     let Ok(permit) = state.query_slots.clone().acquire_owned().await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
@@ -462,9 +529,12 @@ pub fn router(state: Arc<State>) -> Router {
         .route("/api/remotes", get(remotes))
         .route(
             "/api/remotes/import-file",
-            post(|Extract(s): Extract<Arc<State>>, Query(options): Query<HashMap<String, String>>, b: Bytes| async {
-                mutate(s, "import", b, Some(options)).await
-            }).layer(DefaultBodyLimit::max(crate::snapshot::MAX_BYTES)),
+            post(
+                |Extract(s): Extract<Arc<State>>,
+                 Query(options): Query<HashMap<String, String>>,
+                 b: Bytes| async { mutate(s, "import", b, Some(options)).await },
+            )
+            .layer(DefaultBodyLimit::max(crate::snapshot::MAX_BYTES)),
         )
         .route(
             "/api/remotes/import",

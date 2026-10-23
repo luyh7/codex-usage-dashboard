@@ -1,6 +1,8 @@
 """Differential gates against the frozen legacy domain semantics, synthetic only."""
 from __future__ import annotations
 import base64
+from collections import Counter
+from contextlib import closing
 import datetime as dt
 import hashlib
 import itertools
@@ -17,13 +19,32 @@ import time
 from compatibility import ROOT, load_dashboard, compare, canonical
 
 
+def legacy_view(value):
+    """Keep legacy financial semantics; validity labels have dedicated Rust tests.
+
+    The new UI reports the actual per-model/context rate interval, whereas the
+    frozen Python implementation used the date of the selected schedule snapshot.
+    Neither field changes rates or cost. Do not relax numeric comparisons.
+    """
+    if isinstance(value, dict):
+        omitted = {'effective_at', 'effective_until'} if 'prices' in value and 'cost_multiplier' in value else set()
+        if 'uid' in value:
+            omitted.add('last_usage_at')  # New recent-usage metadata, covered by view tests.
+        if 'session_count' in value and 'usage' in value:
+            omitted.update({'main_count', 'agent_count', 'model_breakdown'})  # New summary facets, covered by query/view tests.
+        return {key: legacy_view(item) for key, item in value.items() if key not in omitted}
+    if isinstance(value, list):
+        return [legacy_view(item) for item in value]
+    return value
+
+
 def main():
     os.environ['TZ']='UTC'
     if hasattr(time,'tzset'): time.tzset()
     d=load_dashboard();rng=random.Random(64321)
-    inputs=[];expected=[];names=[]
-    def case(name,payload,result):
-        names.append(name);inputs.append(payload);expected.append(result)
+    inputs=[];expected=[];names=[];contexts=[]
+    def case(name,payload,result,context=None):
+        names.append(name);inputs.append(payload);expected.append(result);contexts.append(context)
     dates=[None,'invalid','2026-01-01T00:00:00Z']
     for moment,_ in d.MODEL_PRICE_SCHEDULES:
         if moment:dates.extend(d.utc_iso(moment+dt.timedelta(seconds=x)) for x in [-1,0,1])
@@ -91,20 +112,21 @@ def main():
                 for entry in files:
                     path=home/entry['path'];path.parent.mkdir(parents=True,exist_ok=True)
                     if 'sqlite_sql' in entry:
-                        with sqlite3.connect(path) as db:db.executescript(entry['sqlite_sql'])
+                        with closing(sqlite3.connect(path)) as db:db.executescript(entry['sqlite_sql'])
                         continue
                     path.write_bytes(base64.b64decode(entry['bytes_base64']));os.utime(path,ns=(entry['mtime_ns'],entry['mtime_ns']))
                     kind='archived' if 'archived_sessions' in path.parts else 'active'
                     _,detail=analyzer.parse_file(path,kind)
-                    case('parse-file:'+fixture.name,{'op':'parse_file','path':str(path),'home':str(home),'source_id':source['id'],'source_label':source['label'],'kind':kind},{k:v for k,v in detail.items() if not k.startswith('_')})
+                    case('parse-file:'+fixture.name,{'op':'parse_file','path':str(path),'home':str(home),'source_id':source['id'],'source_label':source['label'],'kind':kind},{k:v for k,v in detail.items() if not k.startswith('_')},([home],[source],[files]))
                 analyzer.close()
             if contract['operation']=='scan':
                 analyzer=d.CodexUsageAnalyzer(sources,resolve_project_info=False)
                 inventory=analyzer.iter_session_files()
                 snapshot=analyzer.scan('all',include_remotes=False)
-                compare(contract['expected'],canonical(snapshot,[s.codex_home for s in sources],contract['sources'],contract['files']))
-                case('normalized-scan:'+fixture.name,{'op':'normalize_files','with_summary':True,'files':[{'path':str(path),'kind':kind,'home':str(source.codex_home),'source_id':source.id,'source_label':source.label} for source,path,kind in inventory]},{k:snapshot[k] for k in ['sessions','summary','daily_usage','details_by_uid']})
-                case('indexed-scan:'+fixture.name,{'op':'indexed_scan','sources':[{'id':source.id,'label':source.label,'home':str(source.codex_home)} for source in sources],'database':str(Path(temp)/fixture.stem/'index.sqlite3')},{k:snapshot[k] for k in ['sessions','summary','daily_usage','details_by_uid']})
+                compare(contract['expected'],canonical(snapshot,[s.codex_home for s in sources],contract['sources'],contract['files']),mtime_tolerance_us=1)
+                context=([s.codex_home for s in sources],contract['sources'],contract['files'])
+                case('normalized-scan:'+fixture.name,{'op':'normalize_files','with_summary':True,'files':[{'path':str(path),'kind':kind,'home':str(source.codex_home),'source_id':source.id,'source_label':source.label} for source,path,kind in inventory]},{k:snapshot[k] for k in ['sessions','summary','daily_usage','details_by_uid']},context)
+                case('indexed-scan:'+fixture.name,{'op':'indexed_scan','sources':[{'id':source.id,'label':source.label,'home':str(source.codex_home)} for source in sources],'database':str(Path(temp)/fixture.stem/'index.sqlite3')},{k:snapshot[k] for k in ['sessions','summary','daily_usage','details_by_uid']},context)
                 for detail in snapshot['details_by_uid'].values():
                     start=d.parse_timestamp(detail['start_at']);end=d.parse_timestamp(detail['end_at'])
                     if start is not None and end is not None:
@@ -116,10 +138,12 @@ def main():
         assert len(actual)==len(expected),(len(actual),len(expected),result.stderr)
         failures=[]
         for i,(a,b) in enumerate(zip(expected,actual)):
-            try:compare(a,b)
+            if contexts[i]:
+                a,b=canonical(a,*contexts[i]),canonical(b,*contexts[i])
+            try:compare(legacy_view(a),legacy_view(b))
             except AssertionError as exc:
                 failures.append({'case':i,'name':names[i],'error':str(exc),'input':inputs[i] if names[i] not in ['reader'] else {'op':'reader','case':i}})
-        report={'status':'failed' if failures else 'passed','checks':len(expected),'price_grid_cases':price_count,'seed':64321,'comparison':'all public keys and types; exact integers and six-decimal floats','platform':platform.platform(),'rust':subprocess.check_output(['rustc','--version'],text=True).strip(),'source_sha256':hashlib.sha256(__import__('reference_dashboard').SOURCE.read_bytes()).hexdigest(),'failures':failures[:15], 'scope':'usage, normalized timeline, price lookup, rounding, price segments, streamed JSONL; raw session parser included; cross-file continuation, parent normalization and runtime tier merging included'}
+        report={'status':'failed' if failures else 'passed','checks':len(expected),'price_grid_cases':price_count,'seed':64321,'comparison':'legacy keys and types; exact integers and six-decimal floats; paths/derived UIDs canonicalized; new pricing validity, recent-usage and summary facets tested separately in Rust','platform':platform.platform(),'rust':subprocess.check_output(['rustc','--version'],text=True).strip(),'source_sha256':hashlib.sha256(__import__('reference_dashboard').SOURCE.read_bytes()).hexdigest(),'failure_counts':dict(Counter(f['name'] for f in failures)),'failures':failures[:15], 'scope':'usage, normalized timeline, price lookup, rounding, price segments, streamed JSONL; raw session parser included; cross-file continuation, parent normalization and runtime tier merging included'}
         path=ROOT/'benchmarks/implementation/results/core-correctness.json';path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps({k:v for k,v in report.items() if k!='failures'},indent=2))
         if failures:

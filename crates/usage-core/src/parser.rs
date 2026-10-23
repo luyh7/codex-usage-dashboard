@@ -153,11 +153,15 @@ fn user_prompt(message: &str) -> String {
         if message.starts_with("# AGENTS.md instructions for ") {
             return String::new();
         }
-        let Some((opening, body)) = message.strip_prefix('<').and_then(|s| s.split_once('>')) else {
+        let Some((opening, body)) = message.strip_prefix('<').and_then(|s| s.split_once('>'))
+        else {
             break;
         };
         let name = opening.split_whitespace().next().unwrap_or_default();
-        if !matches!(name, "external_codex_apps_open_page" | "in-app-browser-context" | "environment_context") {
+        if !matches!(
+            name,
+            "external_codex_apps_open_page" | "in-app-browser-context" | "environment_context"
+        ) {
             break;
         }
         let Some((_, rest)) = body.split_once(&format!("</{name}>")) else {
@@ -167,7 +171,10 @@ fn user_prompt(message: &str) -> String {
         stripped = true;
     }
     if stripped {
-        message = message.strip_prefix("## My request:").unwrap_or(message).trim_start();
+        message = message
+            .strip_prefix("## My request:")
+            .unwrap_or(message)
+            .trim_start();
     }
     // Filter complete, known context blocks before truncation, preserving any
     // actual request that follows them. Authored markup is otherwise untouched.
@@ -711,7 +718,10 @@ mod tests {
     use serde_json::json;
 
     fn parsed() -> ParsedFile {
-        ParsedFile { detail: SessionDetail::default(), state: ParserState::default() }
+        ParsedFile {
+            detail: SessionDetail::default(),
+            state: ParserState::default(),
+        }
     }
 
     fn message(kind: &str, value: &str) -> Value {
@@ -724,7 +734,12 @@ mod tests {
 
     #[test]
     fn first_user_prompt_skips_injected_context_in_all_message_formats() {
-        for kind in ["response_item", "user_message", "user_input", "human_message"] {
+        for kind in [
+            "response_item",
+            "user_message",
+            "user_input",
+            "human_message",
+        ] {
             let mut parsed = parsed();
             for context in [
                 "# AGENTS.md instructions for /demo\n<INSTRUCTIONS>project rules</INSTRUCTIONS>",
@@ -734,11 +749,19 @@ mod tests {
                 "<in-app-browser-context source=\"ambient-ui-state\">Current URL: http://localhost/</in-app-browser-context>",
             ] {
                 parsed.consume(message(kind, context)).unwrap();
-                assert!(parsed.detail.first_user_prompt.is_empty(), "{kind}: {context}");
+                assert!(
+                    parsed.detail.first_user_prompt.is_empty(),
+                    "{kind}: {context}"
+                );
             }
-            parsed.consume(message(kind, "修复登录流程，并保留错误提示。")).unwrap();
+            parsed
+                .consume(message(kind, "修复登录流程，并保留错误提示。"))
+                .unwrap();
             parsed.consume(message(kind, "这是一条后续请求。")).unwrap();
-            assert_eq!(parsed.detail.first_user_prompt, "修复登录流程，并保留错误提示。", "{kind}");
+            assert_eq!(
+                parsed.detail.first_user_prompt, "修复登录流程，并保留错误提示。",
+                "{kind}"
+            );
         }
     }
 
@@ -749,15 +772,26 @@ mod tests {
             "自动附带的浏览器上下文。".repeat(100)
         );
         let request = "调整事件列表的布局，保留完整值提示。";
-        for kind in ["response_item", "user_message", "user_input", "human_message"] {
+        for kind in [
+            "response_item",
+            "user_message",
+            "user_input",
+            "human_message",
+        ] {
             let mut parsed = parsed();
-            parsed.consume(message(kind, &format!("{context}{request}"))).unwrap();
+            parsed
+                .consume(message(kind, &format!("{context}{request}")))
+                .unwrap();
             assert_eq!(parsed.detail.first_user_prompt, request, "{kind}");
         }
         let mut parsed = parsed();
-        parsed.consume(json!({"type":"response_item","payload":{"type":"message","role":"user","content":[
-            {"type":"input_text","text":context}, {"type":"input_text","text":request}
-        ]}})).unwrap();
+        parsed
+            .consume(
+                json!({"type":"response_item","payload":{"type":"message","role":"user","content":[
+                    {"type":"input_text","text":context}, {"type":"input_text","text":request}
+                ]}}),
+            )
+            .unwrap();
         assert_eq!(parsed.detail.first_user_prompt, request);
     }
 

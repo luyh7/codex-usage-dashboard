@@ -232,7 +232,9 @@ pub fn run(args: &Args) -> Result<()> {
         use std::os::windows::process::CommandExt;
         use windows_sys::Win32::{
             Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation},
-            System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE},
+            System::Console::{
+                GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+            },
         };
         // Command::spawn inherits more than the redirected standard handles on
         // Windows. Keeping the caller's pipes open in the detached server makes
@@ -280,7 +282,10 @@ pub fn run(args: &Args) -> Result<()> {
             return Err(format!("Dashboard startup timed out; see {}", log.display()).into());
         }
         if !reported_wait && Instant::now() >= progress_at {
-            eprintln!("Waiting for the dashboard on port 8765; see {}", log.display());
+            eprintln!(
+                "Waiting for the dashboard on port 8765; see {}",
+                log.display()
+            );
             reported_wait = true;
         }
         thread::sleep(Duration::from_millis(100));

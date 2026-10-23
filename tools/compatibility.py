@@ -6,6 +6,7 @@ Freeze refuses a changed production source. Never reads the user's log roots.
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import hashlib
 import importlib.util
 import json
@@ -38,9 +39,13 @@ def canonical(value, homes, sources, files):
     for i, home in enumerate(homes):
         for file in files[i]:
             relative = file['path']
-            old = hashlib.sha1(f'{sources[i]["id"]}:{home / relative}'.encode()).hexdigest()[:16]
             new = hashlib.sha1(f'{sources[i]["id"]}:<HOME:{i}>/{relative}'.encode()).hexdigest()[:16]
-            identities[old] = new
+            paths = [str(home / relative)]
+            if os.name == 'nt':
+                paths.append('\\\\?\\' + str(home / relative))
+            for native in paths:
+                old = hashlib.sha1(f'{sources[i]["id"]}:{native}'.encode()).hexdigest()[:16]
+                identities[old] = new
 
     def walk(item, location=()):
         if isinstance(item, dict):
@@ -58,8 +63,9 @@ def canonical(value, homes, sources, files):
             if item in identities:
                 return identities[item]
             for i, home in enumerate(homes):
-                if item == str(home) or item.startswith(str(home) + '/'):
-                    return item.replace(str(home), f'<HOME:{i}>', 1)
+                native = item.removeprefix('\\\\?\\') if os.name == 'nt' else item
+                if native == str(home) or native.startswith(str(home) + os.sep):
+                    return f'<HOME:{i}>' + native[len(str(home)):].replace(os.sep, '/')
         return item
     return walk(value)
 
@@ -93,17 +99,24 @@ def capture(analyzer, operation, args, kwargs, invoke):
                     'expected': canonical(public, homes, sources, files)}
 
 
-def compare(expected, actual, path='$'):
+def compare(expected, actual, path='$', *, mtime_tolerance_us=0):
     if isinstance(expected, dict):
         assert isinstance(actual, dict), f'{path}: expected object'
         assert expected.keys() == actual.keys(), f'{path}: keys {expected.keys() ^ actual.keys()}'
         for key in expected:
-            compare(expected[key], actual[key], f'{path}.{key}')
+            compare(expected[key], actual[key], f'{path}.{key}', mtime_tolerance_us=mtime_tolerance_us)
     elif isinstance(expected, list):
         assert isinstance(actual, list) and len(expected) == len(actual), f'{path}: array length'
         for i, (a, b) in enumerate(zip(expected, actual)):
-            compare(a, b, f'{path}[{i}]')
+            compare(a, b, f'{path}[{i}]', mtime_tolerance_us=mtime_tolerance_us)
     else:
+        # Frozen Linux fixtures may lose sub-microsecond mtime precision on
+        # Windows. This allowance is only for their updated_at fields; runtime
+        # Rust/Python comparisons and all token/money values remain exact.
+        if mtime_tolerance_us and path.endswith('.updated_at') and isinstance(expected, str) and isinstance(actual, str):
+            delta = abs(dt.datetime.fromisoformat(expected) - dt.datetime.fromisoformat(actual))
+            if delta <= dt.timedelta(microseconds=mtime_tolerance_us):
+                return
         # Six-decimal money is exact, including null/unknown and booleans.
         assert type(expected) is type(actual) and expected == actual, f'{path}: {expected!r} != {actual!r}'
 

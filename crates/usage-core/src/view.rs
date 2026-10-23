@@ -52,11 +52,16 @@ pub struct Filter {
 }
 // Keep existing single-value API links while allowing unambiguous alternatives.
 fn filter_values(value: &str) -> Vec<String> {
-    if value.is_empty() { return Vec::new(); }
-    if value.starts_with('[') {
-        if let Ok(values) = serde_json::from_str::<Vec<String>>(value) {
-            return values.into_iter().filter(|value| !value.is_empty()).collect();
-        }
+    if value.is_empty() {
+        return Vec::new();
+    }
+    if value.starts_with('[')
+        && let Ok(values) = serde_json::from_str::<Vec<String>>(value)
+    {
+        return values
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .collect();
     }
     vec![value.to_owned()]
 }
@@ -84,7 +89,9 @@ fn add_model_usage(
 ) -> Result<(), Error> {
     let model = if model.is_empty() { "unknown" } else { model };
     let row = rows.entry(model.into()).or_insert_with(|| ModelBreakdown {
-        model: model.into(), cost_complete: true, ..ModelBreakdown::default()
+        model: model.into(),
+        cost_complete: true,
+        ..ModelBreakdown::default()
     });
     row.usage = row.usage.checked_add(usage)?;
     row.estimated_cost_usd = match (row.estimated_cost_usd, cost) {
@@ -289,18 +296,29 @@ impl View {
                 // Include it only when its entire attribution is known.
                 let row = &entry.summary;
                 let attribution = if row.models.is_empty() {
-                    vec![if row.model.is_empty() { "unknown".into() } else { row.model.clone() }]
-                } else { row.models.clone() };
+                    vec![if row.model.is_empty() {
+                        "unknown".into()
+                    } else {
+                        row.model.clone()
+                    }]
+                } else {
+                    row.models.clone()
+                };
                 if attribution.len() == 1 && models.contains(&attribution[0]) {
                     sessions.push(entry.indexed.clone());
                 }
             }
         }
-        let mut view = Self::new(&Snapshot {
-            revision: snapshot.revision,
-            generated_at: snapshot.generated_at.clone(),
-            sessions,
-        }, period, zone, prices)?;
+        let mut view = Self::new(
+            &Snapshot {
+                revision: snapshot.revision,
+                generated_at: snapshot.generated_at.clone(),
+                sessions,
+            },
+            period,
+            zone,
+            prices,
+        )?;
         // The model list describes the conversation. Only the usage timeline
         // and its derived totals are narrowed by the model filter.
         for entry in &mut view.entries {
@@ -308,14 +326,19 @@ impl View {
             entry.summary.models = original.summary.models.clone();
             Arc::make_mut(&mut entry.indexed.detail).models = original.summary.models.clone();
             entry.search.push(' ');
-            entry.search.push_str(&original.summary.models.join(" ").to_lowercase());
+            entry
+                .search
+                .push_str(&original.summary.models.join(" ").to_lowercase());
         }
         view.revision = hash(&(&base.revision, &models))?;
         view.facets = Some(facets);
         Ok(view)
     }
     pub fn facets(&self) -> Result<Summary, QueryError> {
-        self.facets.clone().map(Ok).unwrap_or_else(|| self.summary())
+        self.facets
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| self.summary())
     }
     pub fn new(
         snapshot: &Snapshot,
@@ -485,7 +508,13 @@ impl View {
                     .map(|quote| {
                         crate::pricing::CostParts::for_usage(event.delta, quote.prices).total()
                     });
-                add_model_usage(&mut model_breakdown, model, event.delta, cost, cost.is_some())?;
+                add_model_usage(
+                    &mut model_breakdown,
+                    model,
+                    event.delta,
+                    cost,
+                    cost.is_some(),
+                )?;
                 day.estimated_cost_usd = day
                     .estimated_cost_usd
                     .zip(cost)
@@ -500,7 +529,9 @@ impl View {
                 .map(|s| s.as_ref().clone())
                 .unwrap_or_else(|| SessionSummary::from(detail.as_ref()));
             if indexed.has_detail {
-                summary.last_usage_at = indexed.events.iter()
+                summary.last_usage_at = indexed
+                    .events
+                    .iter()
                     .filter(|event| event.delta.has_tokens())
                     .map(|event| event.timestamp_us)
                     .max()
@@ -561,9 +592,18 @@ impl View {
             // an unresolvable multi-model total to the last model in the session.
             if !trend_complete {
                 model_breakdown.clear();
-                let model = if summary.models.len() > 1 { "unknown" } else { &summary.model };
-                add_model_usage(&mut model_breakdown, model, summary.total_token_usage,
-                    summary.estimated_cost_usd, summary.estimated_cost_usd.is_some())?;
+                let model = if summary.models.len() > 1 {
+                    "unknown"
+                } else {
+                    &summary.model
+                };
+                add_model_usage(
+                    &mut model_breakdown,
+                    model,
+                    summary.total_token_usage,
+                    summary.estimated_cost_usd,
+                    summary.estimated_cost_usd.is_some(),
+                )?;
             }
             entries.push(Entry {
                 indexed,
@@ -677,7 +717,9 @@ impl View {
                 let s = &entry.summary;
                 (search.is_empty() || entry.search.contains(&search))
                     && (models.is_empty()
-                        || models.iter().any(|model| s.model == *model || s.models.contains(model)))
+                        || models
+                            .iter()
+                            .any(|model| s.model == *model || s.models.contains(model)))
                     && (environments.is_empty() || environments.contains(&s.environment_id))
                     && (query.source.is_empty() || s.source == query.source)
                     && (query.project.is_empty() || project_key(s) == query.project)
@@ -712,20 +754,34 @@ impl View {
         for i in &indices {
             for row in &self.entries[*i].model_breakdown {
                 *model_sessions.entry(row.model.clone()).or_default() += 1;
-                add_model_usage(&mut models, &row.model, row.usage,
-                    row.estimated_cost_usd, row.cost_complete)?;
+                add_model_usage(
+                    &mut models,
+                    &row.model,
+                    row.usage,
+                    row.estimated_cost_usd,
+                    row.cost_complete,
+                )?;
             }
         }
-        summary.model_breakdown = models.into_values().map(|mut row| {
-            row.estimated_cost_usd = row.estimated_cost_usd.map(crate::pricing::round_money);
-            row
-        }).collect();
-        summary.by_model = summary.model_breakdown.iter().map(|row| query::ModelUsage {
-            model: row.model.clone(),
-            sessions: model_sessions[&row.model],
-            usage: row.usage,
-        }).collect();
-        summary.by_model.sort_by_key(|row| Reverse(row.usage.total_tokens));
+        summary.model_breakdown = models
+            .into_values()
+            .map(|mut row| {
+                row.estimated_cost_usd = row.estimated_cost_usd.map(crate::pricing::round_money);
+                row
+            })
+            .collect();
+        summary.by_model = summary
+            .model_breakdown
+            .iter()
+            .map(|row| query::ModelUsage {
+                model: row.model.clone(),
+                sessions: model_sessions[&row.model],
+                usage: row.usage,
+            })
+            .collect();
+        summary
+            .by_model
+            .sort_by_key(|row| Reverse(row.usage.total_tokens));
         let mut days: BTreeMap<String, MetricDay> = self
             .hourly_bounds
             .iter()
@@ -983,10 +1039,14 @@ impl View {
     /// Checks the complete filtered selection, independent of pagination/grouping.
     pub fn session_matches(&self, query: &Filter, id: &str) -> Result<bool, QueryError> {
         let selection = self.selection(query)?;
-        Ok(self.by_uid.get(id).is_some_and(|i| selection.indices.contains(i)))
+        Ok(self
+            .by_uid
+            .get(id)
+            .is_some_and(|i| selection.indices.contains(i)))
     }
     fn entry(&self, id: &str) -> Result<&Entry, QueryError> {
-        let entry = self.by_uid
+        let entry = self
+            .by_uid
             .get(id)
             .map(|i| &self.entries[*i])
             .ok_or(QueryError::Missing)?;
@@ -1065,10 +1125,11 @@ impl View {
     }
 }
 fn row_time(row: &SessionSummary) -> i64 {
-    row.last_usage_at.as_deref()
-    .and_then(timestamp::parse)
-    .map(|t| t.timestamp_millis())
-    .unwrap_or(0)
+    row.last_usage_at
+        .as_deref()
+        .and_then(timestamp::parse)
+        .map(|t| t.timestamp_millis())
+        .unwrap_or(0)
 }
 /// Re-anchor a current publication at a previous page offset. Cursors returned
 /// by queries remain bound to the exact revision/filter/page size.
@@ -1115,105 +1176,306 @@ mod tests {
             ("2026-10-21T16:30:00Z", "gpt-6-astra", "fast", 3000),
             ("2026-10-21T17:00:00Z", "gpt-6.1-sol", "ultrafast", 6000),
             ("2026-10-21T17:30:00Z", "unpriced-model", "standard", 6100),
-        ].into_iter().map(|(time, model, tier, input)| RawEvent {
-            timestamp: Some(time.into()), model: model.into(), service_tier: tier.into(),
-            total_token_usage: Usage { input_tokens: input, output_tokens: input / 10,
-                total_tokens: input + input / 10, ..Usage::default() },
+        ]
+        .into_iter()
+        .map(|(time, model, tier, input)| RawEvent {
+            timestamp: Some(time.into()),
+            model: model.into(),
+            service_tier: tier.into(),
+            total_token_usage: Usage {
+                input_tokens: input,
+                output_tokens: input / 10,
+                total_tokens: input + input / 10,
+                ..Usage::default()
+            },
             ..RawEvent::default()
-        }).collect();
+        })
+        .collect();
         let usage = timeline.last().unwrap().total_token_usage;
-        let pricing = prices.price_events(&crate::usage::normalize(&timeline).unwrap(),
-            "unpriced-model", usage, None, "standard").unwrap();
+        let pricing = prices
+            .price_events(
+                &crate::usage::normalize(&timeline).unwrap(),
+                "unpriced-model",
+                usage,
+                None,
+                "standard",
+            )
+            .unwrap();
         let detail = SessionDetail {
-            identity: SessionIdentity { uid: "mixed".into(), session_id: "mixed".into(), ..SessionIdentity::default() },
-            model: "unpriced-model".into(), models: vec!["gpt-6.1-sol".into(), "gpt-6-astra".into(), "unpriced-model".into()],
-            title: "Mixed models".into(), total_token_usage: usage, timeline, pricing,
+            identity: SessionIdentity {
+                uid: "mixed".into(),
+                session_id: "mixed".into(),
+                ..SessionIdentity::default()
+            },
+            model: "unpriced-model".into(),
+            models: vec![
+                "gpt-6.1-sol".into(),
+                "gpt-6-astra".into(),
+                "unpriced-model".into(),
+            ],
+            title: "Mixed models".into(),
+            total_token_usage: usage,
+            timeline,
+            pricing,
             ..SessionDetail::default()
         };
         let mut metadata = IndexedSession::from_detail(Arc::new(detail.metadata())).unwrap();
         metadata.has_detail = false;
-        metadata.detail = Arc::new(SessionDetail { identity: SessionIdentity { uid: "remote".into(), ..metadata.detail.identity.clone() }, ..metadata.detail.as_ref().clone() });
-        let snapshot = Snapshot { revision: 1, generated_at: "2026-10-21T18:00:00Z".into(),
-            sessions: vec![IndexedSession::from_detail(Arc::new(detail)).unwrap(), metadata] };
+        metadata.detail = Arc::new(SessionDetail {
+            identity: SessionIdentity {
+                uid: "remote".into(),
+                ..metadata.detail.identity.clone()
+            },
+            ..metadata.detail.as_ref().clone()
+        });
+        let snapshot = Snapshot {
+            revision: 1,
+            generated_at: "2026-10-21T18:00:00Z".into(),
+            sessions: vec![
+                IndexedSession::from_detail(Arc::new(detail)).unwrap(),
+                metadata,
+            ],
+        };
         let zone = chrono_tz::Asia::Shanghai;
         let now = timestamp::parse(&snapshot.generated_at).unwrap();
-        let all = View::new(&snapshot, Period::bounds("all", None, None, zone, now).unwrap(), zone, &prices).unwrap();
-        let filter = Filter { search: "Mixed models".into(), ..Filter::default() };
+        let all = View::new(
+            &snapshot,
+            Period::bounds("all", None, None, zone, now).unwrap(),
+            zone,
+            &prices,
+        )
+        .unwrap();
+        let filter = Filter {
+            search: "Mixed models".into(),
+            ..Filter::default()
+        };
         let summary = all.query_sessions(&filter, "", 1).unwrap().summary;
         let rows = &summary.model_breakdown;
         assert_eq!(summary.session_count, 2); // Pagination must not truncate totals.
-        assert_eq!(rows.iter().map(|r| r.usage.total_tokens).sum::<i64>(), 13420);
+        assert_eq!(
+            rows.iter().map(|r| r.usage.total_tokens).sum::<i64>(),
+            13420
+        );
         let sol = rows.iter().find(|r| r.model == "gpt-6.1-sol").unwrap();
         assert_eq!(sol.usage.total_tokens, 4400);
         let expected = |model, time, tier, input| {
             let quote = prices.quote(model, Some(time), Some(input), tier).unwrap();
-            crate::pricing::CostParts::for_usage(Usage { input_tokens: input, output_tokens: input / 10,
-                ..Usage::default() }, quote.prices).total()
+            crate::pricing::CostParts::for_usage(
+                Usage {
+                    input_tokens: input,
+                    output_tokens: input / 10,
+                    ..Usage::default()
+                },
+                quote.prices,
+            )
+            .total()
         };
         let sol_cost = expected("gpt-6.1-sol", "2026-10-21T15:00:00Z", "standard", 1000)
             + expected("gpt-6.1-sol", "2026-10-21T17:00:00Z", "ultrafast", 3000);
         assert!((sol.estimated_cost_usd.unwrap() - sol_cost).abs() < 0.000001);
         assert!(sol.cost_complete);
         let period = Period::bounds("all", None, None, zone, now).unwrap();
-        let scoped = View::with_models(&snapshot, period.clone(), zone, &prices, "gpt-6.1-sol").unwrap();
+        let scoped =
+            View::with_models(&snapshot, period.clone(), zone, &prices, "gpt-6.1-sol").unwrap();
         let selected = scoped.query_sessions(&Filter::default(), "", 100).unwrap();
         assert_ne!(scoped.revision, all.revision);
         assert_eq!(scoped.facets().unwrap().session_count, 2);
-        assert_eq!(scoped.facets().unwrap().by_model.iter()
-            .find(|row| row.model == "gpt-6.1-sol").unwrap().usage.total_tokens, 4400);
+        assert_eq!(
+            scoped
+                .facets()
+                .unwrap()
+                .by_model
+                .iter()
+                .find(|row| row.model == "gpt-6.1-sol")
+                .unwrap()
+                .usage
+                .total_tokens,
+            4400
+        );
         assert_eq!(selected.summary.session_count, 1);
         assert_eq!(selected.summary.usage.total_tokens, 4400);
         assert_eq!(selected.summary.usage.output_tokens, 400);
         assert!((selected.summary.estimated_cost_usd - sol_cost).abs() < 0.000001);
-        assert_eq!(selected.items[0].models, all.query_session_detail("mixed").unwrap().models);
+        assert_eq!(
+            selected.items[0].models,
+            all.query_session_detail("mixed").unwrap().models
+        );
         assert_eq!(selected.summary.model_breakdown.len(), 1);
         assert_eq!(selected.summary.model_breakdown[0].model, "gpt-6.1-sol");
         assert_eq!(selected.items[0].total_token_usage.total_tokens, 4400);
         assert!(selected.items[0].price_model_known); // Unselected unknown prices do not leak.
         let detail = scoped.query_session_detail("mixed").unwrap();
         assert_eq!(detail.models, selected.items[0].models);
-        assert!(detail.timeline.iter().all(|event| event.model == "gpt-6.1-sol"));
-        let searched = scoped.query_sessions(&Filter {
-            search: "gpt-6-astra".into(), ..Filter::default()
-        }, "", 100).unwrap();
+        assert!(
+            detail
+                .timeline
+                .iter()
+                .all(|event| event.model == "gpt-6.1-sol")
+        );
+        let searched = scoped
+            .query_sessions(
+                &Filter {
+                    search: "gpt-6-astra".into(),
+                    ..Filter::default()
+                },
+                "",
+                100,
+            )
+            .unwrap();
         assert_eq!(searched.summary.usage.total_tokens, 4400);
-        assert_eq!(detail.timeline.iter().map(|e| e.total_token_usage.total_tokens)
-            .collect::<Vec<_>>(), vec![1100, 4400]);
-        assert_eq!(detail.timeline[1].last_token_usage.unwrap().total_tokens, 3300);
+        assert_eq!(
+            detail
+                .timeline
+                .iter()
+                .map(|e| e.total_token_usage.total_tokens)
+                .collect::<Vec<_>>(),
+            vec![1100, 4400]
+        );
+        assert_eq!(
+            detail.timeline[1].last_token_usage.unwrap().total_tokens,
+            3300
+        );
         assert_eq!(scoped.query_events("mixed", "", 100).unwrap().total, 2);
-        assert_eq!(scoped.query_chart("mixed").unwrap().timeline.last().unwrap()
-            .total_token_usage.total_tokens, 4400);
+        assert_eq!(
+            scoped
+                .query_chart("mixed")
+                .unwrap()
+                .timeline
+                .last()
+                .unwrap()
+                .total_token_usage
+                .total_tokens,
+            4400
+        );
         let trend = scoped.query_metric_trend(&Filter::default()).unwrap();
         assert!(trend.complete);
-        assert_eq!(trend.points.iter().map(|p| p.usage.total_tokens).sum::<i64>(), 4400);
-        assert_eq!(scoped.query_projects(&Filter::default(), "", 100).unwrap()
-            .items[0].usage.total_tokens, 4400);
-        assert_eq!(scoped.query_project_tasks(&Filter::default(), "mixed", "", 100).unwrap()
-            .items[0].summary.usage.total_tokens, 4400);
-        let multi = View::with_models(&snapshot, period.clone(), zone, &prices,
-            r#"["gpt-6-astra","gpt-6.1-sol","gpt-6-astra"]"#).unwrap();
+        assert_eq!(
+            trend
+                .points
+                .iter()
+                .map(|p| p.usage.total_tokens)
+                .sum::<i64>(),
+            4400
+        );
+        assert_eq!(
+            scoped
+                .query_projects(&Filter::default(), "", 100)
+                .unwrap()
+                .items[0]
+                .usage
+                .total_tokens,
+            4400
+        );
+        assert_eq!(
+            scoped
+                .query_project_tasks(&Filter::default(), "mixed", "", 100)
+                .unwrap()
+                .items[0]
+                .summary
+                .usage
+                .total_tokens,
+            4400
+        );
+        let multi = View::with_models(
+            &snapshot,
+            period.clone(),
+            zone,
+            &prices,
+            r#"["gpt-6-astra","gpt-6.1-sol","gpt-6-astra"]"#,
+        )
+        .unwrap();
         assert_eq!(multi.summary().unwrap().usage.total_tokens, 6600);
-        assert_eq!(multi.query_session_detail("mixed").unwrap().timeline.len(), 3);
-        let reverse = View::with_models(&snapshot, period.clone(), zone, &prices,
-            r#"["gpt-6.1-sol","gpt-6-astra"]"#).unwrap();
+        assert_eq!(
+            multi.query_session_detail("mixed").unwrap().timeline.len(),
+            3
+        );
+        let reverse = View::with_models(
+            &snapshot,
+            period.clone(),
+            zone,
+            &prices,
+            r#"["gpt-6.1-sol","gpt-6-astra"]"#,
+        )
+        .unwrap();
         assert_eq!(multi.revision, reverse.revision);
-        let today_scoped = View::with_models(&snapshot,
-            Period::bounds("today", None, None, zone, now).unwrap(), zone, &prices,
-            "gpt-6.1-sol").unwrap();
+        let today_scoped = View::with_models(
+            &snapshot,
+            Period::bounds("today", None, None, zone, now).unwrap(),
+            zone,
+            &prices,
+            "gpt-6.1-sol",
+        )
+        .unwrap();
         assert_eq!(today_scoped.summary().unwrap().usage.total_tokens, 3300);
-        assert_eq!(today_scoped.query_metric_trend(&Filter::default()).unwrap().granularity, "hour");
+        assert_eq!(
+            today_scoped
+                .query_metric_trend(&Filter::default())
+                .unwrap()
+                .granularity,
+            "hour"
+        );
         let empty = View::with_models(&snapshot, period.clone(), zone, &prices, "absent").unwrap();
         assert_eq!(empty.summary().unwrap().session_count, 0);
         let reset = View::with_models(&snapshot, period, zone, &prices, "[]").unwrap();
         assert_eq!(reset.revision, all.revision);
         assert_eq!(reset.summary().unwrap().usage.total_tokens, 13420);
-        assert_eq!(rows.iter().find(|r| r.model == "unpriced-model").unwrap().estimated_cost_usd, None);
-        assert_eq!(rows.iter().find(|r| r.model == "unknown").unwrap().usage.total_tokens, 6710);
-        let today = View::new(&snapshot, Period::bounds("today", None, None, zone, now).unwrap(), zone, &prices).unwrap();
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.model == "unpriced-model")
+                .unwrap()
+                .estimated_cost_usd,
+            None
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.model == "unknown")
+                .unwrap()
+                .usage
+                .total_tokens,
+            6710
+        );
+        let today = View::new(
+            &snapshot,
+            Period::bounds("today", None, None, zone, now).unwrap(),
+            zone,
+            &prices,
+        )
+        .unwrap();
         let summary = today.summary().unwrap();
-        assert_eq!(summary.model_breakdown.iter().map(|r| r.usage.total_tokens).sum::<i64>(), 5610);
-        assert_eq!(summary.model_breakdown.iter().find(|r| r.model == "gpt-6.1-sol").unwrap().usage.total_tokens, 3300);
-        assert_eq!(today.query_sessions(&Filter { search: "no-match".into(), ..Filter::default() }, "", 1).unwrap().summary.model_breakdown.len(), 0);
+        assert_eq!(
+            summary
+                .model_breakdown
+                .iter()
+                .map(|r| r.usage.total_tokens)
+                .sum::<i64>(),
+            5610
+        );
+        assert_eq!(
+            summary
+                .model_breakdown
+                .iter()
+                .find(|r| r.model == "gpt-6.1-sol")
+                .unwrap()
+                .usage
+                .total_tokens,
+            3300
+        );
+        assert_eq!(
+            today
+                .query_sessions(
+                    &Filter {
+                        search: "no-match".into(),
+                        ..Filter::default()
+                    },
+                    "",
+                    1
+                )
+                .unwrap()
+                .summary
+                .model_breakdown
+                .len(),
+            0
+        );
         let mut combined = BTreeMap::new();
         add_model_usage(&mut combined, "mixed", Usage::default(), Some(1.), true).unwrap();
         add_model_usage(&mut combined, "mixed", Usage::default(), None, false).unwrap();
@@ -1279,18 +1541,31 @@ mod tests {
     #[test]
     fn selected_session_checks_all_filtered_rows_and_distinguishes_missing_details() {
         let mut view = view(5, 1);
-        let filter = Filter { search: "other".into(), ..Default::default() };
+        let filter = Filter {
+            search: "other".into(),
+            ..Default::default()
+        };
         assert!(!view.session_matches(&filter, "one").unwrap());
         assert!(view.session_matches(&filter, "two").unwrap());
         let filter = Filter::default();
-        let first = view.query_sessions(&filter, "", 1).unwrap().items[0].uid.clone();
+        let first = view.query_sessions(&filter, "", 1).unwrap().items[0]
+            .uid
+            .clone();
         let other = if first == "one" { "two" } else { "one" };
         assert!(view.session_matches(&filter, other).unwrap());
         assert!(!view.session_matches(&filter, "absent").unwrap());
-        view.entries[*view.by_uid.get("one").unwrap()].indexed.has_detail = false;
+        view.entries[*view.by_uid.get("one").unwrap()]
+            .indexed
+            .has_detail = false;
         assert!(view.session_matches(&filter, "one").unwrap());
-        assert!(matches!(view.query_session_detail("one"), Err(QueryError::DetailsMissing)));
-        assert!(matches!(view.query_session_detail("absent"), Err(QueryError::Missing)));
+        assert!(matches!(
+            view.query_session_detail("one"),
+            Err(QueryError::DetailsMissing)
+        ));
+        assert!(matches!(
+            view.query_session_detail("absent"),
+            Err(QueryError::Missing)
+        ));
     }
     #[test]
     fn multi_select_filters_union_within_groups_intersect_across_groups() {
@@ -1298,32 +1573,102 @@ mod tests {
         let snapshot = Snapshot {
             revision: 1,
             generated_at: "2026-10-01T01:00:00Z".into(),
-            sessions: [("a", "local", "gpt-5", 100), ("b", "wsl", "gpt-6", 200),
-                ("c", "remote", "gpt-6", 400), ("d", "wsl", "other", 800)]
-                .into_iter().map(|(id, environment, model, tokens)| {
-                    let usage = Usage { total_tokens: tokens, ..Usage::default() };
-                    IndexedSession::from_detail(Arc::new(SessionDetail {
-                        identity: SessionIdentity { uid: id.into(), session_id: id.into(), ..SessionIdentity::default() },
-                        model: model.into(), environment_id: environment.into(), cwd: id.into(),
+            sessions: [
+                ("a", "local", "gpt-5", 100),
+                ("b", "wsl", "gpt-6", 200),
+                ("c", "remote", "gpt-6", 400),
+                ("d", "wsl", "other", 800),
+            ]
+            .into_iter()
+            .map(|(id, environment, model, tokens)| {
+                let usage = Usage {
+                    total_tokens: tokens,
+                    ..Usage::default()
+                };
+                IndexedSession::from_detail(Arc::new(SessionDetail {
+                    identity: SessionIdentity {
+                        uid: id.into(),
+                        session_id: id.into(),
+                        ..SessionIdentity::default()
+                    },
+                    model: model.into(),
+                    environment_id: environment.into(),
+                    cwd: id.into(),
+                    total_token_usage: usage,
+                    timeline: vec![RawEvent {
+                        timestamp: Some("2026-10-01T00:00:00Z".into()),
+                        model: model.into(),
                         total_token_usage: usage,
-                        timeline: vec![RawEvent { timestamp: Some("2026-10-01T00:00:00Z".into()), model: model.into(), total_token_usage: usage, ..RawEvent::default() }],
-                        ..SessionDetail::default()
-                    })).unwrap()
-                }).collect(),
+                        ..RawEvent::default()
+                    }],
+                    ..SessionDetail::default()
+                }))
+                .unwrap()
+            })
+            .collect(),
         };
-        let view = View::new(&snapshot, Period::bounds("all", None, None, chrono_tz::UTC,
-            timestamp::parse(&snapshot.generated_at).unwrap()).unwrap(), chrono_tz::UTC, &prices).unwrap();
-        let filter = Filter { model: r#"["gpt-5","gpt-6"]"#.into(), environment: r#"["local","wsl"]"#.into(), ..Filter::default() };
+        let view = View::new(
+            &snapshot,
+            Period::bounds(
+                "all",
+                None,
+                None,
+                chrono_tz::UTC,
+                timestamp::parse(&snapshot.generated_at).unwrap(),
+            )
+            .unwrap(),
+            chrono_tz::UTC,
+            &prices,
+        )
+        .unwrap();
+        let filter = Filter {
+            model: r#"["gpt-5","gpt-6"]"#.into(),
+            environment: r#"["local","wsl"]"#.into(),
+            ..Filter::default()
+        };
         let sessions = view.query_sessions(&filter, "", 100).unwrap();
         assert_eq!(sessions.total, 2);
         assert_eq!(sessions.summary.usage.total_tokens, 300);
-        assert_eq!(view.query_projects(&filter, "", 100).unwrap().summary.usage.total_tokens, 300);
-        assert_eq!(view.query_metric_trend(&filter).unwrap().points.iter().map(|p| p.usage.total_tokens).sum::<i64>(), 300);
-        let one = Filter { model: "gpt-6".into(), environment: "wsl".into(), ..Filter::default() };
-        assert_eq!(view.query_sessions(&one, "", 100).unwrap().summary.usage.total_tokens, 200);
-        let empty = Filter { model: "[]".into(), environment: "[]".into(), ..Filter::default() };
+        assert_eq!(
+            view.query_projects(&filter, "", 100)
+                .unwrap()
+                .summary
+                .usage
+                .total_tokens,
+            300
+        );
+        assert_eq!(
+            view.query_metric_trend(&filter)
+                .unwrap()
+                .points
+                .iter()
+                .map(|p| p.usage.total_tokens)
+                .sum::<i64>(),
+            300
+        );
+        let one = Filter {
+            model: "gpt-6".into(),
+            environment: "wsl".into(),
+            ..Filter::default()
+        };
+        assert_eq!(
+            view.query_sessions(&one, "", 100)
+                .unwrap()
+                .summary
+                .usage
+                .total_tokens,
+            200
+        );
+        let empty = Filter {
+            model: "[]".into(),
+            environment: "[]".into(),
+            ..Filter::default()
+        };
         assert_eq!(view.query_sessions(&empty, "", 100).unwrap().total, 4);
-        assert_eq!(filter_values(r#"["model,with,commas","other"]"#), vec!["model,with,commas", "other"]);
+        assert_eq!(
+            filter_values(r#"["model,with,commas","other"]"#),
+            vec!["model,with,commas", "other"]
+        );
     }
     #[test]
     fn all_events_page_once_with_stable_ties_and_bound_cursors() {
@@ -1603,32 +1948,49 @@ mod tests {
     #[test]
     fn recent_usage_ignores_log_updates_and_zero_deltas_in_every_period() {
         let make = |id: &str, project: &str, time: &str| {
-            let usage = Usage { total_tokens: 100, ..Usage::default() };
+            let usage = Usage {
+                total_tokens: 100,
+                ..Usage::default()
+            };
             IndexedSession::from_detail(Arc::new(SessionDetail {
                 identity: SessionIdentity {
-                    uid: id.into(), session_id: id.into(), root_session_id: id.into(),
+                    uid: id.into(),
+                    session_id: id.into(),
+                    root_session_id: id.into(),
                     ..SessionIdentity::default()
                 },
-                project: project.into(), project_root: project.into(),
+                project: project.into(),
+                project_root: project.into(),
                 // A settings update after the last usage must never affect recency.
                 end_at: "2026-10-22T06:36:38Z".into(),
                 updated_at: Some("2026-10-22T06:36:38Z".into()),
                 total_token_usage: usage,
                 timeline: vec![
-                    RawEvent { timestamp: Some(time.into()), total_token_usage: usage, ..RawEvent::default() },
-                    RawEvent { timestamp: Some("2026-10-22T06:00:00Z".into()), total_token_usage: usage, ..RawEvent::default() },
+                    RawEvent {
+                        timestamp: Some(time.into()),
+                        total_token_usage: usage,
+                        ..RawEvent::default()
+                    },
+                    RawEvent {
+                        timestamp: Some("2026-10-22T06:00:00Z".into()),
+                        total_token_usage: usage,
+                        ..RawEvent::default()
+                    },
                 ],
                 ..SessionDetail::default()
-            })).unwrap()
+            }))
+            .unwrap()
         };
         let mut empty = make("empty", "/empty", "2026-10-22T07:00:00Z");
         empty.detail = Arc::new(SessionDetail {
-            timeline: Vec::new(), total_token_usage: Usage::default(),
+            timeline: Vec::new(),
+            total_token_usage: Usage::default(),
             ..empty.detail.as_ref().clone()
         });
         empty.events = Arc::new(Vec::new());
         let snapshot = Snapshot {
-            revision: 1, generated_at: "2026-10-22T07:20:00Z".into(),
+            revision: 1,
+            generated_at: "2026-10-22T07:20:00Z".into(),
             sessions: vec![
                 make("old", "/old", "2026-10-21T15:00:00Z"),
                 make("example", "/example", "2026-10-21T16:42:35.828Z"),
@@ -1636,28 +1998,62 @@ mod tests {
                 empty,
             ],
         };
-        let filter = Filter { sort: "updated".into(), ..Filter::default() };
+        let filter = Filter {
+            sort: "updated".into(),
+            ..Filter::default()
+        };
         let now = timestamp::parse(&snapshot.generated_at).unwrap();
         let zone = chrono_tz::Asia::Shanghai;
         for period in ["all", "today"] {
-            let view = View::new(&snapshot, Period::bounds(period, None, None, zone, now).unwrap(), zone, &PriceSchedule::bundled()).unwrap();
+            let view = View::new(
+                &snapshot,
+                Period::bounds(period, None, None, zone, now).unwrap(),
+                zone,
+                &PriceSchedule::bundled(),
+            )
+            .unwrap();
             let sessions = view.query_sessions(&filter, "", 100).unwrap();
             assert_eq!(sessions.items[0].uid, "newer");
             let example = sessions.items.iter().find(|s| s.uid == "example").unwrap();
-            assert_eq!(example.last_usage_at.as_deref().and_then(timestamp::parse), timestamp::parse("2026-10-21T16:42:35.828Z"));
+            assert_eq!(
+                example.last_usage_at.as_deref().and_then(timestamp::parse),
+                timestamp::parse("2026-10-21T16:42:35.828Z")
+            );
             assert_eq!(example.total_token_usage.total_tokens, 100);
             let projects = view.query_projects(&filter, "", 100).unwrap();
             assert_eq!(projects.items[0].key, "/newer");
             let project = projects.items.iter().find(|p| p.key == "/example").unwrap();
-            assert_eq!(timestamp::parse(project.updated_at.as_deref().unwrap()), timestamp::parse(example.last_usage_at.as_deref().unwrap()));
-            let tasks = view.query_project_tasks(&filter, "/example", "", 100).unwrap();
-            assert_eq!(tasks.items[0].sessions[0].last_usage_at, example.last_usage_at);
+            assert_eq!(
+                timestamp::parse(project.updated_at.as_deref().unwrap()),
+                timestamp::parse(example.last_usage_at.as_deref().unwrap())
+            );
+            let tasks = view
+                .query_project_tasks(&filter, "/example", "", 100)
+                .unwrap();
+            assert_eq!(
+                tasks.items[0].sessions[0].last_usage_at,
+                example.last_usage_at
+            );
             let wire = view.wire_summaries().unwrap();
-            assert_eq!(wire.iter().find(|s| s["uid"] == "example").unwrap()["last_usage_at"], example.last_usage_at.as_deref().unwrap());
+            assert_eq!(
+                wire.iter().find(|s| s["uid"] == "example").unwrap()["last_usage_at"],
+                example.last_usage_at.as_deref().unwrap()
+            );
             let old = sessions.items.iter().find(|s| s.uid == "old");
             if period == "all" {
-                assert_eq!(old.unwrap().last_usage_at.as_deref(), Some("2026-10-21T15:00:00Z"));
-                assert!(sessions.items.iter().find(|s| s.uid == "empty").unwrap().last_usage_at.is_none());
+                assert_eq!(
+                    old.unwrap().last_usage_at.as_deref(),
+                    Some("2026-10-21T15:00:00Z")
+                );
+                assert!(
+                    sessions
+                        .items
+                        .iter()
+                        .find(|s| s.uid == "empty")
+                        .unwrap()
+                        .last_usage_at
+                        .is_none()
+                );
             } else {
                 // A repeated usage counter today does not constitute new usage.
                 assert!(old.unwrap().last_usage_at.is_none());
@@ -1680,7 +2076,10 @@ mod tests {
                 end_at: end.into(),
                 timeline: vec![RawEvent {
                     timestamp: Some(end.into()),
-                    total_token_usage: Usage { total_tokens: amount, ..Usage::default() },
+                    total_token_usage: Usage {
+                        total_tokens: amount,
+                        ..Usage::default()
+                    },
                     ..RawEvent::default()
                 }],
                 total_token_usage: Usage {

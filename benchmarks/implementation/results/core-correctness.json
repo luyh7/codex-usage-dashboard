@@ -3,10 +3,11 @@
   "checks": 39543,
   "price_grid_cases": 35235,
   "seed": 64321,
-  "comparison": "all public keys and types; exact integers and six-decimal floats",
-  "platform": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "comparison": "legacy keys and types; exact integers and six-decimal floats; paths/derived UIDs canonicalized; new pricing validity, recent-usage and summary facets tested separately in Rust",
+  "platform": "Windows-11-10.0.22631-SP0",
   "rust": "rustc 1.96.0 (ac68faa20 2026-05-25)",
   "source_sha256": "af792e659c6459aa2c3b805cdcfa3bd78a9679d1fec8610191d32d4394426641",
+  "failure_counts": {},
   "failures": [],
   "scope": "usage, normalized timeline, price lookup, rounding, price segments, streamed JSONL; raw session parser included; cross-file continuation, parent normalization and runtime tier merging included"
 }

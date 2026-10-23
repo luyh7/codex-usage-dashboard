@@ -525,11 +525,13 @@ pub fn detail_for_models_indexed(
     let detail = &indexed.detail;
     let mut filtered = detail_for_events(
         detail,
-        indexed.events.iter().filter_map(|e| Some((
-            &detail.timeline[e.source_order],
-            DateTime::from_timestamp_micros(e.timestamp_us)?,
-            e.delta,
-        ))),
+        indexed.events.iter().filter_map(|e| {
+            Some((
+                &detail.timeline[e.source_order],
+                DateTime::from_timestamp_micros(e.timestamp_us)?,
+                e.delta,
+            ))
+        }),
         DateTime::<Utc>::MIN_UTC,
         DateTime::<Utc>::MAX_UTC,
         pricing,
@@ -553,9 +555,8 @@ fn detail_for_events<'a>(
     let mut total = Usage::default();
     let mut last = Usage::default();
     let events: Vec<_> = events.collect();
-    let event_model = |source: &crate::RawEvent| {
-        fallback(&[&source.model, &detail.model]).to_owned()
-    };
+    let event_model =
+        |source: &crate::RawEvent| fallback(&[&source.model, &detail.model]).to_owned();
     let matches_model = |source: &crate::RawEvent| {
         selected_models.is_empty() || selected_models.contains(&event_model(source))
     };
@@ -586,11 +587,16 @@ fn detail_for_events<'a>(
             task.timestamp
                 .as_deref()
                 .and_then(timestamp::parse)
-                .is_some_and(|t| t >= start && t <= end && (
-                    selected_models.is_empty() || events.iter().rev()
-                        .find(|(_, time, _)| *time <= t)
-                        .is_some_and(|(source, _, _)| matches_model(source))
-                ))
+                .is_some_and(|t| {
+                    t >= start
+                        && t <= end
+                        && (selected_models.is_empty()
+                            || events
+                                .iter()
+                                .rev()
+                                .find(|(_, time, _)| *time <= t)
+                                .is_some_and(|(source, _, _)| matches_model(source)))
+                })
         })
         .cloned()
         .collect();

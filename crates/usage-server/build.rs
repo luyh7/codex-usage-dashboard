@@ -22,6 +22,7 @@ fn main() {
     for path in [
         "Cargo.toml",
         "Cargo.lock",
+        ".cargo/config.toml",
         "crates/usage-core/src",
         "crates/usage-core/Cargo.toml",
         "crates/usage-core/data",

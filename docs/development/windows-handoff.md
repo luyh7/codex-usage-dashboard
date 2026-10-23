@@ -3,7 +3,7 @@
 ## 分支与范围
 
 - 开发分支：`codex/rust-svelte-redesign`，包含 Rust 后端、原生启动/安装，以及 Svelte 的 Clear Mint 页面重构。
-- 稳定基线：`c42f0e8`（`Update OpenAI model pricing`）。本次不向 `main` 合并，不创建发布标签，不发布 npm 包或 GitHub Release。
+- 稳定基线：`c42f0e8`（`Update OpenAI model pricing`）。1.0.1 发布准备通过开发分支和草稿 PR 验收；main 合并、版本标签和 GitHub Release 留到正式发布时执行。
 - 页面原稿和规范：[Clear Mint](../design/clear-mint/README.md)。当前只有一个主题，Svelte 不提供深色或跟随系统模式。
 - `/` 直接打开重构后的 Svelte 页面，经典页面及其专属接口已删除。
 
@@ -56,4 +56,4 @@ Windows `v1.0.1` 已完成 MSVC 构建、原生安装/升级/启动/停止与 Ch
 
 `tools/verify_mint_ui.mjs` 使用隔离的虚构 API 数据；目前其浏览器路径针对 Linux，Windows 可先通过浏览器完成视觉校验，再适配自动化入口。本机 `output/` 截图和临时输出不上传；已采用的三张原稿与字体许可证随仓库保存。
 
-后续提交继续推送 `codex/rust-svelte-redesign`。合并和发布仍需单独执行。
+后续提交继续推送 `codex/rust-svelte-redesign`。合并和发布仍需单独执行，见[发布准备清单](../releases/prepare-1.0.1.md)。

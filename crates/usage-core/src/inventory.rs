@@ -226,6 +226,7 @@ impl Inventory {
         let mut present = HashSet::new();
         for source in self.sources.clone() {
             let ttl = history_ttl(&source.home);
+            let mut retried = HashSet::new();
             let mut pending = vec![
                 (source.home.join("archived_sessions"), "archived"),
                 (source.home.join("sessions"), "active"),
@@ -235,9 +236,8 @@ impl Inventory {
                 let Some((files, children)) = self.directory(&directory)? else {
                     continue;
                 };
-                if kind == "active" {
-                    pending.extend(children.into_iter().rev().map(|p| (p, kind)));
-                }
+                let result_start = result.len();
+                let mut missing = false;
                 for path in files {
                     let cached = self.metadata.get(&path).filter(|(checked, stamp)| {
                         stamp.modified_ns / 1_000_000_000 < epoch - 86400
@@ -250,7 +250,11 @@ impl Inventory {
                         self.metrics.metadata_checks += 1;
                         let stamp = match FileStamp::read(&path) {
                             Ok(stamp) => stamp,
-                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                                missing = true;
+                                self.metadata.remove(&path);
+                                continue;
+                            }
                             Err(e) => return Err(e),
                         };
                         self.metadata.insert(path.clone(), (now, stamp.clone()));
@@ -264,6 +268,16 @@ impl Inventory {
                         kind: kind.into(),
                         stamp,
                     });
+                }
+                // Directory timestamps can remain unchanged during a rapid
+                // plain/compressed replacement. A missing cached entry proves
+                // the listing stale: rediscover once before publishing usage.
+                if missing && retried.insert(directory.clone()) {
+                    self.directories.remove(&directory);
+                    result.truncate(result_start);
+                    pending.push((directory, kind));
+                } else if kind == "active" {
+                    pending.extend(children.into_iter().rev().map(|p| (p, kind)));
                 }
             }
         }
@@ -286,6 +300,34 @@ impl Inventory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_cached_plain_log_rediscovers_compressed_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("sessions");
+        fs::create_dir(&directory).unwrap();
+        let plain = directory.join("rollout.jsonl");
+        let compressed = plain.with_extension("jsonl.zst");
+        fs::write(&plain, b"{}\n").unwrap();
+        let mut inventory = Inventory::new(vec![LogSource {
+            id: "fixture".into(),
+            label: "Synthetic".into(),
+            home: root.path().into(),
+        }]);
+        assert_eq!(inventory.discover().unwrap()[0].path, plain);
+        fs::write(
+            &compressed,
+            zstd::stream::encode_all(&b"{}\n"[..], 1).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(&plain).unwrap();
+        // Reproduce a filesystem whose directory stamp did not expose the swap.
+        inventory.directories.get_mut(&directory).unwrap().stamp =
+            FileStamp::read(&directory).unwrap();
+        let files = inventory.discover().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, compressed);
+        assert_eq!(inventory.metrics.directory_reads, 2);
+    }
     #[test]
     fn historical_cache_hits_do_not_extend_expiry_and_hints_invalidate() {
         let root = tempfile::tempdir().unwrap();

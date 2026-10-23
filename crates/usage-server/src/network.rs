@@ -15,16 +15,24 @@ pub async fn bind(address: SocketAddr) -> io::Result<TcpListener> {
             Err(error) => {
                 let transient = cfg!(windows)
                     && error.kind() == io::ErrorKind::AddrInUse
-                    && tokio::time::timeout(Duration::from_millis(200), TcpStream::connect(address))
-                        .await
-                        .map_or(true, |result| result.is_err());
+                    && tokio::time::timeout(
+                        Duration::from_millis(200),
+                        TcpStream::connect(address),
+                    )
+                    .await
+                    .map_or(true, |result| result.is_err());
                 if !transient || tokio::time::Instant::now() >= deadline {
-                    return Err(io::Error::new(error.kind(), format!(
-                        "port 8765 unavailable: {error}. Another listener, a Windows port reservation, or a previous WSL binding may own it; no process was terminated and no alternate port was used"
-                    )));
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "port 8765 unavailable: {error}. Another listener, a Windows port reservation, or a previous WSL binding may own it; no process was terminated and no alternate port was used"
+                        ),
+                    ));
                 }
                 if !waiting {
-                    eprintln!("Waiting for Windows to release port 8765 after the previous listener exited (up to 5 minutes).");
+                    eprintln!(
+                        "Waiting for Windows to release port 8765 after the previous listener exited (up to 5 minutes)."
+                    );
                     waiting = true;
                 }
                 tokio::time::sleep(Duration::from_millis(250)).await;

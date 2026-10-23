@@ -2,7 +2,7 @@
 // Fresh installation and real native lifecycle, on 8765, with no Python on PATH.
 import assert from 'node:assert/strict';
 import {execFileSync,spawn} from 'node:child_process';
-import {mkdtemp,mkdir,readFile,writeFile,rm,copyFile,readdir} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,copyFile,readdir,chmod} from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -41,10 +41,19 @@ const health=async()=>{const r=await fetch(base+'/api/health',{headers:{Connecti
 const checks=[];
 try {
  assert.equal(run(process.execPath,[install,'--offline'],false),null);checks.push('missing offline artifact fails without fallback');
- run(process.execPath,installArgs);assert.equal((await readFile(path.join(skill,'SKILL.md'),'utf8')).includes('native executable'),true);
- assert(!(await readdir(path.join(skill,'scripts'))).some(name=>name.endsWith('.py')));checks.push('fresh offline install ships no Python backend or launcher');
  const rows=[{type:'session_meta',payload:{id:'native-only-fixture',model:'gpt-5',cwd:path.join(tmp,'project')}},{timestamp:'2026-10-01T00:00:00Z',type:'event_msg',payload:{type:'token_count',info:{total_token_usage:{input_tokens:10,output_tokens:2,total_tokens:12}}}}];
  await writeFile(path.join(codex,'sessions/rollout-native.jsonl'),rows.map(r=>JSON.stringify(r)).join('\n')+'\n');
+ // A manual download must work with its original asset filename and no skill.
+ const direct=path.join(tmp,entry.file);
+ await copyFile(path.join(root,'dist/release',entry.file),direct);await chmod(direct,0o755);
+ run(direct,launchArgs);await until(async()=> (await health()).index.phase==='ready');
+ assert.equal((await health()).build_id,entry.build_id);
+ assert.equal(JSON.parse(run(direct,['--once','--json','--codex-home',codex,'--no-auto-windows'])).summary.usage.total_tokens,12);
+ run(direct,['--stop']);assert(!await occupied());
+ checks.push('direct release download starts, reads logs and stops without a skill or interpreters');
+ run(process.execPath,installArgs);assert.equal((await readFile(path.join(skill,'SKILL.md'),'utf8')).includes('native executable'),true);
+ assert.deepEqual(await readFile(binary),await readFile(direct));
+ assert(!(await readdir(path.join(skill,'scripts'))).some(name=>name.endsWith('.py')));checks.push('fresh offline skill install uses exactly the same executable as the direct download');
  run(binary,launchArgs);await until(async()=> (await health()).index.phase==='ready');
  let h=await health();assert.equal(h.build_id,entry.build_id);assert.equal(h.implementation,'rust');assert.equal(h.ui,'svelte');
  const page=await(await fetch(base,{headers:{Connection:'close'}})).text();
@@ -90,6 +99,12 @@ try {
  await writeFile(path.join(skill,'scripts/open_dashboard.py'),'obsolete');
  const transport=path.join(tmp,'release-transport.mjs');
  await writeFile(transport,`import {readFile} from 'node:fs/promises';\nconst manifest=${JSON.stringify(manifest)};\nconst artifact=${JSON.stringify(path.join(root,'dist/release',entry.file))};\nglobalThis.fetch=async url=>{if(!String(url).includes('/v'+manifest.version+'/'))throw Error('Wrong release requested');return {ok:true,url:String(url),body:[String(url).endsWith('/manifest.json')?Buffer.from(JSON.stringify(manifest)):await readFile(artifact)]}};\n`);
+ const skillOnly=path.join(tmp,'skill-only');await mkdir(path.join(skillOnly,'scripts'),{recursive:true});
+ for(const file of ['SKILL.md','native.json','scripts/install_runtime.mjs'])await copyFile(path.join(root,'skills/codex-usage-dashboard',file),path.join(skillOnly,file));
+ const freshBinary=path.join(skillOnly,'runtime',binaryName());
+ assert.equal(run(process.execPath,['--import',pathToFileURL(transport).href,path.join(skillOnly,'scripts/install_runtime.mjs'),'--ensure']).trim(),freshBinary);
+ assert.deepEqual(await readFile(freshBinary),await readFile(direct));
+ checks.push('fresh skill-only installation downloads and verifies the same release executable (mock HTTPS transport)');
  assert.equal(run(process.execPath,['--import',pathToFileURL(transport).href,ensure,'--ensure']).trim(),binary);
  assert.equal(JSON.parse(await readFile(path.join(runtime,'manifest.json'),'utf8')).version,manifest.version);
  assert(!(await readdir(path.join(skill,'scripts'))).includes('open_dashboard.py'));
