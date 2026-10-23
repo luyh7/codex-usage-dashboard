@@ -1,6 +1,6 @@
 # 桌面验证记录
 
-Windows、Linux 开发包已实现并完成下列验证；完整三端验收尚未完成。用户确认当前没有 Mac 或现成 macOS CI，保留 macOS 未验证项。构建矩阵配置不能作为实机通过的证据。
+Windows、Linux 开发包已实现并完成下列验证；完整三端验收尚未完成。用户没有 Mac 实机，已授权通过草稿 PR #9 执行新的 GitHub Actions 四目标矩阵。云端结果补齐中，构建及启动不能作为交互实机通过的证据。
 
 ## 基线与制品
 
@@ -44,6 +44,8 @@ Windows：11 Pro 10.0.22631，x64，WebView2 155.0.4283.62。Linux：WSLg Ubuntu
 - Windows/Linux 覆盖或重装后设置与导入文件 SHA256、设备身份不变；移除后仍能查询保留的 24K 虚构用量。
 
 曾出现一次 Windows CLI 冷启动超时和一次宿主烟测超时，确切原因尚未定位。随后隔离 CLI 冷启动、安装后启动、覆盖后启动均通过；10 个全新状态目录的连续宿主冷启动也全部通过，约 0.85–3.10 秒。证据：windows-cold-starts.json。后续通过不代表已经证实前两次超时的根因。
+
+2026-10-24 延续验证发现一个 WSLg AppImage 实例已退出，日志尾部有 `free(): corrupted unsorted chunks`，触发原因未确定。日志保留为 linux-appimage-heap-crash.log；同包连续三次受控退出返回 0 且无该错误，不能据此宣布根因已消除。Linux 对自有服务发送 SIGTERM 后约 5.6 秒恢复为新 PID，宿主与业务数据保留，见 linux-service-recovery.json。Windows 24K 小夹具的 30 秒空闲采样，9 个宿主/服务/WebView 进程 CPU 增量为 0，私有内存约 268 MiB；这不是长期或大负载指标。Linux 采样期间子进程集合发生变化，不据此宣称完整空闲资源通过。
 
 真实界面检查修复了 AppImage 保存框默认进入临时解包目录的问题；现默认文档目录，不存在时用用户主目录。新包已实测：Windows 打开文档目录并取消；Linux 打开用户主目录，导出到中文/空格路径，解压后确认一个会话、12K 本机用量，并在真实 WebKit 文件选择器中导入 Windows 快照，合计仍为 24K。日志来源选择从用户主目录开始。
 

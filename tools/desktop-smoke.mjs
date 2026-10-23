@@ -63,7 +63,7 @@ try{
 }finally{
   try{await activate('quit');}catch{}
   try{await withDeadline(exited,10000,'Host exit timed out');}catch{child.kill();await exited;}
-  if(startupMs!==undefined&&child.exitCode===0){const prefs=JSON.parse(await readFile(path.join(state,'desktop-settings.json'),'utf8'));assert(prefs.width>0&&prefs.height>0,'Explicit quit must save window geometry');}
+  if(startupMs!==undefined&&child.exitCode===0){const prefs=JSON.parse(await readFile(path.join(state,'desktop-settings.json'),'utf8'));assert(prefs.width>0&&prefs.height>0,'Explicit quit must save window geometry: '+JSON.stringify(prefs));}
   await log.close();
   let stopped=!record;
   if(record){for(let i=0;i<50;i++){try{const health=await(await fetch('http://'+record.address+'/api/health',{signal:AbortSignal.timeout(200)})).json();if(health.instance_id!==record.instance_id){stopped=true;break;}await pause(100);}catch{stopped=true;break;}}}

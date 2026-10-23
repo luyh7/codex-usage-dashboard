@@ -123,7 +123,7 @@ fn client_size(window: &WebviewWindow) -> Option<(f64, f64)> {
     {
         let size = window.inner_size().ok()?;
         let scale = window.scale_factor().unwrap_or(1.);
-        Some((
+        (size.width > 0 && size.height > 0 && scale.is_finite() && scale > 0.).then_some((
             f64::from(size.width) / scale,
             f64::from(size.height) / scale,
         ))
@@ -135,6 +135,9 @@ fn save_window(app: &tauri::AppHandle) {
     };
     let state = app.state::<Desktop>();
     let mut prefs = read_window(&state.root);
+    // Preserve a usable restore size even when the first window opens maximized.
+    prefs.width.get_or_insert(1380.);
+    prefs.height.get_or_insert(900.);
     prefs.maximized = window.is_maximized().unwrap_or(false);
     if !prefs.maximized
         && let Some((width, height)) = client_size(&window)
@@ -670,8 +673,9 @@ fn main() {
         RunEvent::ExitRequested { .. } => {
             // Window close already hides without destroying the window. Allow
             // explicit Dock/system Quit, while saving state and stopping recovery.
-            app.state::<Desktop>().closing.store(true, Ordering::SeqCst);
-            save_window(app);
+            if !app.state::<Desktop>().closing.swap(true, Ordering::SeqCst) {
+                save_window(app);
+            }
         }
         RunEvent::Exit => {
             let state = app.state::<Desktop>();
