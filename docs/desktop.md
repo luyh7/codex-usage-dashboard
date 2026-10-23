@@ -105,6 +105,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 cargo fmt --manifest-path desktop/Cargo.toml --check
 cargo clippy --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path desktop/Cargo.toml --release --locked
 npm run check --prefix web
 npm test --prefix web
 node --test tools/runtime.test.mjs tools/security.test.mjs tools/desktop-update.test.mjs

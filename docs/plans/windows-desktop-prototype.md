@@ -1,6 +1,6 @@
 # Windows、macOS、Linux 桌面客户端实施计划
 
-状态：主体实现已落地；应用源码 e28dcc4 的四目标构建、启动与测试源更新均通过，Windows、Linux 最新开发包已有真实界面、安装和大快照证据，完整三端验收未完成。Windows CI 安装包在 Windows 11 复验通过，Ubuntu 22.04 CI 包在 WSLg 和 Debian 12 用户环境复验通过。macOS 两架构已在 CI 验证，但没有实机，用户确认保留人工交互未验证项。实现与命令说明见 [桌面客户端](../desktop.md)，逐平台证据与缺口见 [验证记录](../desktop-verification.md)。下文工作树交接段保留规划时状态，当前任务在 `codex/cross-platform-desktop` 的独立 worktree 实施。
+状态：主体实现已落地；应用源码 4ee9271 的四目标构建、启动、目录记录测试与测试源更新均通过，Windows、Linux 最新开发包已有真实界面、安装和大快照证据，完整三端验收未完成。Windows CI 安装包在 Windows 11 复验通过，Ubuntu 22.04 CI 包在 WSLg 和 Debian 12 用户环境复验通过，包含目录记忆及保留检查。macOS 两架构已在 CI 验证，但没有实机，用户确认保留人工交互未验证项。之后提交仅更新文档，应用源码不变。实现与命令说明见 [桌面客户端](../desktop.md)，逐平台证据与缺口见 [验证记录](../desktop-verification.md)。下文工作树交接段保留规划时状态，当前任务在 `codex/cross-platform-desktop` 的独立 worktree 实施。
 
 ## 目标
 
