@@ -30,7 +30,7 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if value}
     <div class="row"><span>{lang === 'zh' ? '关闭窗口' : 'Close window'}</span><Dropdown label={lang === 'zh' ? '关闭窗口' : 'Close window'} value={value.hide_on_close ? 'hide' : 'quit'} options={value.can_hide ? [['quit', lang === 'zh' ? '退出应用' : 'Quit'], ['hide', lang === 'zh' ? '保留在托盘' : 'Keep in tray']] : [['quit', lang === 'zh' ? '系统默认' : 'System default']]} change={v => save({ hide_on_close: v === 'hide' })} /></div>
-    <div class="row"><label for="autostart">{lang === 'zh' ? '登录时启动' : 'Start at login'}</label><input id="autostart" type="checkbox" checked={value.autostart} disabled={busy} onchange={e => save({ autostart: e.currentTarget.checked })} /></div>
+    <div class="row"><label for="autostart">{lang === 'zh' ? '登录时启动' : 'Start at login'}</label><input id="autostart" type="checkbox" checked={value.autostart} disabled={busy} onchange={e => { const autostart = e.currentTarget.checked; e.currentTarget.checked = value?.autostart ?? false; void save({ autostart }); }} /></div>
     <div class="row"><span>{value.version}</span><button disabled={busy} onclick={() => check()}>{lang === 'zh' ? '检查更新' : 'Check for updates'}</button></div>
     {#if update?.state === 'current'}<p role="status">{lang === 'zh' ? '已是最新版本' : 'Up to date'}</p>{/if}
     {#if update?.state === 'unavailable'}<p role="status">{lang === 'zh' ? '此开发包尚未配置签名更新渠道。' : update.message}</p>{/if}
