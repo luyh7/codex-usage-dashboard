@@ -1,11 +1,15 @@
 # Codex Usage Dashboard
 
-Codex Usage Dashboard is a Codex-only skill for viewing local OpenAI Codex usage.
+Codex Usage Dashboard shows local OpenAI Codex usage. Install it as a Codex skill or run the standalone executable; both use the same native program and browser dashboard.
 
 It reads your local Codex session logs and opens a browser dashboard for per-conversation usage: total tokens, output tokens, estimated dollar cost, cache hit rate, turns, model, reasoning effort, tool calls, and token-count timeline. It can also import JSON snapshots exported from other devices, so each machine can show local realtime usage plus manually imported remote usage.
 
 > Currently only supports OpenAI Codex. It is not a Claude Code, Cursor, Continue, or generic OpenAI API dashboard.
 <img width="1830" height="1041" alt="Codex Usage Dashboard project view" src="assets/codex-usage-dashboard.png" />
+
+The dashboard uses a native Rust backend and a Svelte interface at `http://127.0.0.1:8765/`. The classic interface and Python runtime have been removed.
+
+See the [Windows development handoff](docs/development/windows-handoff.md) for checkout, build and verification instructions, and [approved designs](docs/design/README.md) for the UI reference.
 
 ## Why This Exists
 
@@ -23,13 +27,12 @@ Recommended global Codex install:
 npx skills add luyh7/codex-usage-dashboard -g -a codex -y
 ```
 
-Then restart Codex or open a new Codex conversation. Type `/usage`, then select the **Codex Usage Dashboard** skill.
-
-The skill opens the local dashboard in your browser.
+Invoke `$codex-usage-dashboard`, or select **Codex Usage Dashboard** in the skill picker. The skill checks its runtime on every invocation and installs the matching native release when missing or outdated, including after a skills CLI update. This check requires Node 18+; downloads require a published release. The verified executable opens the dashboard at the root URL. Direct native launches need no Node.
 
 ## Install With npx
 
-GitHub installer:
+The installer downloads and verifies the native artifact for your platform, then installs the skill. Node 18+ is needed only for installation:
+
 
 ```bash
 npx github:luyh7/codex-usage-dashboard
@@ -47,6 +50,30 @@ Install and open immediately:
 npx github:luyh7/codex-usage-dashboard -- --open
 ```
 
+## Download and Run
+
+Download the executable for your platform from [GitHub Releases](https://github.com/luyh7/codex-usage-dashboard/releases). The skill installer downloads these same files automatically; manual downloads need no skill, Node.js, Python, or Rust.
+
+| Platform | Filename contains |
+| --- | --- |
+| Windows x64 | `windows-x64` (ends in `.exe`) |
+| Linux x64, glibc (built on Ubuntu 22.04) | `linux-x64` |
+| macOS Intel | `darwin-x64` |
+| macOS Apple Silicon | `darwin-arm64` |
+
+On Windows, save the `.exe` in a permanent folder and run it. On macOS/Linux, rename the downloaded executable to `codex-usage-dashboard`, then run:
+
+```bash
+chmod +x ./codex-usage-dashboard
+./codex-usage-dashboard
+```
+
+The program starts in the background and opens `http://127.0.0.1:8765/` in your browser. Keep the file in place while it runs. Use the same executable with `--stop` to stop it or `--shortcut` to create an optional shortcut. To update a manual installation, stop the old program before replacing it.
+
+Release files are not code-signed or notarized, so Windows or macOS may require explicit approval through the operating system's security settings. Linux ARM, Windows ARM, and musl/Alpine are not currently included. GitHub's **Source code** archives do not contain the executable.
+
+`manifest.json` serves the skill installer. To verify a manual download against `SHA256SUMS`, use `Get-FileHash .\<downloaded-file>.exe -Algorithm SHA256` in PowerShell, `sha256sum <downloaded-file>` on Linux, or `shasum -a 256 <downloaded-file>` on macOS, and compare the hash for that exact filename.
+
 ## Features
 
 - Per-conversation Codex usage from local session logs.
@@ -62,86 +89,105 @@ npx github:luyh7/codex-usage-dashboard -- --open
 - Token-count timeline with latest entries shown first.
 - Tool call counts, project path, log file path, and session metadata.
 - Local and read-only: reads Codex session logs from one or more local Codex homes; does not modify Codex logs.
+- Reads both `.jsonl` and Codex's automatically compressed `.jsonl.zst` histories, including archived logs. Compression and resuming a log preserve usage without counting both file representations twice.
 - Reuses unchanged remote snapshots and cached session directory listings. Active logs are checked on every refresh; historical file metadata on Windows drives mounted under WSL is reused for up to two seconds between refreshes. Date filters also check the last event time inside logs whose file modification time is stale. New files, replacements, and archive moves invalidate their directory cache on the next refresh.
-- Manual multi-device snapshots: export `cousash-<device-short-code>.json` from one device and import it into another dashboard as remote data.
+- Manual multi-device snapshots: export `cousash-<device-short-code>.json.gz` from one device and import it into another dashboard as remote data. Legacy `.json` snapshots remain supported.
 - WSL + Windows support: when running in WSL, automatically merges WSL `~/.codex` with Windows `/mnt/c/Users/<you>/.codex` when present.
-- Cross-platform: works on Windows and macOS with Python 3.
+- Native builds for Linux, Windows and macOS; a matching platform artifact is required.
 - No API key required.
 
-## What Gets Installed
+## Installation and Build
 
-The standard skills CLI installs:
-
-```text
-~/.codex/skills/codex-usage-dashboard
-```
-
-The bundled npm installer copies the same skill to that location.
-
-Repository layout:
+The npm installer uses `~/.agents/skills/codex-usage-dashboard`, or
+`$CODEX_HOME/skills/codex-usage-dashboard` when `CODEX_HOME` is explicitly set.
+The skills CLI may select its own skill location. Inside the installed skill:
 
 ```text
-skills/
-  codex-usage-dashboard/
-    SKILL.md
-    agents/openai.yaml
-    scripts/open_dashboard.py
-    scripts/export_snapshot.py
-    scripts/codex_usage_dashboard.py
-    scripts/install_desktop_shortcut.py
-    assets/codex_usage_dashboard.ico
+SKILL.md
+native.json
+scripts/install_runtime.mjs     # install/update/readiness check
+runtime/codex-usage-dashboard   # .exe on Windows; sole runtime entry
+runtime/manifest.json
 ```
 
-## Manual Launch
-
-After installation:
+Downloads use the versioned GitHub Release declared in `native.json`, with SHA256
+and build identity verification. Missing, unsupported or invalid artifacts fail
+installation; there is no Python fallback. A repository checkout alone does not
+include generated native artifacts. For development or before the matching
+release is published, build and install locally:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
+node tools/package_release.mjs
+node bin/install.js --runtime-manifest dist/release/manifest.json --offline
 ```
 
-On macOS you may need:
+Building requires Rust stable and Node.js 24+; Windows builds also need Visual Studio C++ Build Tools and the Windows SDK. Running the installed binary requires none of these tools.
+The build embeds only the Svelte dashboard assets. Build `web/dist` before running Cargo; builds fail when the dashboard assets are missing.
+See [release and rollback](docs/implementation/release-and-rollback.md) for
+platform acceptance status and offline distribution.
+
+## Launch and Stop
+
+On Linux/macOS with the default npm installation path:
 
 ```bash
-python3 ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --stop
 ```
 
-The dashboard opens at:
+On Windows, run `runtime/codex-usage-dashboard.exe` from the installed skill.
+The default action starts or reuses the background service and opens
+`http://127.0.0.1:8765/`. Use `--no-browser` to suppress opening the browser,
+`--serve` for a foreground server, or `--shortcut` to create a native desktop entry.
+The launcher authenticates managed processes before replacement; an unrelated or
+unmanaged listener on 8765 is left running and reported as an error.
 
-```text
-http://127.0.0.1:8765/
-```
+## Developer Checks
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace --locked`, `npm run check --prefix web`, `npm test --prefix web`,
+and `node --test tools/release.test.mjs` cover the implementation and release assembly.
+After packaging with `node tools/package_release.mjs`, run
+`node tools/verify_native.mjs --replace-worktree` to verify both installation routes on port 8765 and restore the worktree dashboard. The native verifier
+uses an empty PATH to prove launch/export/stop do not invoke Python or Node.
+Python is used only by optional historical differential tests under `tools/`,
+`tests/`, and `benchmarks/`; their oracle is read from pinned Git history into a
+temporary directory and is never installed or used as an application backend.
+The release CI also runs this differential check on every supported platform.
+See the [release checklist](docs/releases/prepare-1.0.1.md) and [1.0.1 notes](docs/releases/v1.0.1.md).
 
 ## Manual Multi-Device Usage
 
 Open the dashboard on the receiving device:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/open_dashboard.py
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard
 ```
 
 Export a snapshot on another device from the dashboard's **Export Snapshot** button, or run:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/export_snapshot.py
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --export-snapshot
 ```
 
-The export command writes a JSON file named like:
+Dashboard exports display a percentage with preparation, compression and download stages. Percentages follow processed session events and downloaded bytes. Concurrent exports share one job, and an unchanged local snapshot can reuse the completed export.
+
+The export command writes a losslessly compressed JSON file named like:
 
 ```text
-cousash-mac-9f3a72c1.json
+cousash-mac-9f3a72c1.json.gz
 ```
 
-Snapshot filenames retain the legacy `cousash-` prefix for compatibility.
+Snapshot filenames retain the legacy `cousash-` prefix for compatibility. Compression preserves all statistics, session details and token timeline events. To export uncompressed JSON for an older dashboard, specify an explicit `.json` path with `--export-snapshot snapshot.json`; `/api/export.json` also remains available.
 
-In the dashboard, use **Import Remote Data** to import that JSON file. The device short code is stored inside the file and is used as the stable identity. Re-importing a newer file from the same device updates that remote data incrementally by session id. If there is no matching remote device yet, the dashboard asks for a display name.
+In the dashboard, use **Import Remote Data** to import a `.json.gz` or legacy `.json` file. The server automatically decompresses gzip files; both the upload and decompressed JSON are limited to 512 MiB. The device short code is stored inside the file and is used as the stable identity. Re-importing a newer file from the same device updates that remote data incrementally by session id. If there is no matching remote device yet, the dashboard asks for a display name.
 
 Imported remote snapshots are stored outside the skill directory in the user's application config directory, so reinstalling the skill does not remove them. Remote data can be renamed or deleted from **Manage Remote Data**; deletion is permanent.
 
 To force specific log roots, pass `--codex-home` one or more times:
 
 ```bash
-python ~/.codex/skills/codex-usage-dashboard/scripts/codex_usage_dashboard.py \
+~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard \
   --codex-home ~/.codex \
   --codex-home /mnt/c/Users/<you>/.codex
 ```
@@ -171,6 +217,7 @@ This is a local dashboard. It does not upload your Codex logs. It starts a local
 ## Limitations
 
 - Codex-only: designed for OpenAI Codex Desktop/CLI local session logs.
+- Temporary Codex side chats (`ephemeral: true`) are not counted because they do not persist the session logs this dashboard reads. These chats still consume model usage, so dashboard totals exclude that activity.
 - Cost is an estimate from public API prices, including the documented Fast mode multiplier, and may not match ChatGPT/Codex subscription billing.
 - `codex-auto-review` is shown as $0.00 by dashboard convention; this is not a public API unit price.
 - Automatic remote syncing across machines is not included. Multi-device support is manual export/import. WSL + Windows works on the same machine when the Windows profile is mounted under `/mnt/c`.

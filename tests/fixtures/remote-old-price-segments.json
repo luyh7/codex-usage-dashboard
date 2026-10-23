@@ -1,0 +1,18 @@
+{
+  "schema": "cousash.remote-snapshot",
+  "version": 1,
+  "device": {"short_code": "old-segments", "label": "Synthetic old segments"},
+  "snapshot": {
+    "generated_at": "2026-07-09T17:01:00Z",
+    "sessions": [{"uid": "old-uid", "session_id": "old-session", "model": "gpt-5", "total_token_usage": {"input_tokens": 100, "total_tokens": 100}, "estimated_cost_usd": 17.5, "estimated_cost_breakdown_usd": {"input_tokens": 17.5}, "price_model_known": true}],
+    "details_by_uid": {
+      "old-uid": {
+        "uid": "old-uid", "session_id": "old-session", "model": "gpt-5",
+        "total_token_usage": {"input_tokens": 100, "total_tokens": 100},
+        "estimated_cost_usd": 17.5, "estimated_cost_breakdown_usd": {"input_tokens": 17.5}, "price_model_known": true,
+        "timeline": [{"timestamp": "2026-07-09T17:00:00Z", "total_token_usage": {"input_tokens": 100, "total_tokens": 100}}],
+        "applied_price_segments": [{"model": "gpt-5", "prices": {"input": 1.25, "cached_input": 0.125, "output": 10.0}, "usage": {"input_tokens": 100}, "estimated_cost_usd": 17.5, "estimated_cost_breakdown_usd": {"input_tokens": 17.5}}]
+      }
+    }
+  }
+}

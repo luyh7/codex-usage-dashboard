@@ -1,0 +1,1 @@
+{"scope":"500 explicitly generated historical files on the Windows mount; one diagnostic pass, not a release benchmark", "python_stat_ms":586.2704690007376,"rust_metadata_ms":661.561267,"rust_libc_stat_ms":527.80379,"rust_fstatat_ms":588.255521,"conclusion":"No syscall change shipped. The inventory TTL expired during a full sweep; production retains std metadata."}

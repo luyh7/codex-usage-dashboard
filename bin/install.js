@@ -1,90 +1,31 @@
 #!/usr/bin/env node
 "use strict";
-
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const cp = require("child_process");
-
-const SKILL_NAME = "codex-usage-dashboard";
-const repoRoot = path.resolve(__dirname, "..");
-const sourceSkill = path.join(repoRoot, "skills", SKILL_NAME);
-const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-const targetRoot = path.join(codexHome, "skills");
-const targetSkill = path.join(targetRoot, SKILL_NAME);
-const removedAliasSkills = ["cousash-open", "cousash-export"];
-const args = new Set(process.argv.slice(2));
-
-function copyRecursive(src, dest) {
-  const stat = fs.statSync(src);
-  if (stat.isDirectory()) {
-    fs.mkdirSync(dest, { recursive: true });
-    for (const entry of fs.readdirSync(src)) {
-      if (entry === "__pycache__" || entry === ".DS_Store") continue;
-      copyRecursive(path.join(src, entry), path.join(dest, entry));
-    }
-    return;
-  }
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
+const fs=require('fs');
+const path=require('path');
+const os=require('os');
+const cp=require('child_process');
+const {pathToFileURL}=require('url');
+const name='codex-usage-dashboard';
+const root=path.resolve(__dirname,'..');
+const source=path.join(root,'skills',name);
+// Current Codex user skill location; CODEX_HOME remains an explicit override.
+const target=path.join(process.env.CODEX_HOME?path.join(process.env.CODEX_HOME,'skills'):path.join(os.homedir(),'.agents','skills'),name);
+function copy(src,dest) {
+  if(fs.statSync(src).isDirectory()) {
+    fs.mkdirSync(dest,{recursive:true});
+    for(const entry of fs.readdirSync(src)) if(!['runtime','__pycache__','.DS_Store'].includes(entry)) copy(path.join(src,entry),path.join(dest,entry));
+  } else fs.copyFileSync(src,dest);
 }
-
-function removeIfExists(target) {
-  if (fs.existsSync(target)) {
-    fs.rmSync(target, { recursive: true, force: true });
-  }
+async function main() {
+  const args=process.argv.slice(2);const flag=args.indexOf('--runtime-manifest');
+  if(flag>=0 && (!args[flag+1]||args[flag+1].startsWith('--'))) throw Error('--runtime-manifest requires a manifest path or HTTPS URL');
+  const {installRuntime}=await import(pathToFileURL(path.join(source,'scripts/install_runtime.mjs')));
+  // Finish artifact verification before replacing the installed skill.
+  const binary=await installRuntime({manifest:flag<0?undefined:args[flag+1],offline:args.includes('--offline'),rollback:args.includes('--rollback-native'),runtimeRoot:path.join(target,'runtime')});
+  copy(source,target);
+  for(const alias of ['cousash-open','cousash-export']) fs.rmSync(path.join(path.dirname(target),alias),{recursive:true,force:true});
+  console.log(`Installed ${name}: ${target}\nInvoke $codex-usage-dashboard in Codex, or run:\n  "${binary}"`);
+  if(args.includes('--shortcut')) cp.execFileSync(binary,['--shortcut'],{stdio:'inherit'});
+  if(args.includes('--open')) cp.execFileSync(binary,[],{stdio:'inherit'});
 }
-
-function findPython() {
-  const candidates = process.platform === "win32"
-    ? ["python.exe", "py.exe"]
-    : ["python3", "python"];
-
-  for (const candidate of candidates) {
-    const result = cp.spawnSync(candidate, ["--version"], { stdio: "ignore" });
-    if (result.status === 0) return candidate;
-  }
-  return null;
-}
-
-function runPython(script) {
-  const python = findPython();
-  if (!python) {
-    console.warn("Python was not found. The skill is installed, but shortcut/open commands need Python 3.");
-    return;
-  }
-  cp.spawnSync(python, [script], { stdio: "inherit" });
-}
-
-if (!fs.existsSync(sourceSkill)) {
-  console.error(`Missing bundled skill: ${sourceSkill}`);
-  process.exit(1);
-}
-
-fs.mkdirSync(targetRoot, { recursive: true });
-for (const name of removedAliasSkills) {
-  removeIfExists(path.join(targetRoot, name));
-}
-if (args.has("--force") || args.has("-f")) {
-  removeIfExists(targetSkill);
-}
-copyRecursive(sourceSkill, targetSkill);
-
-console.log(`Installed ${SKILL_NAME} to: ${targetSkill}`);
-console.log("");
-console.log("Codex-only: this is a Codex skill and currently only works in OpenAI Codex.");
-console.log("Restart Codex or open a new Codex conversation, then ask:");
-console.log("  Use $codex-usage-dashboard to open Codex Usage Dashboard");
-console.log("");
-console.log("Standard skills CLI install:");
-console.log("  npx skills add luyh7/codex-usage-dashboard -g -a codex -y");
-console.log("");
-console.log("Direct launch:");
-console.log(`  python "${path.join(targetSkill, "scripts", "open_dashboard.py")}"`);
-
-if (args.has("--shortcut")) {
-  runPython(path.join(targetSkill, "scripts", "install_desktop_shortcut.py"));
-}
-if (args.has("--open")) {
-  runPython(path.join(targetSkill, "scripts", "open_dashboard.py"));
-}
+main().catch(error=>{console.error(`Installation failed: ${error.message}\nA matching Rust executable is required. For a local build, use --runtime-manifest /path/to/manifest.json --offline.`);process.exitCode=1});

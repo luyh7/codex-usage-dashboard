@@ -1,0 +1,75 @@
+/* Every hover hint shares one visual treatment, including chart readouts. */
+.ui-tooltip,
+.metric-tooltip,
+.chart-tooltip {
+  width: max-content;
+  max-width: min(330px, calc(100vw - 16px));
+  padding: 9px 12px;
+  border: 1px solid #d8e8e1;
+  border-radius: 9px;
+  background: #fbfefc;
+  color: #264b40;
+  box-shadow: 0 4px 16px #143f3014, 0 1px 3px #143f3008;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: normal;
+  text-align: left;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.ui-tooltip,
+.metric-tooltip {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 200;
+  max-height: calc(100dvh - 16px);
+  overflow: hidden;
+}
+.metric-tooltip-title,
+.chart-tooltip span { color: #668275; font-size: 11px; }
+.metric-tooltip-row > span { color: #668275; }
+.metric-tooltip-row > b,
+.chart-tooltip strong { color: #264b40; font-weight: 600; }
+.price-tooltip {
+  max-width: min(560px, calc(100vw - 16px));
+  padding: 11px 13px;
+  white-space: normal;
+}
+.price-tooltip .tooltip-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.price-tooltip .tooltip-table + .tooltip-table { margin-top: 12px; }
+.price-tooltip caption { padding: 0 0 7px; text-align: left; font-weight: 600; color: #264b40; }
+.price-tooltip caption .session-metadata { margin-top: 0; gap: 6px; font-size: 12px; }
+.price-tooltip .tooltip-price-period { margin-top: 4px; color: #789185; font-size: 10px; font-weight: 400; overflow-wrap: normal; }
+.price-tooltip th,
+.price-tooltip td { padding: 4px 0 4px 16px; text-align: right; white-space: nowrap; background: transparent; border: 0; }
+.price-tooltip th:first-child { padding-left: 0; text-align: left; }
+.price-tooltip thead th { padding-top: 0; padding-bottom: 5px; border-bottom: 1px solid #e3eee8; color: #789185; font-size: 10px; font-weight: 400; }
+.price-tooltip tbody th { color: #668275; font-weight: 400; }
+.price-tooltip td:last-child { font-weight: 600; }
+.price-tooltip tbody i { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; vertical-align: 1px; }
+.price-tooltip .tooltip-subrow th:first-child { position: relative; padding-left: 18px; }
+.price-tooltip .tooltip-subrow th:first-child::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  bottom: 50%;
+  width: 10px;
+  height: calc(100% - 8px);
+  border-left: 1px solid #bdd3c7;
+  border-bottom: 1px solid #bdd3c7;
+  border-bottom-left-radius: 4px;
+  pointer-events: none;
+}
+.price-tooltip .tooltip-subrow th,
+.price-tooltip .tooltip-subrow td { font-size: .92em; font-weight: 400; color: #819286; }
+.price-tooltip .tooltip-note { margin-top: 6px; color: #789185; font-size: 10px; }
+@media (max-width: 480px) {
+  .price-tooltip { padding: 9px 10px; }
+  .price-tooltip .tooltip-table { font-size: 11px; }
+  .price-tooltip th,
+  .price-tooltip td { padding-left: 10px; }
+}

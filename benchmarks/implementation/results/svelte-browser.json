@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "keyboard selection, complete curve and 100-event previous/next",
+    "search and retained input focus",
+    "combined filter and full metrics",
+    "view state survives browser refresh",
+    "calendar and date exclusion",
+    "browser remote import, naming, rename and confirmed deletion",
+    "event page retained across a new revision",
+    "SSE disconnect/reconnect revalidates changed data",
+    "narrow viewport and collapsible details"
+  ],
+  "browser": "148.0.7778.96",
+  "port": 8765,
+  "implementation": "rust+svelte",
+  "unavailable": [
+    "Windows native",
+    "macOS"
+  ],
+  "build_id": "39cdbb863c1010233107da08d3b4c4568915d470a93132a75de60c95c7248474",
+  "passed": true
+}

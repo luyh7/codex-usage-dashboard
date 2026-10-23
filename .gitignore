@@ -9,3 +9,13 @@ coverage/
 .tmp-codex-home-npx/
 .npm-cache/
 /tmp/
+
+/target/
+
+/web/node_modules/
+/web/dist/
+
+/skills/codex-usage-dashboard/runtime/
+
+# Local design explorations and verification captures; approved designs live in docs/design/.
+/output/

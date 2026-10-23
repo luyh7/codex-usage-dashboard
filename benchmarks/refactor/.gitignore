@@ -1,0 +1,5 @@
+.work/
+rust/target/
+frontend/node_modules/
+frontend/dist/
+__pycache__/

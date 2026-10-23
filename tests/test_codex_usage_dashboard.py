@@ -14,13 +14,10 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 
-MODULE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "skills"
-    / "codex-usage-dashboard"
-    / "scripts"
-    / "codex_usage_dashboard.py"
-)
+# Historical behavior is a development oracle, never an installed backend.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+from reference_dashboard import SOURCE as MODULE_PATH
 
 spec = importlib.util.spec_from_file_location("codex_usage_dashboard", MODULE_PATH)
 assert spec is not None
@@ -28,19 +25,6 @@ dashboard = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(dashboard)
 
-OPENER_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "skills"
-    / "codex-usage-dashboard"
-    / "scripts"
-    / "open_dashboard.py"
-)
-
-opener_spec = importlib.util.spec_from_file_location("open_dashboard", OPENER_PATH)
-assert opener_spec is not None
-opener = importlib.util.module_from_spec(opener_spec)
-assert opener_spec.loader is not None
-opener_spec.loader.exec_module(opener)
 
 
 class CodexUsageDashboardTests(unittest.TestCase):
@@ -3633,122 +3617,6 @@ for (const service_tier of ['default', 'standard', '']) {
                 server.server_close()
                 thread.join(timeout=5)
 
-    def test_opener_health_check_reads_full_payload(self) -> None:
-        class Response:
-            status = 200
-
-            def __init__(self, features: list[str]):
-                self.features = features
-
-            def __enter__(self) -> "Response":
-                return self
-
-            def __exit__(self, *args: object) -> None:
-                return None
-
-            def read(self) -> bytes:
-                payload = {
-                    "ok": True,
-                    "app": "codex-usage-dashboard",
-                    "padding": "x" * 512,
-                    "features": self.features,
-                }
-                return json.dumps(payload).encode("utf-8")
-
-        original_urlopen = opener.urlopen
-        try:
-            opener.urlopen = lambda *_args, **_kwargs: Response(dashboard.DASHBOARD_FEATURES)
-            self.assertEqual(opener.health_dashboard_url(8765), "http://127.0.0.1:8765/")
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "gpt-6-family-pricing-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "effective-dated-pricing-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [
-                    feature
-                    for feature in dashboard.DASHBOARD_FEATURES
-                    if feature != "subagent-fast-mode-inheritance-v1"
-                ]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-month-year-picker-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-month-year-token-totals-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-incomplete-total-spinner-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-incomplete-day-spinner-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-per-day-load-state-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-month-year-range-apply-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "calendar-view-default-range-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "expandable-agent-task-rollups-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "compact-agent-task-tree-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "aligned-agent-task-tree-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "main-agent-child-usage-row-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "aligned-task-title-gutter-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "project-session-indent-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "clickable-task-rows-and-gutter-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "main-agent-title-alignment-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "compact-subagent-indent-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "project-folder-aggregate-columns-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-            opener.urlopen = lambda *_args, **_kwargs: Response(
-                [feature for feature in dashboard.DASHBOARD_FEATURES if feature != "filtered-summary-metrics-v1"]
-            )
-            self.assertIsNone(opener.health_dashboard_url(8765))
-        finally:
-            opener.urlopen = original_urlopen
 
     def test_once_cli_can_build_cold_cache_with_spawn_workers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

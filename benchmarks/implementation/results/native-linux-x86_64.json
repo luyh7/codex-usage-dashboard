@@ -1,0 +1,25 @@
+{
+  "platform": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "python": "3.14.4",
+  "checks": [
+    "first npm install",
+    "missing binary has actionable failure",
+    "offline verified native installation",
+    "checksum failure and missing offline artifact preserve installation",
+    "forced upgrade preserves config, snapshots and native rollback artifacts",
+    "native manifest rollback",
+    "unknown port owner left running",
+    "native CLI once",
+    "native CLI export v1",
+    "upgrade from frozen old Python installation without health PID",
+    "verified native launch and same-build reuse",
+    "one-shot CLI coexists with server, includes remotes; relative export remains local-only",
+    "authenticated graceful shutdown with SSE and port release",
+    "explicit Python rollback replaces managed Rust gracefully",
+    "verified Python process replaced by Rust"
+  ],
+  "native": "Linux",
+  "build_id": "3861c46fd99a09e40dcd337e90a95b2a0128813d01efe012470a058f70dca8dd",
+  "binary_sha256": "030e502c8808c40fc602a2dbe4c1ea408c7c159b27da89cd1bcff2828ed64474",
+  "passed": true
+}

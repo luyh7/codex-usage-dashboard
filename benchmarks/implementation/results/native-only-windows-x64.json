@@ -1,0 +1,29 @@
+{
+  "passed": true,
+  "platform": "windows-x64",
+  "version": "1.0.1",
+  "ui": "svelte",
+  "build_id": "8a16b9983ad5650f21ed86d777819d5fffd126bf2c42fe7eab51abc69db8ef5b",
+  "python_on_path": false,
+  "checks": [
+    "missing offline artifact fails without fallback",
+    "direct release download starts, reads logs and stops without a skill or interpreters",
+    "fresh offline skill install uses exactly the same executable as the direct download",
+    "root and index serve current UI and assets; classic routes removed; old bookmarks redirect",
+    "skill readiness check reuses matching runtime offline",
+    "skill invoked through a symlink resolves and verifies its runtime",
+    "same build and source scope reuse",
+    "concurrent launches serialize",
+    "standalone export and once coexist with server without Python",
+    "default CLI and HTTP gzip exports retain complete session details",
+    "checksum failure preserves install and running process",
+    "upgrade removes old scripts and preserves external user data",
+    "fresh skill-only installation downloads and verifies the same release executable (mock HTTPS transport)",
+    "skills CLI update replaces stale runtime with the skill release and cleans old backend",
+    "verified native-only rollback",
+    "source changes replace managed process",
+    "Windows waits for an invisible previous binding, then launches on the same port",
+    "authenticated stop closes SSE and releases writer/port",
+    "foreign port owner remains running"
+  ]
+}

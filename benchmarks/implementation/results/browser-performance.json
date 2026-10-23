@@ -1,0 +1,133 @@
+{
+  "scale": {
+    "remote_sessions": 10000,
+    "local_sessions": 1,
+    "local_events": 10004
+  },
+  "browser": "148.0.7778.96",
+  "samples": 15,
+  "warmups": 2,
+  "method": "Input/click dispatched in the page, through real HTTP to rendered DOM plus one paint frame. Includes transport, JSON decode, server query/search and DOM layout. Warm filesystem/index; no concurrent benchmark workers.",
+  "measurements": {
+    "search_10000": {
+      "p50_ms": 32.100000001490116,
+      "p95_ms": 32.40000000037253,
+      "samples_ms": [
+        31.799999998882413,
+        32,
+        32.100000001490116,
+        32,
+        32.09999999962747,
+        32.100000001490116,
+        32,
+        31.90000000037253,
+        32.30000000074506,
+        32.19999999925494,
+        32.30000000074506,
+        32.100000001490116,
+        32.09999999962747,
+        32.40000000037253,
+        32.30000000074506
+      ]
+    },
+    "project_expand_10000": {
+      "p50_ms": 32.90000000037253,
+      "p95_ms": 33.19999999925494,
+      "samples_ms": [
+        32.90000000037253,
+        32.80000000074506,
+        32.80000000074506,
+        32.90000000037253,
+        32.80000000074506,
+        33.19999999925494,
+        32.90000000037253,
+        32.90000000037253,
+        32.90000000037253,
+        32.80000000074506,
+        32.80000000074506,
+        32.80000000074506,
+        32.90000000037253,
+        32.80000000074506,
+        32.90000000037253
+      ]
+    },
+    "detail_10004": {
+      "p50_ms": 35.69999999925494,
+      "p95_ms": 42.30000000074506,
+      "samples_ms": [
+        27.09999999962747,
+        27.09999999962747,
+        41.09999999962747,
+        26.299999998882413,
+        42.30000000074506,
+        26.40000000037253,
+        42.20000000111759,
+        26.09999999962747,
+        41.69999999925494,
+        35.69999999925494,
+        37.09999999962747,
+        39.59999999962747,
+        26,
+        41.90000000037253,
+        28
+      ]
+    }
+  },
+  "checks": [
+    "cross-page selection and old summary-only archive detail message",
+    "parent aggregate and expandable own/child agent rows",
+    "project task group paging",
+    "task page retained across publication refresh",
+    "failed listing and successful retry"
+  ],
+  "health": {
+    "ok": true,
+    "app": "codex-usage-dashboard",
+    "protocol_version": 1,
+    "implementation": "rust",
+    "ui": "svelte",
+    "source_sha256": "3861c46fd99a09e40dcd337e90a95b2a0128813d01efe012470a058f70dca8dd",
+    "build_id": "3861c46fd99a09e40dcd337e90a95b2a0128813d01efe012470a058f70dca8dd",
+    "version": "0.2.0",
+    "pid": 91063,
+    "codex_homes": [
+      "/tmp/rust-http-contract-5br7bj38/home"
+    ],
+    "instance_id": "",
+    "features": [
+      "paged-events-v1",
+      "separate-chart-v1",
+      "indexed-search-v1",
+      "periods",
+      "period-deltas",
+      "all-period",
+      "multi-codex-home",
+      "remote-snapshot-v1",
+      "background-index-v1",
+      "sse-revision-v1"
+    ],
+    "device_short_code": "wsl-36939aec",
+    "index": {
+      "phase": "ready",
+      "revision": 13,
+      "metrics": {
+        "full_parses": 1,
+        "incremental_parses": 1,
+        "persistent_hits": 0,
+        "unchanged_files": 0,
+        "normalized_components": 2,
+        "component_hits": 0,
+        "transaction_ms": 35.987133,
+        "last_refresh_ms": 0.06954,
+        "events_written": 20007
+      },
+      "watch_roots": 1,
+      "poll_interval_ms": 2000
+    }
+  },
+  "gates": {
+    "search_10000": true,
+    "project_expand_10000": true,
+    "detail_10004": true
+  }
+}

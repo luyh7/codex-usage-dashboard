@@ -1,0 +1,638 @@
+{
+  "operation": "scan",
+  "sources": [
+    {
+      "id": "wsl",
+      "label": "WSL"
+    }
+  ],
+  "files": [
+    [
+      {
+        "path": "sessions/rollout-2026-07-10T10-00-00-child-before-first-token.jsonl",
+        "mtime_ns": 1792580999919411556,
+        "bytes_base64": "eyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDowNTowMFoiLCAidHlwZSI6ICJzZXNzaW9uX21ldGEiLCAicGF5bG9hZCI6IHsiaWQiOiAiY2hpbGQtYmVmb3JlLWZpcnN0LXRva2VuIiwgInNlc3Npb25faWQiOiAicGFyZW50LWJlZm9yZS1maXJzdC10b2tlbiIsICJ0aHJlYWRfc291cmNlIjogInN1YmFnZW50IiwgInNvdXJjZSI6IHsic3ViYWdlbnQiOiB7InRocmVhZF9zcGF3biI6IHsicGFyZW50X3RocmVhZF9pZCI6ICJwYXJlbnQtYmVmb3JlLWZpcnN0LXRva2VuIiwgImZvcmtlZF9mcm9tX2lkIjogInBhcmVudC1iZWZvcmUtZmlyc3QtdG9rZW4iLCAiYWdlbnRfcGF0aCI6ICIvcm9vdC9lYXJseS1mb3JrIn19fSwgImN3ZCI6ICIvd29yay9lYXJseS1mb3JrIiwgIm1vZGVsIjogImdwdC01In19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MDY6MDBaIiwgInR5cGUiOiAiZXZlbnRfbXNnIiwgInBheWxvYWQiOiB7InR5cGUiOiAidG9rZW5fY291bnQiLCAiaW5mbyI6IHsidG90YWxfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDYwLCAidG90YWxfdG9rZW5zIjogNjB9LCAibGFzdF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogNjAsICJ0b3RhbF90b2tlbnMiOiA2MH19fX0="
+      },
+      {
+        "path": "sessions/rollout-2026-07-10T10-00-00-parent-before-first-token.jsonl",
+        "mtime_ns": 1792580999919374740,
+        "bytes_base64": "eyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDowMDowMFoiLCAidHlwZSI6ICJzZXNzaW9uX21ldGEiLCAicGF5bG9hZCI6IHsiaWQiOiAicGFyZW50LWJlZm9yZS1maXJzdC10b2tlbiIsICJzZXNzaW9uX2lkIjogInBhcmVudC1iZWZvcmUtZmlyc3QtdG9rZW4iLCAidGhyZWFkX3NvdXJjZSI6ICJ1c2VyIiwgImN3ZCI6ICIvd29yay9lYXJseS1mb3JrIiwgIm1vZGVsIjogImdwdC01In19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MTA6MDBaIiwgInR5cGUiOiAiZXZlbnRfbXNnIiwgInBheWxvYWQiOiB7InR5cGUiOiAidG9rZW5fY291bnQiLCAiaW5mbyI6IHsidG90YWxfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDEwMCwgInRvdGFsX3Rva2VucyI6IDEwMH0sICJsYXN0X3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiAxMDAsICJ0b3RhbF90b2tlbnMiOiAxMDB9fX19"
+      }
+    ]
+  ],
+  "args": [],
+  "kwargs": {},
+  "expected": {
+    "generated_at": "<GENERATED_AT>",
+    "codex_home": "<HOME:0>",
+    "codex_sources": [
+      {
+        "id": "wsl",
+        "label": "WSL",
+        "codex_home": "<HOME:0>",
+        "is_remote": false
+      }
+    ],
+    "sessions": [
+      {
+        "uid": "9843eefa2fb6817a",
+        "session_id": "parent-before-first-token",
+        "root_session_id": "parent-before-first-token",
+        "parent_thread_id": "",
+        "forked_from_id": "",
+        "thread_source": "user",
+        "is_subagent": false,
+        "agent_path": "",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "early-fork",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-parent-before-first-token.jsonl",
+        "file_size": 456,
+        "parse_errors": 0,
+        "created_at": "2026-07-10T10:00:00Z",
+        "start_at": "2026-07-10T10:00:00Z",
+        "end_at": "2026-07-10T10:10:00Z",
+        "updated_at": "2026-10-21T11:09:59.919375Z",
+        "cwd": "/work/early-fork",
+        "project": "early-fork",
+        "project_root": "/work/early-fork",
+        "workspace_root": "/work/early-fork",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "total_token_usage": {
+          "input_tokens": 100,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 100
+        },
+        "last_token_usage": {
+          "input_tokens": 100,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 100
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 100,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 100
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.000125,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.000125,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "cached_input_percent": 0.0,
+        "token_event_count": 1,
+        "turn_count": 1,
+        "completed_turn_count": 0,
+        "duration_ms_total": 0,
+        "time_to_first_token_ms_avg": null
+      },
+      {
+        "uid": "dea651fb17c922ba",
+        "session_id": "child-before-first-token",
+        "root_session_id": "parent-before-first-token",
+        "parent_thread_id": "parent-before-first-token",
+        "forked_from_id": "parent-before-first-token",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/early-fork",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "early-fork",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-child-before-first-token.jsonl",
+        "file_size": 629,
+        "parse_errors": 0,
+        "created_at": "2026-07-10T10:05:00Z",
+        "start_at": "2026-07-10T10:06:00Z",
+        "end_at": "2026-07-10T10:06:00Z",
+        "updated_at": "2026-10-21T11:09:59.919412Z",
+        "cwd": "/work/early-fork",
+        "project": "early-fork",
+        "project_root": "/work/early-fork",
+        "workspace_root": "/work/early-fork",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "total_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 60
+        },
+        "last_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 60
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 60
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 7.5e-05,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 7.5e-05,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "cached_input_percent": 0.0,
+        "token_event_count": 1,
+        "turn_count": 1,
+        "completed_turn_count": 0,
+        "duration_ms_total": 0,
+        "time_to_first_token_ms_avg": null
+      }
+    ],
+    "details_by_uid": {
+      "dea651fb17c922ba": {
+        "uid": "dea651fb17c922ba",
+        "session_id": "child-before-first-token",
+        "root_session_id": "parent-before-first-token",
+        "parent_thread_id": "parent-before-first-token",
+        "forked_from_id": "parent-before-first-token",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/early-fork",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "early-fork",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-child-before-first-token.jsonl",
+        "file_size": 629,
+        "line_count": 2,
+        "parse_errors": 0,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": "2026-07-10T10:05:00Z",
+        "start_at": "2026-07-10T10:06:00Z",
+        "end_at": "2026-07-10T10:06:00Z",
+        "updated_at": "2026-10-21T11:09:59.919412Z",
+        "cwd": "/work/early-fork",
+        "project": "early-fork",
+        "project_root": "/work/early-fork",
+        "workspace_root": "/work/early-fork",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "originator": "",
+        "cli_version": "",
+        "total_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 60
+        },
+        "last_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 60
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 60
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 7.5e-05,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 7.5e-05,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "applied_price_segments": [
+          {
+            "model": "gpt-5",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "",
+            "cost_multiplier": 1.0,
+            "prices": {
+              "input": 1.25,
+              "cached_input": 0.125,
+              "output": 10.0
+            },
+            "usage": {
+              "input_tokens": 60,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 60
+            },
+            "estimated_cost_usd": 7.5e-05,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 7.5e-05,
+              "cached_input_tokens": 0.0,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 0.0,
+              "reasoning_output_tokens": 0.0
+            }
+          }
+        ],
+        "cached_input_percent": 0.0,
+        "model_context_window": null,
+        "token_event_count": 1,
+        "turn_count": 1,
+        "completed_turn_count": 0,
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "first_user_prompt": "",
+        "last_agent_preview": "",
+        "latest_rate_limits": null,
+        "latest_plan_type": null,
+        "latest_rate_limit_reached_type": null,
+        "tool_counts": {},
+        "duration_ms_total": 0,
+        "duration_ms_avg": null,
+        "time_to_first_token_ms_avg": null,
+        "timeline": [
+          {
+            "timestamp": "2026-07-10T10:06:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 60,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 60
+            },
+            "last_token_usage": {
+              "input_tokens": 60,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 60
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          }
+        ],
+        "tasks": []
+      },
+      "9843eefa2fb6817a": {
+        "uid": "9843eefa2fb6817a",
+        "session_id": "parent-before-first-token",
+        "root_session_id": "parent-before-first-token",
+        "parent_thread_id": "",
+        "forked_from_id": "",
+        "thread_source": "user",
+        "is_subagent": false,
+        "agent_path": "",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "early-fork",
+        "source": "active",
+        "environment": "WSL",
+        "environment_id": "wsl",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-parent-before-first-token.jsonl",
+        "file_size": 456,
+        "line_count": 2,
+        "parse_errors": 0,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": "2026-07-10T10:00:00Z",
+        "start_at": "2026-07-10T10:00:00Z",
+        "end_at": "2026-07-10T10:10:00Z",
+        "updated_at": "2026-10-21T11:09:59.919375Z",
+        "cwd": "/work/early-fork",
+        "project": "early-fork",
+        "project_root": "/work/early-fork",
+        "workspace_root": "/work/early-fork",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "originator": "",
+        "cli_version": "",
+        "total_token_usage": {
+          "input_tokens": 100,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 100
+        },
+        "last_token_usage": {
+          "input_tokens": 100,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 100
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 100,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 100
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.000125,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.000125,
+          "cached_input_tokens": 0.0,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "applied_price_segments": [
+          {
+            "model": "gpt-5",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "",
+            "cost_multiplier": 1.0,
+            "prices": {
+              "input": 1.25,
+              "cached_input": 0.125,
+              "output": 10.0
+            },
+            "usage": {
+              "input_tokens": 100,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 100
+            },
+            "estimated_cost_usd": 0.000125,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 0.000125,
+              "cached_input_tokens": 0.0,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 0.0,
+              "reasoning_output_tokens": 0.0
+            }
+          }
+        ],
+        "cached_input_percent": 0.0,
+        "model_context_window": null,
+        "token_event_count": 1,
+        "turn_count": 1,
+        "completed_turn_count": 0,
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "first_user_prompt": "",
+        "last_agent_preview": "",
+        "latest_rate_limits": null,
+        "latest_plan_type": null,
+        "latest_rate_limit_reached_type": null,
+        "tool_counts": {},
+        "duration_ms_total": 0,
+        "duration_ms_avg": null,
+        "time_to_first_token_ms_avg": null,
+        "timeline": [
+          {
+            "timestamp": "2026-07-10T10:10:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 100,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 100
+            },
+            "last_token_usage": {
+              "input_tokens": 100,
+              "cached_input_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 100
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          }
+        ],
+        "tasks": []
+      }
+    },
+    "summary": {
+      "session_count": 2,
+      "active_count": 2,
+      "archived_count": 0,
+      "usage": {
+        "input_tokens": 160,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 160
+      },
+      "estimated_cost_usd": 0.0002,
+      "estimated_cost_known_count": 2,
+      "by_model": [
+        {
+          "model": "gpt-5",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 160,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 160
+          }
+        }
+      ],
+      "by_project": [
+        {
+          "project": "early-fork",
+          "project_root": "/work/early-fork",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 160,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 160
+          }
+        }
+      ],
+      "by_environment": [
+        {
+          "id": "wsl",
+          "label": "WSL",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 160,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 160
+          }
+        }
+      ],
+      "by_day": [
+        {
+          "date": "2026-07-10",
+          "sessions": 2,
+          "usage": {
+            "input_tokens": 160,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 160
+          }
+        }
+      ],
+      "top_session_uid": "9843eefa2fb6817a"
+    },
+    "daily_usage": [
+      {
+        "date": "2026-07-10",
+        "usage": {
+          "input_tokens": 160,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 160
+        }
+      }
+    ],
+    "daily_usage_complete": true,
+    "period": {
+      "key": "all",
+      "start_at": null,
+      "end_at": "<GENERATED_AT>"
+    },
+    "snapshot_token": "<REVISION>"
+  },
+  "origin_test": "test_subagent_before_parent_first_token_resolves_zero_baseline"
+}

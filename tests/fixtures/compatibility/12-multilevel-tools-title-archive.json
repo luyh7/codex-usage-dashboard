@@ -1,0 +1,1038 @@
+{
+  "operation": "scan",
+  "sources": [
+    {
+      "id": "fixture",
+      "label": "Synthetic"
+    }
+  ],
+  "files": [
+    [
+      {
+        "path": "archived_sessions/rollout-2026-07-10T10-00-00-parent-thread.jsonl",
+        "mtime_ns": 1783677600000000000,
+        "bytes_base64": "eyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDowMDowMFoiLCAidHlwZSI6ICJzZXNzaW9uX21ldGEiLCAicGF5bG9hZCI6IHsiaWQiOiAicGFyZW50LXRocmVhZCIsICJzZXNzaW9uX2lkIjogInBhcmVudC10aHJlYWQiLCAidGhyZWFkX3NvdXJjZSI6ICJ1c2VyIiwgImN3ZCI6ICIvd29yay9zaGFyZWQtcHJvamVjdCIsICJtb2RlbCI6ICJncHQtNSJ9fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTEwVDEwOjAxOjAwWiIsICJ0eXBlIjogImV2ZW50X21zZyIsICJwYXlsb2FkIjogeyJ0eXBlIjogInRva2VuX2NvdW50IiwgImluZm8iOiB7InRvdGFsX3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiA4MCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAyMCwgIm91dHB1dF90b2tlbnMiOiAyMCwgInRvdGFsX3Rva2VucyI6IDEwMH0sICJsYXN0X3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiA4MCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAyMCwgIm91dHB1dF90b2tlbnMiOiAyMCwgInRvdGFsX3Rva2VucyI6IDEwMH19fX0KeyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDowNTowMFoiLCAidHlwZSI6ICJldmVudF9tc2ciLCAicGF5bG9hZCI6IHsidHlwZSI6ICJ0b2tlbl9jb3VudCIsICJpbmZvIjogeyJ0b3RhbF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogMjAwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDUwLCAib3V0cHV0X3Rva2VucyI6IDUwLCAidG90YWxfdG9rZW5zIjogMjUwfSwgImxhc3RfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDEyMCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAzMCwgIm91dHB1dF90b2tlbnMiOiAzMCwgInRvdGFsX3Rva2VucyI6IDE1MH19fX0KeyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDoyMDowMFoiLCAidHlwZSI6ICJldmVudF9tc2ciLCAicGF5bG9hZCI6IHsidHlwZSI6ICJ0b2tlbl9jb3VudCIsICJpbmZvIjogeyJ0b3RhbF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogMjYwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDYwLCAib3V0cHV0X3Rva2VucyI6IDcwLCAidG90YWxfdG9rZW5zIjogMzMwfSwgImxhc3RfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDYwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDEwLCAib3V0cHV0X3Rva2VucyI6IDIwLCAidG90YWxfdG9rZW5zIjogODB9fX19"
+      },
+      {
+        "path": "sessions/rollout-2026-07-10T10-00-00-child-thread.jsonl",
+        "mtime_ns": 1783677600000000000,
+        "bytes_base64": "eyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDoxMDowMC4wMDBaIiwgInR5cGUiOiAic2Vzc2lvbl9tZXRhIiwgInBheWxvYWQiOiB7ImlkIjogImNoaWxkLXRocmVhZCIsICJzZXNzaW9uX2lkIjogInBhcmVudC10aHJlYWQiLCAidGhyZWFkX3NvdXJjZSI6ICJzdWJhZ2VudCIsICJzb3VyY2UiOiB7InN1YmFnZW50IjogeyJ0aHJlYWRfc3Bhd24iOiB7InBhcmVudF90aHJlYWRfaWQiOiAicGFyZW50LXRocmVhZCIsICJkZXB0aCI6IDEsICJhZ2VudF9wYXRoIjogIi9yb290L2F1ZGl0IiwgImFnZW50X25pY2tuYW1lIjogIkF1ZGl0In19fSwgImN3ZCI6ICIvd29yay9zaGFyZWQtcHJvamVjdCIsICJtb2RlbCI6ICJncHQtNSJ9fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTEwVDEwOjEwOjAwLjAwMVoiLCAidHlwZSI6ICJzZXNzaW9uX21ldGEiLCAicGF5bG9hZCI6IHsiaWQiOiAicGFyZW50LXRocmVhZCIsICJzZXNzaW9uX2lkIjogInBhcmVudC10aHJlYWQiLCAidGhyZWFkX3NvdXJjZSI6ICJ1c2VyIiwgImN3ZCI6ICIvd29yay9zaGFyZWQtcHJvamVjdCIsICJtb2RlbCI6ICJncHQtNSJ9fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTEwVDEwOjEwOjAwLjAwMloiLCAidHlwZSI6ICJldmVudF9tc2ciLCAicGF5bG9hZCI6IHsidHlwZSI6ICJ0b2tlbl9jb3VudCIsICJpbmZvIjogeyJ0b3RhbF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogODAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogMjAsICJvdXRwdXRfdG9rZW5zIjogMjAsICJ0b3RhbF90b2tlbnMiOiAxMDB9LCAibGFzdF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogODAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogMjAsICJvdXRwdXRfdG9rZW5zIjogMjAsICJ0b3RhbF90b2tlbnMiOiAxMDB9fX19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MTA6MDAuMDAzWiIsICJ0eXBlIjogImV2ZW50X21zZyIsICJwYXlsb2FkIjogeyJ0eXBlIjogInRva2VuX2NvdW50IiwgImluZm8iOiB7InRvdGFsX3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiAyMDAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogNTAsICJvdXRwdXRfdG9rZW5zIjogNTAsICJ0b3RhbF90b2tlbnMiOiAyNTB9LCAibGFzdF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogMTIwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDMwLCAib3V0cHV0X3Rva2VucyI6IDMwLCAidG90YWxfdG9rZW5zIjogMTUwfX19fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTEwVDEwOjEwOjAxWiIsICJ0eXBlIjogInR1cm5fY29udGV4dCIsICJwYXlsb2FkIjogeyJ0dXJuX2lkIjogImNoaWxkLXR1cm4iLCAiY3dkIjogIi93b3JrL3NoYXJlZC1wcm9qZWN0IiwgIm1vZGVsIjogImdwdC01In19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MTE6MDBaIiwgInR5cGUiOiAiZXZlbnRfbXNnIiwgInBheWxvYWQiOiB7InR5cGUiOiAidG9rZW5fY291bnQiLCAiaW5mbyI6IHsidG90YWxfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDI1MCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiA2MCwgIm91dHB1dF90b2tlbnMiOiA2MCwgInRvdGFsX3Rva2VucyI6IDMxMH0sICJsYXN0X3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiA1MCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAxMCwgIm91dHB1dF90b2tlbnMiOiAxMCwgInRvdGFsX3Rva2VucyI6IDYwfX19fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTEwVDEwOjEyOjAwWiIsICJ0eXBlIjogImV2ZW50X21zZyIsICJwYXlsb2FkIjogeyJ0eXBlIjogInRva2VuX2NvdW50IiwgImluZm8iOiB7InRvdGFsX3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiAzMjAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogODAsICJvdXRwdXRfdG9rZW5zIjogODAsICJ0b3RhbF90b2tlbnMiOiA0MDB9LCAibGFzdF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogNzAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogMjAsICJvdXRwdXRfdG9rZW5zIjogMjAsICJ0b3RhbF90b2tlbnMiOiA5MH19fX0="
+      },
+      {
+        "path": "sessions/rollout-2026-07-10T10-00-00-grandchild-thread.jsonl",
+        "mtime_ns": 1783677600000000000,
+        "bytes_base64": "eyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDoxMDowMC4wMDBaIiwgInR5cGUiOiAic2Vzc2lvbl9tZXRhIiwgInBheWxvYWQiOiB7ImlkIjogImdyYW5kY2hpbGQtdGhyZWFkIiwgInNlc3Npb25faWQiOiAicGFyZW50LXRocmVhZCIsICJ0aHJlYWRfc291cmNlIjogInN1YmFnZW50IiwgInNvdXJjZSI6IHsic3ViYWdlbnQiOiB7InRocmVhZF9zcGF3biI6IHsicGFyZW50X3RocmVhZF9pZCI6ICJjaGlsZC10aHJlYWQiLCAiZGVwdGgiOiAyLCAiYWdlbnRfcGF0aCI6ICIvcm9vdC9hdWRpdC9uZXN0ZWQiLCAiYWdlbnRfbmlja25hbWUiOiAiQXVkaXQifX19LCAiY3dkIjogIi93b3JrL3NoYXJlZC1wcm9qZWN0IiwgIm1vZGVsIjogImdwdC01In19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MTA6MDAuMDAxWiIsICJ0eXBlIjogInNlc3Npb25fbWV0YSIsICJwYXlsb2FkIjogeyJpZCI6ICJwYXJlbnQtdGhyZWFkIiwgInNlc3Npb25faWQiOiAicGFyZW50LXRocmVhZCIsICJ0aHJlYWRfc291cmNlIjogInVzZXIiLCAiY3dkIjogIi93b3JrL3NoYXJlZC1wcm9qZWN0IiwgIm1vZGVsIjogImdwdC01In19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MTA6MDAuMDAyWiIsICJ0eXBlIjogImV2ZW50X21zZyIsICJwYXlsb2FkIjogeyJ0eXBlIjogInRva2VuX2NvdW50IiwgImluZm8iOiB7InRvdGFsX3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiA4MCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAyMCwgIm91dHB1dF90b2tlbnMiOiAyMCwgInRvdGFsX3Rva2VucyI6IDEwMH0sICJsYXN0X3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiA4MCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAyMCwgIm91dHB1dF90b2tlbnMiOiAyMCwgInRvdGFsX3Rva2VucyI6IDEwMH19fX0KeyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDoxMDowMC4wMDNaIiwgInR5cGUiOiAiZXZlbnRfbXNnIiwgInBheWxvYWQiOiB7InR5cGUiOiAidG9rZW5fY291bnQiLCAiaW5mbyI6IHsidG90YWxfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDIwMCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiA1MCwgIm91dHB1dF90b2tlbnMiOiA1MCwgInRvdGFsX3Rva2VucyI6IDI1MH0sICJsYXN0X3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiAxMjAsICJjYWNoZWRfaW5wdXRfdG9rZW5zIjogMzAsICJvdXRwdXRfdG9rZW5zIjogMzAsICJ0b3RhbF90b2tlbnMiOiAxNTB9fX19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MTA6MDFaIiwgInR5cGUiOiAidHVybl9jb250ZXh0IiwgInBheWxvYWQiOiB7InR1cm5faWQiOiAiY2hpbGQtdHVybiIsICJjd2QiOiAiL3dvcmsvc2hhcmVkLXByb2plY3QiLCAibW9kZWwiOiAiZ3B0LTUifX0KeyJ0aW1lc3RhbXAiOiAiMjAyNi0wNy0xMFQxMDoxMTowMFoiLCAidHlwZSI6ICJldmVudF9tc2ciLCAicGF5bG9hZCI6IHsidHlwZSI6ICJ0b2tlbl9jb3VudCIsICJpbmZvIjogeyJ0b3RhbF90b2tlbl91c2FnZSI6IHsiaW5wdXRfdG9rZW5zIjogMjUwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDYwLCAib3V0cHV0X3Rva2VucyI6IDYwLCAidG90YWxfdG9rZW5zIjogMzEwfSwgImxhc3RfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDUwLCAiY2FjaGVkX2lucHV0X3Rva2VucyI6IDEwLCAib3V0cHV0X3Rva2VucyI6IDEwLCAidG90YWxfdG9rZW5zIjogNjB9fX19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6MTI6MDBaIiwgInR5cGUiOiAiZXZlbnRfbXNnIiwgInBheWxvYWQiOiB7InR5cGUiOiAidG9rZW5fY291bnQiLCAiaW5mbyI6IHsidG90YWxfdG9rZW5fdXNhZ2UiOiB7ImlucHV0X3Rva2VucyI6IDMyMCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiA4MCwgIm91dHB1dF90b2tlbnMiOiA4MCwgInRvdGFsX3Rva2VucyI6IDQwMH0sICJsYXN0X3Rva2VuX3VzYWdlIjogeyJpbnB1dF90b2tlbnMiOiA3MCwgImNhY2hlZF9pbnB1dF90b2tlbnMiOiAyMCwgIm91dHB1dF90b2tlbnMiOiAyMCwgInRvdGFsX3Rva2VucyI6IDkwfX19fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTEwVDEwOjQwOjAwWiIsICJ0eXBlIjogInJlc3BvbnNlX2l0ZW0iLCAicGF5bG9hZCI6IHsidHlwZSI6ICJmdW5jdGlvbl9jYWxsIiwgIm5hbWUiOiAiZXhlY19jb21tYW5kIiwgImFyZ3VtZW50cyI6ICJ7XCJjbWRcIjpcImVjaG8gc3ludGhldGljXCJ9In19CnsidGltZXN0YW1wIjogIjIwMjYtMDctMTBUMTA6NDA6MDFaIiwgInR5cGUiOiAicmVzcG9uc2VfaXRlbSIsICJwYXlsb2FkIjogeyJ0eXBlIjogIm1lc3NhZ2UiLCAicm9sZSI6ICJ1c2VyIiwgImNvbnRlbnQiOiBbeyJ0eXBlIjogImlucHV0X3RleHQiLCAidGV4dCI6ICIjIEFHRU5UUy5tZCBpbnN0cnVjdGlvbnMgZm9yIC93b3JrL3N5bnRoZXRpY1xuPElOU1RSVUNUSU9OUz5zeW50aGV0aWM8L0lOU1RSVUNUSU9OUz4ifV19fQp7InRpbWVzdGFtcCI6ICIyMDI2LTA3LTEwVDEwOjQwOjAyWiIsICJ0eXBlIjogInJlc3BvbnNlX2l0ZW0iLCAicGF5bG9hZCI6IHsidHlwZSI6ICJtZXNzYWdlIiwgInJvbGUiOiAidXNlciIsICJjb250ZW50IjogW3sidHlwZSI6ICJpbnB1dF90ZXh0IiwgInRleHQiOiAiU3ludGhldGljIG5lc3RlZCB0YXNrIn1dfX0="
+      }
+    ]
+  ],
+  "args": [
+    "all"
+  ],
+  "kwargs": {
+    "include_remotes": false
+  },
+  "expected": {
+    "generated_at": "<GENERATED_AT>",
+    "codex_home": "<HOME:0>",
+    "codex_sources": [
+      {
+        "id": "fixture",
+        "label": "Synthetic",
+        "codex_home": "<HOME:0>",
+        "is_remote": false
+      }
+    ],
+    "sessions": [
+      {
+        "uid": "c2655739e5ff8892",
+        "session_id": "grandchild-thread",
+        "root_session_id": "parent-thread",
+        "parent_thread_id": "child-thread",
+        "forked_from_id": "",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/audit/nested",
+        "agent_nickname": "Audit",
+        "agent_role": "",
+        "title": "Audit · nested",
+        "source": "active",
+        "environment": "Synthetic",
+        "environment_id": "fixture",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-grandchild-thread.jsonl",
+        "file_size": 2642,
+        "parse_errors": 0,
+        "created_at": "2026-07-10T10:10:00.000Z",
+        "start_at": "2026-07-10T10:10:00.002Z",
+        "end_at": "2026-07-10T10:12:00Z",
+        "updated_at": "2026-07-10T10:00:00Z",
+        "cwd": "/work/shared-project",
+        "project": "shared-project",
+        "project_root": "/work/shared-project",
+        "workspace_root": "/work/shared-project",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "total_token_usage": {
+          "input_tokens": 320,
+          "cached_input_tokens": 80,
+          "cache_write_tokens": 0,
+          "output_tokens": 80,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 400
+        },
+        "last_token_usage": {
+          "input_tokens": 70,
+          "cached_input_tokens": 20,
+          "cache_write_tokens": 0,
+          "output_tokens": 20,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 90
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 320,
+          "cached_input_tokens": 80,
+          "cache_write_tokens": 0,
+          "output_tokens": 80,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 400
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.00111,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.0003,
+          "cached_input_tokens": 1e-05,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0008,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "cached_input_percent": 25.0,
+        "token_event_count": 4,
+        "turn_count": 4,
+        "completed_turn_count": 0,
+        "duration_ms_total": 0,
+        "time_to_first_token_ms_avg": null
+      },
+      {
+        "uid": "245b1f02e619f32a",
+        "session_id": "parent-thread",
+        "root_session_id": "parent-thread",
+        "parent_thread_id": "",
+        "forked_from_id": "",
+        "thread_source": "user",
+        "is_subagent": false,
+        "agent_path": "",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "shared-project",
+        "source": "archived",
+        "environment": "Synthetic",
+        "environment_id": "fixture",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/archived_sessions/rollout-2026-07-10T10-00-00-parent-thread.jsonl",
+        "file_size": 1188,
+        "parse_errors": 0,
+        "created_at": "2026-07-10T10:00:00Z",
+        "start_at": "2026-07-10T10:00:00Z",
+        "end_at": "2026-07-10T10:20:00Z",
+        "updated_at": "2026-07-10T10:00:00Z",
+        "cwd": "/work/shared-project",
+        "project": "shared-project",
+        "project_root": "/work/shared-project",
+        "workspace_root": "/work/shared-project",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "total_token_usage": {
+          "input_tokens": 260,
+          "cached_input_tokens": 60,
+          "cache_write_tokens": 0,
+          "output_tokens": 70,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 330
+        },
+        "last_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 10,
+          "cache_write_tokens": 0,
+          "output_tokens": 20,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 80
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 260,
+          "cached_input_tokens": 60,
+          "cache_write_tokens": 0,
+          "output_tokens": 70,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 330
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.000958,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.00025,
+          "cached_input_tokens": 8e-06,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0007,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "cached_input_percent": 23.1,
+        "token_event_count": 3,
+        "turn_count": 3,
+        "completed_turn_count": 0,
+        "duration_ms_total": 0,
+        "time_to_first_token_ms_avg": null
+      },
+      {
+        "uid": "37b55251219cf1a6",
+        "session_id": "child-thread",
+        "root_session_id": "parent-thread",
+        "parent_thread_id": "parent-thread",
+        "forked_from_id": "",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/audit",
+        "agent_nickname": "Audit",
+        "agent_role": "",
+        "title": "Audit",
+        "source": "active",
+        "environment": "Synthetic",
+        "environment_id": "fixture",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-child-thread.jsonl",
+        "file_size": 2036,
+        "parse_errors": 0,
+        "created_at": "2026-07-10T10:10:00.000Z",
+        "start_at": "2026-07-10T10:11:00Z",
+        "end_at": "2026-07-10T10:12:00Z",
+        "updated_at": "2026-07-10T10:00:00Z",
+        "cwd": "/work/shared-project",
+        "project": "shared-project",
+        "project_root": "/work/shared-project",
+        "workspace_root": "/work/shared-project",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "total_token_usage": {
+          "input_tokens": 120,
+          "cached_input_tokens": 30,
+          "cache_write_tokens": 0,
+          "output_tokens": 30,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 150
+        },
+        "last_token_usage": {
+          "input_tokens": 70,
+          "cached_input_tokens": 20,
+          "cache_write_tokens": 0,
+          "output_tokens": 20,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 90
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 320,
+          "cached_input_tokens": 80,
+          "cache_write_tokens": 0,
+          "output_tokens": 80,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 400
+        },
+        "inherited_token_usage": {
+          "input_tokens": 200,
+          "cached_input_tokens": 50,
+          "cache_write_tokens": 0,
+          "output_tokens": 50,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 250
+        },
+        "inherited_token_event_count": 2,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.000416,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.000112,
+          "cached_input_tokens": 4e-06,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0003,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "cached_input_percent": 25.0,
+        "token_event_count": 2,
+        "turn_count": 2,
+        "completed_turn_count": 0,
+        "duration_ms_total": 0,
+        "time_to_first_token_ms_avg": null
+      }
+    ],
+    "details_by_uid": {
+      "c2655739e5ff8892": {
+        "uid": "c2655739e5ff8892",
+        "session_id": "grandchild-thread",
+        "root_session_id": "parent-thread",
+        "parent_thread_id": "child-thread",
+        "forked_from_id": "",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/audit/nested",
+        "agent_nickname": "Audit",
+        "agent_role": "",
+        "title": "Audit · nested",
+        "source": "active",
+        "environment": "Synthetic",
+        "environment_id": "fixture",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-grandchild-thread.jsonl",
+        "file_size": 2642,
+        "line_count": 10,
+        "parse_errors": 0,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": "2026-07-10T10:10:00.000Z",
+        "start_at": "2026-07-10T10:10:00.002Z",
+        "end_at": "2026-07-10T10:12:00Z",
+        "updated_at": "2026-07-10T10:00:00Z",
+        "cwd": "/work/shared-project",
+        "project": "shared-project",
+        "project_root": "/work/shared-project",
+        "workspace_root": "/work/shared-project",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "originator": "",
+        "cli_version": "",
+        "total_token_usage": {
+          "input_tokens": 320,
+          "cached_input_tokens": 80,
+          "cache_write_tokens": 0,
+          "output_tokens": 80,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 400
+        },
+        "last_token_usage": {
+          "input_tokens": 70,
+          "cached_input_tokens": 20,
+          "cache_write_tokens": 0,
+          "output_tokens": 20,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 90
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 320,
+          "cached_input_tokens": 80,
+          "cache_write_tokens": 0,
+          "output_tokens": 80,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 400
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.00111,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.0003,
+          "cached_input_tokens": 1e-05,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0008,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "applied_price_segments": [
+          {
+            "model": "gpt-5",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "",
+            "cost_multiplier": 1.0,
+            "prices": {
+              "input": 1.25,
+              "cached_input": 0.125,
+              "output": 10.0
+            },
+            "usage": {
+              "input_tokens": 320,
+              "cached_input_tokens": 80,
+              "cache_write_tokens": 0,
+              "output_tokens": 80,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 400
+            },
+            "estimated_cost_usd": 0.00111,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 0.0003,
+              "cached_input_tokens": 1e-05,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 0.0008,
+              "reasoning_output_tokens": 0.0
+            }
+          }
+        ],
+        "cached_input_percent": 25.0,
+        "model_context_window": null,
+        "token_event_count": 4,
+        "turn_count": 4,
+        "completed_turn_count": 0,
+        "user_message_count": 2,
+        "assistant_message_count": 0,
+        "first_user_prompt": "Synthetic nested task",
+        "last_agent_preview": "",
+        "latest_rate_limits": null,
+        "latest_plan_type": null,
+        "latest_rate_limit_reached_type": null,
+        "tool_counts": {
+          "exec_command": 1
+        },
+        "duration_ms_total": 0,
+        "duration_ms_avg": null,
+        "time_to_first_token_ms_avg": null,
+        "timeline": [
+          {
+            "timestamp": "2026-07-10T10:10:00.002Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 80,
+              "cached_input_tokens": 20,
+              "cache_write_tokens": 0,
+              "output_tokens": 20,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 100
+            },
+            "last_token_usage": {
+              "input_tokens": 80,
+              "cached_input_tokens": 20,
+              "cache_write_tokens": 0,
+              "output_tokens": 20,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 100
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          },
+          {
+            "timestamp": "2026-07-10T10:10:00.003Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 200,
+              "cached_input_tokens": 50,
+              "cache_write_tokens": 0,
+              "output_tokens": 50,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 250
+            },
+            "last_token_usage": {
+              "input_tokens": 120,
+              "cached_input_tokens": 30,
+              "cache_write_tokens": 0,
+              "output_tokens": 30,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 150
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          },
+          {
+            "timestamp": "2026-07-10T10:11:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 250,
+              "cached_input_tokens": 60,
+              "cache_write_tokens": 0,
+              "output_tokens": 60,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 310
+            },
+            "last_token_usage": {
+              "input_tokens": 50,
+              "cached_input_tokens": 10,
+              "cache_write_tokens": 0,
+              "output_tokens": 10,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 60
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          },
+          {
+            "timestamp": "2026-07-10T10:12:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 320,
+              "cached_input_tokens": 80,
+              "cache_write_tokens": 0,
+              "output_tokens": 80,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 400
+            },
+            "last_token_usage": {
+              "input_tokens": 70,
+              "cached_input_tokens": 20,
+              "cache_write_tokens": 0,
+              "output_tokens": 20,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 90
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          }
+        ],
+        "tasks": []
+      },
+      "37b55251219cf1a6": {
+        "uid": "37b55251219cf1a6",
+        "session_id": "child-thread",
+        "root_session_id": "parent-thread",
+        "parent_thread_id": "parent-thread",
+        "forked_from_id": "",
+        "thread_source": "subagent",
+        "is_subagent": true,
+        "agent_path": "/root/audit",
+        "agent_nickname": "Audit",
+        "agent_role": "",
+        "title": "Audit",
+        "source": "active",
+        "environment": "Synthetic",
+        "environment_id": "fixture",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/sessions/rollout-2026-07-10T10-00-00-child-thread.jsonl",
+        "file_size": 2036,
+        "line_count": 7,
+        "parse_errors": 0,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": "2026-07-10T10:10:00.000Z",
+        "start_at": "2026-07-10T10:11:00Z",
+        "end_at": "2026-07-10T10:12:00Z",
+        "updated_at": "2026-07-10T10:00:00Z",
+        "cwd": "/work/shared-project",
+        "project": "shared-project",
+        "project_root": "/work/shared-project",
+        "workspace_root": "/work/shared-project",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "originator": "",
+        "cli_version": "",
+        "total_token_usage": {
+          "input_tokens": 120,
+          "cached_input_tokens": 30,
+          "cache_write_tokens": 0,
+          "output_tokens": 30,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 150
+        },
+        "last_token_usage": {
+          "input_tokens": 70,
+          "cached_input_tokens": 20,
+          "cache_write_tokens": 0,
+          "output_tokens": 20,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 90
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 320,
+          "cached_input_tokens": 80,
+          "cache_write_tokens": 0,
+          "output_tokens": 80,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 400
+        },
+        "inherited_token_usage": {
+          "input_tokens": 200,
+          "cached_input_tokens": 50,
+          "cache_write_tokens": 0,
+          "output_tokens": 50,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 250
+        },
+        "inherited_token_event_count": 2,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.000416,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.000112,
+          "cached_input_tokens": 4e-06,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0003,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "applied_price_segments": [
+          {
+            "model": "gpt-5",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "",
+            "cost_multiplier": 1.0,
+            "prices": {
+              "input": 1.25,
+              "cached_input": 0.125,
+              "output": 10.0
+            },
+            "usage": {
+              "input_tokens": 120,
+              "cached_input_tokens": 30,
+              "cache_write_tokens": 0,
+              "output_tokens": 30,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 150
+            },
+            "estimated_cost_usd": 0.000416,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 0.000112,
+              "cached_input_tokens": 4e-06,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 0.0003,
+              "reasoning_output_tokens": 0.0
+            }
+          }
+        ],
+        "cached_input_percent": 25.0,
+        "model_context_window": null,
+        "token_event_count": 2,
+        "turn_count": 2,
+        "completed_turn_count": 0,
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "first_user_prompt": "",
+        "last_agent_preview": "",
+        "latest_rate_limits": null,
+        "latest_plan_type": null,
+        "latest_rate_limit_reached_type": null,
+        "tool_counts": {},
+        "duration_ms_total": 0,
+        "duration_ms_avg": null,
+        "time_to_first_token_ms_avg": null,
+        "timeline": [
+          {
+            "timestamp": "2026-07-10T10:11:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 50,
+              "cached_input_tokens": 10,
+              "cache_write_tokens": 0,
+              "output_tokens": 10,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 60
+            },
+            "last_token_usage": {
+              "input_tokens": 50,
+              "cached_input_tokens": 10,
+              "cache_write_tokens": 0,
+              "output_tokens": 10,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 60
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          },
+          {
+            "timestamp": "2026-07-10T10:12:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 120,
+              "cached_input_tokens": 30,
+              "cache_write_tokens": 0,
+              "output_tokens": 30,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 150
+            },
+            "last_token_usage": {
+              "input_tokens": 70,
+              "cached_input_tokens": 20,
+              "cache_write_tokens": 0,
+              "output_tokens": 20,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 90
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          }
+        ],
+        "tasks": []
+      },
+      "245b1f02e619f32a": {
+        "uid": "245b1f02e619f32a",
+        "session_id": "parent-thread",
+        "root_session_id": "parent-thread",
+        "parent_thread_id": "",
+        "forked_from_id": "",
+        "thread_source": "user",
+        "is_subagent": false,
+        "agent_path": "",
+        "agent_nickname": "",
+        "agent_role": "",
+        "title": "shared-project",
+        "source": "archived",
+        "environment": "Synthetic",
+        "environment_id": "fixture",
+        "is_remote": false,
+        "remote_device_short_code": "",
+        "remote_imported_at": "",
+        "remote_exported_at": "",
+        "codex_home": "<HOME:0>",
+        "path": "<HOME:0>/archived_sessions/rollout-2026-07-10T10-00-00-parent-thread.jsonl",
+        "file_size": 1188,
+        "line_count": 4,
+        "parse_errors": 0,
+        "fast_skipped_line_count": 0,
+        "fast_skipped_bytes": 0,
+        "created_at": "2026-07-10T10:00:00Z",
+        "start_at": "2026-07-10T10:00:00Z",
+        "end_at": "2026-07-10T10:20:00Z",
+        "updated_at": "2026-07-10T10:00:00Z",
+        "cwd": "/work/shared-project",
+        "project": "shared-project",
+        "project_root": "/work/shared-project",
+        "workspace_root": "/work/shared-project",
+        "project_branch": "",
+        "is_git_worktree": false,
+        "model": "gpt-5",
+        "models": [
+          "gpt-5"
+        ],
+        "service_tier": "",
+        "service_tiers": [],
+        "effort": "",
+        "originator": "",
+        "cli_version": "",
+        "total_token_usage": {
+          "input_tokens": 260,
+          "cached_input_tokens": 60,
+          "cache_write_tokens": 0,
+          "output_tokens": 70,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 330
+        },
+        "last_token_usage": {
+          "input_tokens": 60,
+          "cached_input_tokens": 10,
+          "cache_write_tokens": 0,
+          "output_tokens": 20,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 80
+        },
+        "branch_total_token_usage": {
+          "input_tokens": 260,
+          "cached_input_tokens": 60,
+          "cache_write_tokens": 0,
+          "output_tokens": 70,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 330
+        },
+        "inherited_token_usage": {
+          "input_tokens": 0,
+          "cached_input_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 0
+        },
+        "inherited_token_event_count": 0,
+        "fork_usage_resolved": true,
+        "estimated_cost_usd": 0.000958,
+        "estimated_cost_breakdown_usd": {
+          "input_tokens": 0.00025,
+          "cached_input_tokens": 8e-06,
+          "cache_write_tokens": 0.0,
+          "output_tokens": 0.0007,
+          "reasoning_output_tokens": 0.0
+        },
+        "price_model_known": true,
+        "applied_price_segments": [
+          {
+            "model": "gpt-5",
+            "effective_at": null,
+            "context_tier": null,
+            "service_tier": "",
+            "cost_multiplier": 1.0,
+            "prices": {
+              "input": 1.25,
+              "cached_input": 0.125,
+              "output": 10.0
+            },
+            "usage": {
+              "input_tokens": 260,
+              "cached_input_tokens": 60,
+              "cache_write_tokens": 0,
+              "output_tokens": 70,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 330
+            },
+            "estimated_cost_usd": 0.000957,
+            "estimated_cost_breakdown_usd": {
+              "input_tokens": 0.00025,
+              "cached_input_tokens": 8e-06,
+              "cache_write_tokens": 0.0,
+              "output_tokens": 0.0007,
+              "reasoning_output_tokens": 0.0
+            }
+          }
+        ],
+        "cached_input_percent": 23.1,
+        "model_context_window": null,
+        "token_event_count": 3,
+        "turn_count": 3,
+        "completed_turn_count": 0,
+        "user_message_count": 0,
+        "assistant_message_count": 0,
+        "first_user_prompt": "",
+        "last_agent_preview": "",
+        "latest_rate_limits": null,
+        "latest_plan_type": null,
+        "latest_rate_limit_reached_type": null,
+        "tool_counts": {},
+        "duration_ms_total": 0,
+        "duration_ms_avg": null,
+        "time_to_first_token_ms_avg": null,
+        "timeline": [
+          {
+            "timestamp": "2026-07-10T10:01:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 80,
+              "cached_input_tokens": 20,
+              "cache_write_tokens": 0,
+              "output_tokens": 20,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 100
+            },
+            "last_token_usage": {
+              "input_tokens": 80,
+              "cached_input_tokens": 20,
+              "cache_write_tokens": 0,
+              "output_tokens": 20,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 100
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          },
+          {
+            "timestamp": "2026-07-10T10:05:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 200,
+              "cached_input_tokens": 50,
+              "cache_write_tokens": 0,
+              "output_tokens": 50,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 250
+            },
+            "last_token_usage": {
+              "input_tokens": 120,
+              "cached_input_tokens": 30,
+              "cache_write_tokens": 0,
+              "output_tokens": 30,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 150
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          },
+          {
+            "timestamp": "2026-07-10T10:20:00Z",
+            "model": "gpt-5",
+            "service_tier": "",
+            "total_token_usage": {
+              "input_tokens": 260,
+              "cached_input_tokens": 60,
+              "cache_write_tokens": 0,
+              "output_tokens": 70,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 330
+            },
+            "last_token_usage": {
+              "input_tokens": 60,
+              "cached_input_tokens": 10,
+              "cache_write_tokens": 0,
+              "output_tokens": 20,
+              "reasoning_output_tokens": 0,
+              "total_tokens": 80
+            },
+            "model_context_window": null,
+            "rate_limits": null
+          }
+        ],
+        "tasks": []
+      }
+    },
+    "summary": {
+      "session_count": 3,
+      "active_count": 2,
+      "archived_count": 1,
+      "usage": {
+        "input_tokens": 700,
+        "cached_input_tokens": 170,
+        "cache_write_tokens": 0,
+        "output_tokens": 180,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 880
+      },
+      "estimated_cost_usd": 0.002484,
+      "estimated_cost_known_count": 3,
+      "by_model": [
+        {
+          "model": "gpt-5",
+          "sessions": 3,
+          "usage": {
+            "input_tokens": 700,
+            "cached_input_tokens": 170,
+            "cache_write_tokens": 0,
+            "output_tokens": 180,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 880
+          }
+        }
+      ],
+      "by_project": [
+        {
+          "project": "shared-project",
+          "project_root": "/work/shared-project",
+          "sessions": 3,
+          "usage": {
+            "input_tokens": 700,
+            "cached_input_tokens": 170,
+            "cache_write_tokens": 0,
+            "output_tokens": 180,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 880
+          }
+        }
+      ],
+      "by_environment": [
+        {
+          "id": "fixture",
+          "label": "Synthetic",
+          "sessions": 3,
+          "usage": {
+            "input_tokens": 700,
+            "cached_input_tokens": 170,
+            "cache_write_tokens": 0,
+            "output_tokens": 180,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 880
+          }
+        }
+      ],
+      "by_day": [
+        {
+          "date": "2026-07-10",
+          "sessions": 3,
+          "usage": {
+            "input_tokens": 700,
+            "cached_input_tokens": 170,
+            "cache_write_tokens": 0,
+            "output_tokens": 180,
+            "reasoning_output_tokens": 0,
+            "total_tokens": 880
+          }
+        }
+      ],
+      "top_session_uid": "c2655739e5ff8892"
+    },
+    "daily_usage": [
+      {
+        "date": "2026-07-10",
+        "usage": {
+          "input_tokens": 700,
+          "cached_input_tokens": 170,
+          "cache_write_tokens": 0,
+          "output_tokens": 180,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 880
+        }
+      }
+    ],
+    "daily_usage_complete": true,
+    "period": {
+      "key": "all",
+      "start_at": null,
+      "end_at": "<GENERATED_AT>"
+    },
+    "snapshot_token": "<REVISION>"
+  },
+  "origin_test": "synthetic_multilevel_tools_title_archive"
+}
