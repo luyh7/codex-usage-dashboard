@@ -11,6 +11,7 @@
     "fresh offline skill install uses exactly the same executable as the direct download",
     "root and index serve current UI and assets; classic routes removed; old bookmarks redirect",
     "skill readiness check reuses matching runtime offline",
+    "skill invoked through a symlink resolves and verifies its runtime",
     "same build and source scope reuse",
     "concurrent launches serialize",
     "standalone export and once coexist with server without Python",

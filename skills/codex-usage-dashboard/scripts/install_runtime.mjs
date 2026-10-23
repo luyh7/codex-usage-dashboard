@@ -2,7 +2,7 @@
 // Installation only. The installed executable handles every normal launch.
 import {createHash, randomBytes} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {readFile, writeFile, mkdir, rename, chmod, rm} from 'node:fs/promises';
+import {readFile, writeFile, mkdir, rename, chmod, rm, realpath} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -114,7 +114,7 @@ export async function installRuntime({manifest: source, offline = false, rollbac
     throw error;
   } finally {await rm(candidate,{force:true})}
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => null) === await realpath(fileURLToPath(import.meta.url))) {
   const args=process.argv.slice(2); const index=args.indexOf('--manifest');
   try {
     if(index>=0 && (!args[index+1] || args[index+1].startsWith('--'))) throw Error('--manifest requires a path or HTTPS URL');

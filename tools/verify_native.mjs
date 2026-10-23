@@ -2,7 +2,7 @@
 // Fresh installation and real native lifecycle, on 8765, with no Python on PATH.
 import assert from 'node:assert/strict';
 import {execFileSync,spawn} from 'node:child_process';
-import {mkdtemp,mkdir,readFile,writeFile,rm,copyFile,readdir,chmod,realpath} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,copyFile,readdir,chmod,realpath,symlink} from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -37,7 +37,15 @@ const run=(exe,args=[],ok=true)=>{
 };
 const installArgs=[install,'--runtime-manifest',manifestPath,'--offline'];
 const launchArgs=['--no-browser','--codex-home',codex,'--no-auto-windows','--timezone','UTC'];
-const health=async()=>{const r=await fetch(base+'/api/health',{headers:{Connection:'close'}});assert.equal(r.status,200);return r.json()};
+// Synchronous launcher calls can close a server before Node processes pooled
+// socket EOF events. Probe each new process using a fresh, unpooled connection.
+const health=()=>new Promise((resolve,reject)=>{
+ const request=http.get(base+'/api/health',{agent:false},response=>{
+  let body='';response.setEncoding('utf8');response.on('data',chunk=>body+=chunk);
+  response.on('error',reject);response.on('end',()=>{try{assert.equal(response.statusCode,200);resolve(JSON.parse(body))}catch(error){reject(error)}});
+ });
+ request.on('error',reject);request.setTimeout(5000,()=>request.destroy(Error('Health probe timed out')));
+});
 const checks=[];
 try {
  assert.equal(run(process.execPath,[install,'--offline'],false),null);checks.push('missing offline artifact fails without fallback');
@@ -70,6 +78,10 @@ try {
  const ensure=path.join(skill,'scripts/install_runtime.mjs');
  assert.equal(run(process.execPath,[ensure,'--ensure']).trim(),binary);
  assert.equal((await health()).pid,h.pid);checks.push('skill readiness check reuses matching runtime offline');
+ const skillAlias=path.join(tmp,'linked-skill');
+ await symlink(skill,skillAlias,process.platform==='win32'?'junction':'dir');
+ assert.equal(run(process.execPath,[path.join(skillAlias,'scripts/install_runtime.mjs'),'--ensure']).trim(),binary);
+ assert.equal((await health()).pid,h.pid);checks.push('skill invoked through a symlink resolves and verifies its runtime');
  const pid=h.pid;run(binary,launchArgs);assert.equal((await health()).pid,pid);checks.push('same build and source scope reuse');
  // Two concurrent invocations must still resolve to one server.
  await Promise.all([1,2].map(()=>new Promise((resolve,reject)=>{const p=spawn(binary,launchArgs,{env,cwd:tmp,stdio:'ignore'});p.on('error',reject);p.on('exit',code=>code===0?resolve():reject(Error(`launcher exit ${code}`)))})));
