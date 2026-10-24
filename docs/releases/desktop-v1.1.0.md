@@ -6,10 +6,10 @@ Windows 与 Mac 免费直装客户端稳定版，包含匹配的统计程序，�
 
 | 已验收环境 | 安装包 | SHA256 |
 | --- | --- | --- |
-| Windows 11 x64，build 22631，已有 WebView2 155.0.4283.62 | [Windows 安装器](https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/cousash-1.1.0-windows-x64.exe) | `21ecfba83b0ee8b45255ebe3e6e9036d0d884f81760be7c58498a30184307b4c` |
-| macOS 26.6.2（25G83），Apple Silicon arm64 | [Mac DMG](https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/cousash-1.1.0-darwin-arm64.dmg) | `bdd4f509313b10b78070ce146db9d9508bfe8d64f41ee924a1529ec6fa7ff93e` |
+| Windows 11 x64，build 22631，已有 WebView2 155.0.4283.62 | [Windows 安装器](https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-v1.1.0/cousash-1.1.0-windows-x64.exe) | `21ecfba83b0ee8b45255ebe3e6e9036d0d884f81760be7c58498a30184307b4c` |
+| macOS 26.6.2（25G83），Apple Silicon arm64 | [Mac DMG](https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-v1.1.0/cousash-1.1.0-darwin-arm64.dmg) | `bdd4f509313b10b78070ce146db9d9508bfe8d64f41ee924a1529ec6fa7ff93e` |
 
-稳定支持承诺仅限以上环境。完整校验清单见同一 Release 的 `SHA256SUMS`。
+稳定支持承诺仅限以上环境。完整校验清单见 [1.1.0 SHA256SUMS](https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-v1.1.0/SHA256SUMS)。
 
 ## 安装与更新
 
@@ -19,7 +19,7 @@ Mac 将应用复制到 Applications 后打开。此前 1.0.1 带 Chrome 隔离�
 
 客户端通过独立的 [GitHub Releases HTTPS 频道](https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json)检查更新，安装前验证长期公钥对应的更新签名及发行版本。更新替换应用与随包程序，保留业务数据；另提供完整安装包用于手动升级和回退。Windows 自动更新显示一次安装语言确认，确认后继续安装与重启。
 
-本次重新构建内部版本为 1.1.0 的生产包，重新生成绑定 1.1.0 的长期公钥更新签名。两端已通过全新安装、同版重装、卸载保留数据、已发布 1.0.1 完整包回退和 1.0.1 → 1.1.0 完整包升级；准确的 24,000 tokens、语言/时区、来源、设备身份、导入快照、目录记录及窗口尺寸保留。Windows 覆盖升级时旧宿主仍在运行，安装器正常停止本轮宿主和 helper。公开频道切换后另行记录真实 HTTPS 自动更新结果。
+本次重新构建内部版本为 1.1.0 的生产包，重新生成绑定 1.1.0 的长期公钥更新签名。两端已通过全新安装、同版重装、卸载保留数据、已发布 1.0.1 完整包回退和 1.0.1 → 1.1.0 完整包升级；准确的 24,000 tokens、语言/时区、来源、设备身份、导入快照、目录记录及窗口尺寸保留。Windows 覆盖升级时旧宿主仍在运行，安装器正常停止本轮宿主和 helper。真实 HTTPS 自动更新结果见 [PR #10 的验收证据](https://github.com/luyh7/codex-usage-dashboard/pull/10)。
 
 ## 已知限制
 
