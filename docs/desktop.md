@@ -20,6 +20,8 @@ Windows 从开始菜单启动；macOS 将 `.app` 放入 Applications 后打开�
 
 首次打开自动发现本机 Codex 目录。设置可以查看当前来源，选择其他文件夹，或恢复自动发现。缺少目录、读取失败和空目录会显示状态。更换来源后客户端重启自己拥有的统计服务；使用独立 CLI 服务时会要求先退出该服务，不会擅自替换它。
 
+客户端先检查服务归属再保存来源，拒绝操作时保留现有来源配置；停止服务失败时尝试恢复原来源。CLI 的摘要和导出也检查当前实际来源及程序身份，来源发生变化时明确报告冲突，避免静默使用旧索引。
+
 首次没有可用本机日志且没有导入会话时，客户端直接打开日志来源设置，提供文件夹选择；空的 sessions 目录不会被当作已有用量。
 
 设置中的语言和展示时区保存在应用配置里，端口变化、关闭重开和覆盖安装后仍可恢复。浏览器原有 localStorage 仅作为首次配置的迁移来源；不能自动读取另一个浏览器的数据。临时筛选与展开状态仍可由当前页面保存。
@@ -92,6 +94,8 @@ node tools/desktop.mjs bundle
 node tools/desktop-smoke.mjs
 node tools/desktop-concurrency.mjs
 ```
+
+macOS 本地开发包需要完整 ad-hoc 应用签名时，使用 `APPLE_SIGNING_IDENTITY=- node tools/desktop.mjs bundle`，与开发 CI 的签名方式一致；随后运行 `codesign --verify --deep --strict` 检查 app。仅由链接器签名的 Mach-O 不等于完整应用包签名，也不代表 Developer ID 或公证。
 
 制品位于 `desktop/target/<target>/release/bundle/`；同级 `artifacts.json` 记录版本、服务 build ID、大小及 SHA256。`desktop/Cargo.lock` 和 `desktop/package-lock.json` 冻结桌面依赖；桌面是独立 Cargo workspace，不给普通 CLI 发布增加 WebKitGTK 或其他桌面编译依赖。
 

@@ -1,6 +1,8 @@
 # 桌面验证记录
 
-Windows、macOS 两架构和 Linux 开发包均已在各自系统构建、启动；完整三端交互验收尚未完成。Windows/Linux 有本地图形验证，macOS 有 GitHub Actions 运行证据。用户已确认没有 Mac 实机，实机交互检查保留为未验证；构建和启动不代替该检查。草稿 [PR #9](https://github.com/luyh7/codex-usage-dashboard/pull/9) 包含实现、验证脚本和四目标流水线。
+Windows、macOS 两架构和 Linux 开发包均已在各自系统构建、启动；完整三端交互验收尚未完成。草稿 [PR #9](https://github.com/luyh7/codex-usage-dashboard/pull/9) 包含实现、验证脚本和四目标流水线。
+
+2026-10-24 的后续审查已在 Apple Silicon Mac 实机补验主要界面、原生文件操作、来源切换及恢复，并修复三个来源一致性问题；当前应用源码为 d54921d。最新结果与剩余范围见 [PR #9 审查与 Mac 实机补验](desktop-review-2026-10-24.md)。下文保留 4ee9271 及之前的验证证据，不能把原版四目标 CI 当作后续修复的验证。原先“没有 Mac 实机”的环境限制已经改变，Intel、最低系统和完整硬件矩阵仍待验证。
 
 ## 基线与制品
 
@@ -167,7 +169,7 @@ Windows 安装器启动后的异步失败、安装中途磁盘故障及正式更
 
 ## 未验证项
 
-- macOS 实机 WKWebView 视觉/交互、Applications/Finder 安装移除、Dock、Cmd+Q、菜单、原生文件及最低 14.5 系统；用户已确认没有实机并保留未验证。云端更新修复复验结果另列，不能代替以上项目。
+- macOS 的历史环境缺口已由后续 Apple Silicon 实机补验部分缩小，详见 [最新记录](desktop-review-2026-10-24.md)。Intel GUI、Finder/Dock 完整交互及最低 14.5 系统仍未验证；不能用新系统或单架构结果代替。
 - Windows 10、无 WebView2 的全新机器和离线运行库安装。
 - 独立 Linux X11/Wayland 和无托盘桌面的完整交互；Ubuntu 22.04 CI、Debian 12 用户环境和 WSLg 的已验证范围见上文。
 - 各端全部提示框位置、层级、鼠标、键盘和模态场景；单元测试及部分截图不能替代完整矩阵。
