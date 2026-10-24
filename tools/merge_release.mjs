@@ -5,6 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {checkRelease, platforms} from './check_release.mjs';
+import {nativeAssetName} from './release-names.mjs';
 
 export async function mergeRelease(input, output, tag) {
   const {version} = await checkRelease(tag);
@@ -24,7 +25,7 @@ export async function mergeRelease(input, output, tag) {
           assert(!combined.platforms[key], `Duplicate platform: ${key}`);
           assert.match(value.build_id, /^[a-f0-9]{64}$/, 'Invalid build identity');
           assert.match(value.sha256, /^[a-f0-9]{64}$/, 'Invalid checksum');
-          const expected = `codex-usage-dashboard-${version}-${key}-${value.build_id.slice(0, 12)}${key.startsWith('windows-') ? '.exe' : ''}`;
+          const expected = nativeAssetName(version, key);
           assert.equal(value.file, expected, 'Invalid artifact filename');
           const source = path.join(dir, value.file);
           const bytes = await readFile(source);

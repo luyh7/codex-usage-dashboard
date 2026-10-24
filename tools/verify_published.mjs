@@ -10,6 +10,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {platformKey,binaryName} from '../skills/codex-usage-dashboard/scripts/install_runtime.mjs';
 import {checkRelease,platforms} from './check_release.mjs';
+import {nativeAssetName} from './release-names.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const config=await checkRelease(process.env.RELEASE_TAG);
@@ -44,7 +45,7 @@ try {
  assert.deepEqual(Object.keys(manifest.platforms).sort(),[...platforms].sort());
  const entry=manifest.platforms[key];
  assert.match(entry.build_id,/^[a-f0-9]{64}$/);assert.match(entry.sha256,/^[a-f0-9]{64}$/);
- assert.equal(entry.file,`codex-usage-dashboard-${config.version}-${key}-${entry.build_id.slice(0,12)}${key==='windows-x64'?'.exe':''}`);
+ assert.equal(entry.file,nativeAssetName(config.version,key));
  const bytes=await download(entry.file);
  assert.equal(createHash('sha256').update(bytes).digest('hex'),entry.sha256);
  const sums=(await download('SHA256SUMS')).toString('utf8');

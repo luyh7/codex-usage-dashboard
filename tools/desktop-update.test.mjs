@@ -8,7 +8,7 @@ test('update manifests require complete architecture coverage and keep artifacts
   for(const[target,suffix]of rows){const folder=path.join(dir,'desktop-'+target);await mkdir(folder);await writeFile(path.join(folder,'service-build.json'),JSON.stringify({version:'1.0.1',build_id:'a'.repeat(64)}));await writeFile(path.join(folder,'client'+suffix),target);await writeFile(path.join(folder,'client'+suffix+'.sig'),Buffer.from('synthetic-signature').toString('base64'));}
   const out=path.join(dir,'staged');const result=await stageUpdates(dir,'1.0.1','https://example.test/releases/','notes',out);
   assert.equal(Object.keys(result.platforms).length,4);assert.notEqual(result.platforms['darwin-aarch64'].url,result.platforms['darwin-x86_64'].url);
-  assert.equal(await readFile(path.join(out,'cousash-1.0.1-darwin-arm64.app.tar.gz'),'utf8'),'aarch64-apple-darwin');
+  assert.equal(await readFile(path.join(out,'cousash-1.0.1-macos-arm64.app.tar.gz'),'utf8'),'aarch64-apple-darwin');
   await assert.rejects(stageUpdates(dir,'1.0.2','https://example.test/','',out),/mismatched version/);
   await assert.rejects(stageUpdates(dir,'1.0.1','http://example.test/','',out),/HTTPS/);
   await rm(path.join(dir,'desktop-x86_64-apple-darwin/client.app.tar.gz.sig'));
@@ -29,8 +29,8 @@ test('explicit CLI platforms stage only the selected release targets',async t=>{
   assert.equal(result.status,0,result.stderr);
   const manifest=JSON.parse(await readFile(path.join(out,'latest.json'),'utf8'));assert.deepEqual(Object.keys(manifest.platforms),['windows-x86_64','darwin-aarch64']);
   assert.equal(manifest.notes,'Limited stable release');assert.equal((await readFile(path.join(out,'SHA256SUMS'),'utf8')).trim().split('\n').length,2);
-  assert.equal(await readFile(path.join(out,'cousash-1.0.1-windows-x64.exe'),'utf8'),'x86_64-pc-windows-msvc');
-  await assert.rejects(readFile(path.join(out,'cousash-1.0.1-darwin-x64.app.tar.gz')),/ENOENT/);
+  assert.equal(await readFile(path.join(out,'cousash-1.0.1-windows-x64-setup.exe'),'utf8'),'x86_64-pc-windows-msvc');
+  await assert.rejects(readFile(path.join(out,'cousash-1.0.1-macos-x64.app.tar.gz')),/ENOENT/);
 });
 test('platform selection never silently drops missing targets or accepts invalid selections',async t=>{
   const dir=await limitedRelease(t),out=path.join(dir,'staged');
@@ -38,13 +38,13 @@ test('platform selection never silently drops missing targets or accepts invalid
   await assert.rejects(stageUpdates(dir,'1.0.1','https://example.test/','',out,['windows-x86_64','linux-x86_64']),/ENOENT/);
   await rm(path.join(dir,'desktop-aarch64-apple-darwin/client.app.tar.gz.sig'));
   await assert.rejects(stageUpdates(dir,'1.0.1','https://example.test/','',out,['windows-x86_64','darwin-aarch64']),/ENOENT/);
-  await assert.rejects(readFile(path.join(out,'cousash-1.0.1-windows-x64.exe')),/ENOENT/);
+  await assert.rejects(readFile(path.join(out,'cousash-1.0.1-windows-x64-setup.exe')),/ENOENT/);
 });
 test('staging rejects stale output without changing a previously staged release',async t=>{
   const dir=await limitedRelease(t),out=path.join(dir,'staged');await mkdir(out);await writeFile(path.join(out,'latest.json'),'existing release');await writeFile(path.join(out,'unverified-linux.AppImage'),'preserve');
   await assert.rejects(stageUpdates(dir,'1.0.1','https://example.test/','',out,['windows-x86_64','darwin-aarch64']),/empty.*director/i);
   assert.equal(await readFile(path.join(out,'latest.json'),'utf8'),'existing release');assert.equal(await readFile(path.join(out,'unverified-linux.AppImage'),'utf8'),'preserve');
-  await assert.rejects(readFile(path.join(out,'cousash-1.0.1-windows-x64.exe')),/ENOENT/);
+  await assert.rejects(readFile(path.join(out,'cousash-1.0.1-windows-x64-setup.exe')),/ENOENT/);
 });
 
 test('concurrent staging has one winner and never mixes platform artifacts',async t=>{

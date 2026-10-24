@@ -6,6 +6,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import {checkRelease, platforms} from './check_release.mjs';
 import {mergeRelease} from './merge_release.mjs';
+import {nativeAssetName} from './release-names.mjs';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dashboard-release-'));
@@ -17,7 +18,7 @@ async function fixture(t) {
     await mkdir(dir, {recursive: true});
     const bytes = Buffer.from(`fixture:${key}`);
     const sha256 = createHash('sha256').update(bytes).digest('hex');
-    const file = `codex-usage-dashboard-${version}-${key}-${sha256.slice(0, 12)}${key.startsWith('windows-') ? '.exe' : ''}`;
+    const file = nativeAssetName(version, key);
     await writeFile(path.join(dir, file), bytes);
     await writeFile(path.join(dir, 'manifest.json'), JSON.stringify({version, protocol_version: 1, ui: 'svelte', platforms: {[key]: {file, sha256, build_id: sha256}}}));
   }

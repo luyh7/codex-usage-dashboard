@@ -4,6 +4,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {parseArgs} from 'node:util';
+import {desktopAssetName} from './release-names.mjs';
 const targets=[
   ['x86_64-pc-windows-msvc','windows-x86_64','windows-x64','.exe'],
   ['aarch64-apple-darwin','darwin-aarch64','darwin-arm64','.app.tar.gz'],
@@ -27,7 +28,7 @@ export async function stageUpdates(root,version,base,notes,output,platformKeys=t
     if(artifacts.length!==1)throw Error(`${label}: expected one ${suffix} update artifact`);
     const signature=(await readFile(artifacts[0]+'.sig','utf8')).trim();
     if(!signature||!/^[A-Za-z0-9+/=\r\n]+$/.test(signature))throw Error(`${label}: missing or invalid updater signature`);
-    const name=`cousash-${version}-${label}${suffix}`;
+    const name=desktopAssetName(version,label,suffix);
     const digest=createHash('sha256').update(await readFile(artifacts[0])).digest('hex');
     prepared.push({key,name,artifact:artifacts[0],signature,digest});
   }

@@ -55,16 +55,18 @@ npx github:luyh7/codex-usage-dashboard -- --open
 
 This installs the same skill and native runtime. Use `--shortcut` instead of `--open` to create a desktop shortcut.
 
-### Download the executable
+### Download the desktop app or CLI
+
+[Each version Release](https://github.com/luyh7/codex-usage-dashboard/releases/latest) contains both desktop installers and CLI programs. For the desktop app, choose Windows `windows-x64-setup.exe` or Mac `macos-arm64.dmg`; the table below lists CLI downloads.
 
 Choose an asset from [GitHub Releases](https://github.com/luyh7/codex-usage-dashboard/releases/latest):
 
 | Platform | Filename contains |
 | --- | --- |
-| macOS · Apple Silicon | `darwin-arm64` |
-| macOS · Intel | `darwin-x64` |
-| Windows · x64 | `windows-x64` · `.exe` |
-| Linux · x64, glibc | `linux-x64` |
+| macOS · Apple Silicon | `cli-macos-arm64` |
+| macOS · Intel | `cli-macos-x64` |
+| Windows · x64 | `cli-windows-x64` · `.exe` |
+| Linux · x64, glibc | `cli-linux-x64` |
 
 On Windows, keep the `.exe` in a permanent folder and run it. On macOS or Linux, rename the downloaded file to `codex-usage-dashboard`, then run:
 

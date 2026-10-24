@@ -23,7 +23,7 @@ jobs:
       - run: node tools/check_release.mjs
       - run: npm run validate
       - run: node --check tools/verify_published.mjs
-      - run: node --test tools/release.test.mjs tools/desktop-update.test.mjs tools/ci-changes.test.mjs
+      - run: node --test tools/release.test.mjs tools/desktop-update.test.mjs tools/assemble-release.test.mjs tools/ci-changes.test.mjs
       - name: Rust formatting
         run: |
           cargo fmt --check

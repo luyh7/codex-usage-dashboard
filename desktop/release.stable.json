@@ -6,7 +6,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFFQ0RERDRERjE4NUE2QUIKUldTcnBvWHhUZDNOSHVTUW5YTHdXUHVpWUUvWDVudGtHbXNVVkZISnRGbXRDQlppVTVPOVRBdzEK",
       "endpoints": [
-        "https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json"
+        "https://github.com/luyh7/codex-usage-dashboard/releases/latest/download/latest.json"
       ],
       "requireSignedVersion": true
     }

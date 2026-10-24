@@ -55,16 +55,18 @@ npx github:luyh7/codex-usage-dashboard -- --open
 
 该命令安装同一套技能和原生程序。将 `--open` 换成 `--shortcut` 可创建桌面快捷方式。
 
-### 下载可执行文件
+### 下载桌面版或命令行程序
+
+[同一版本下载页](https://github.com/luyh7/codex-usage-dashboard/releases/latest)同时提供桌面安装包和命令行程序。普通桌面安装选择 Windows `windows-x64-setup.exe` 或 Mac `macos-arm64.dmg`；下表用于命令行程序。
 
 从 [GitHub Releases](https://github.com/luyh7/codex-usage-dashboard/releases/latest) 选择对应平台的文件：
 
 | 平台 | 文件名包含 |
 | --- | --- |
-| macOS · Apple Silicon | `darwin-arm64` |
-| macOS · Intel | `darwin-x64` |
-| Windows · x64 | `windows-x64` · `.exe` |
-| Linux · x64，glibc | `linux-x64` |
+| macOS · Apple Silicon | `cli-macos-arm64` |
+| macOS · Intel | `cli-macos-x64` |
+| Windows · x64 | `cli-windows-x64` · `.exe` |
+| Linux · x64，glibc | `cli-linux-x64` |
 
 Windows 用户将 `.exe` 保存在固定目录后运行。macOS 或 Linux 用户将下载的文件重命名为 `codex-usage-dashboard`，然后执行：
 
