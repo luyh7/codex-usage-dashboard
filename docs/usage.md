@@ -42,7 +42,7 @@ The npm installer uses `~/.agents/skills/codex-usage-dashboard`, or `$CODEX_HOME
 
 ### Desktop app
 
-Desktop installers and CLI programs share [one Release per version](https://github.com/luyh7/codex-usage-dashboard/releases/latest). Choose `windows-x64-setup.exe` for Windows or `macos-arm64.dmg` for Apple Silicon Mac. See [desktop support and known limitations](desktop.md). Existing 1.0.1/1.1.0 desktop installations use a retired update address and need a manual full-package upgrade.
+Desktop installers and CLI programs share [one Release per version](https://github.com/luyh7/codex-usage-dashboard/releases/latest). Choose `windows-x64-setup.exe` for Windows or `macos-arm64.dmg` for Apple Silicon Mac. See [desktop installation guide](desktop.md). Existing 1.0.1/1.1.0 desktop installations use a retired update address and need a manual full-package upgrade.
 
 ### Standalone executable
 
