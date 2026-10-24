@@ -27,7 +27,7 @@ node scripts/install_runtime.mjs --ensure
 node scripts/install_runtime.mjs --manifest /path/to/manifest.json --offline
 ```
 
-在线安装读取 `native.json` 指定的 `1.0.1` GitHub Release manifest 和相邻平台文件。
+在线安装读取 `native.json` 指定的 版本对应的 GitHub Release manifest 和相邻平台文件。
 每次调用 skill 都先执行 `--ensure`，校验版本、SHA256、build ID 与 `ui: svelte`；
 skills CLI 更新遗留的旧 runtime 会自动替换，匹配版本无需联网。
 新安装与升级均清理旧 Python 脚本。经典界面的制品会被拒绝。
@@ -37,7 +37,7 @@ skills CLI 更新遗留的旧 runtime 会自动替换，匹配版本无需联网
 同一 Release 可执行文件也支持直接下载运行，无需 skill、Node、Python 或 Rust。
 Windows 下载 `.exe`；macOS/Linux 下载对应架构的文件并授予执行权限。
 运行后仍通过浏览器使用本地面板。手动更新前先用旧程序的 `--stop` 退出。
-发布目标为 `linux-x64`、`windows-x64`、`darwin-x64`、`darwin-arm64`，两种 Mac 架构分别原生验收。
+发布目标为 `linux-x64`、`windows-x64`、`macos-x64`、`macos-arm64`，两种 Mac 架构分别原生验收。
 
 ## 启动、退出、导出
 
@@ -87,7 +87,7 @@ npm 更新成功后删除旧安装目录中已知的 Python 脚本，保留外�
 PR、main 推送和手动运行都会合并四个平台制品，生成 `release-candidate` CI artifact，不创建 Release。
 开发分支的普通推送不触发工作流；通过 PR 运行验收。
 只有 `v*` 标签的 push 事件才允许发布，且必须通过全部验收、标签版本检查和 main 祖先检查。
-发布使用 `docs/releases/v1.0.1.md` 的说明，不提前手动创建同名 Release。
+发布使用 `docs/releases/vVERSION.md` 的说明，不提前手动创建同名 Release。
 合并工具拒绝缺失/重复平台、校验失败、版本不匹配和非空输出目录。未执行的 CI 不算验收通过。
 完整操作边界见[发布准备清单](../releases/prepare-1.0.1.md)。
 
@@ -104,3 +104,22 @@ Windows `1.0.1` MSVC 制品已在原生 Windows 进程中完成上述全部生�
 Windows Chromium 已验证根路径概览、设置、导航历史、快照管理和 320px/390px 布局。
 macOS 完整验收仍需对应 CI；本地验收不代表已发布 GitHub Release。
 Python 仅用于可选的历史差分测试，不是构建、打包、安装或运行的前提。
+
+## 一个版本一个 Release
+
+发布按一个版本一个 Release 整理：桌面安装包、命令行程序、更新清单和校验文件都在 `vVERSION` 下。下载名使用 `macos`，不附构建码；完整构建身份及 SHA256 保留在 `manifest.json` 和 `SHA256SUMS` 中。
+
+CLI 仍使用原来的内部平台键（例如 `darwin-arm64`），安装器读取 manifest 中的新文件名，无需修改平台识别或牺牲完整性校验。桌面包与 CLI 的 Windows 文件分别使用 `-setup.exe` 和 `-cli-windows-x64.exe`，避免混淆。
+
+经原生验收并完成长期密钥签名后，把桌面产物放到同一个 `vVERSION` 的暂存目录；不要再创建 `desktop-vVERSION` 或 `desktop-updates` Release。使用同一套校验文件合并工具，防止桌面清单覆盖 CLI 校验项：
+
+```bash
+node tools/merge_release.mjs downloaded-native dist/native vVERSION
+node tools/desktop-update.mjs downloaded-desktop VERSION https://github.com/luyh7/codex-usage-dashboard/releases/download/vVERSION/ docs/releases/vVERSION.md dist/desktop --platform windows-x86_64 --platform darwin-aarch64
+# 将已验收的 Mac DMG 同样按 macos-arm64.dmg 命名后加入 dist/desktop 及其 SHA256SUMS。
+node tools/assemble-release.mjs dist/native dist/desktop dist/publish vVERSION
+```
+
+所有版本只使用一个 `manifest.json`、一个 `latest.json` 和一个覆盖全部资产的 `SHA256SUMS`。普通用户从 Release 说明顶部的安装包表下载；CLI 入口收在折叠说明中。签名、归档和机器清单仍作为同一 Release 的辅助资产保留。
+
+用户选择移除独立更新频道，不保留兼容入口。已发布 1.0.1/1.1.0 客户端内置的旧地址将停止工作，需要手动下载完整安装包升级；保留配置和导入数据。后续构建使用统一入口 `https://github.com/luyh7/codex-usage-dashboard/releases/latest/download/latest.json`，并继续验证长期公钥更新签名及发行版本。此轮整理复用已验收的程序字节，未重新构建或扩大稳定支持范围。

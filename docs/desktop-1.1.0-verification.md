@@ -10,9 +10,9 @@ Windows 为未购买系统签名的 NSIS；Mac app 与 helper 的完整 ad-hoc �
 
 | 1.1.0 文件 | SHA256 |
 | --- | --- |
-| `cousash-1.1.0-windows-x64.exe` | `21ecfba83b0ee8b45255ebe3e6e9036d0d884f81760be7c58498a30184307b4c` |
-| `cousash-1.1.0-darwin-arm64.dmg` | `bdd4f509313b10b78070ce146db9d9508bfe8d64f41ee924a1529ec6fa7ff93e` |
-| `cousash-1.1.0-darwin-arm64.app.tar.gz` | `927c314102d0f6aeb3f46a47cbba0a3704e898425867d3a583d29b177738175e` |
+| `cousash-1.1.0-windows-x64-setup.exe` | `21ecfba83b0ee8b45255ebe3e6e9036d0d884f81760be7c58498a30184307b4c` |
+| `cousash-1.1.0-macos-arm64.dmg` | `bdd4f509313b10b78070ce146db9d9508bfe8d64f41ee924a1529ec6fa7ff93e` |
+| `cousash-1.1.0-macos-arm64.app.tar.gz` | `927c314102d0f6aeb3f46a47cbba0a3704e898425867d3a583d29b177738175e` |
 
 Mac helper build ID 为 `4cc59a3099dfe7c66165fc1a09249967e63de56dc2d85453c6f3aeb2e433fc6d`；Windows 为 `92ef5bc8741c4750c7883af8028e9f3f4df7e81d19967076360ce0b6bc4ea27b`。
 
@@ -22,7 +22,7 @@ Mac helper build ID 为 `4cc59a3099dfe7c66165fc1a09249967e63de56dc2d85453c6f3aeb
 
 两端都已通过 1.1.0 全新安装、同版重装、卸载保留数据、1.0.1 完整包回退和 1.0.1 → 1.1.0 完整包升级。原生设置界面均显示 1.1.0。准确的 24,000 tokens、语言/时区、来源、设备身份、导入快照、目录记录和窗口尺寸保留。Windows 升级时基线宿主仍在运行，安装器停止本轮宿主及 helper，监视的宿主均正常退出。
 
-固定更新入口继续为 `https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json`。1.1.0 制品放在独立版本 Release `desktop-v1.1.0`；频道清单只列 Windows x64 和 Mac arm64，并指向该版本资产。旧 1.0.1 安装与更新文件保留在 `desktop-updates`，不覆写原字节；其原清单和校验记录也另行保留，用于审计和必要时恢复频道。切换后的匿名 HTTPS 校验、真实应用内安装/重启及最终数据保留结果见 PR #10。
+发布按一个版本一个 Release 整理：桌面安装包、命令行程序、更新清单和校验文件都在 `vVERSION` 下。下载名使用 `macos`，不附构建码；完整构建身份及 SHA256 保留在 `manifest.json` 和 `SHA256SUMS` 中。 用户选择移除独立更新频道，不保留兼容入口。已发布 1.0.1/1.1.0 客户端内置的旧地址将停止工作，需要手动下载完整安装包升级；保留配置和导入数据。后续构建使用统一入口 `https://github.com/luyh7/codex-usage-dashboard/releases/latest/download/latest.json`，并继续验证长期公钥更新签名及发行版本。此轮整理复用已验收的程序字节，未重新构建或扩大稳定支持范围。 原始签名与旧清单保留在本次迁移的本地审计备份中。
 
 ## CI 与限制
 

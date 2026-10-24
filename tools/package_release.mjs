@@ -6,6 +6,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {platformKey,binaryName} from '../skills/codex-usage-dashboard/scripts/install_runtime.mjs';
 import {checkRelease,platforms} from './check_release.mjs';
+import {nativeAssetName} from './release-names.mjs';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const args=process.argv.slice(2);const outputFlag=args.indexOf('--output');
 const output=outputFlag<0?path.join(root,'dist/release'):path.resolve(args[outputFlag+1]);
@@ -21,7 +22,7 @@ if(!args.includes('--skip-build')) {
 const binary=path.join(process.env.CARGO_TARGET_DIR || path.join(root,'target'),'release',binaryName());
 const info=JSON.parse(execFileSync(binary,['--build-info'],{encoding:'utf8'}));
 if(info.ui!=='svelte'||info.version!==config.version) throw Error('Build the current dashboard before packaging; runtime and skill must match');
-const name=`codex-usage-dashboard-${info.version}-${key}-${info.build_id.slice(0,12)}${process.platform==='win32'?'.exe':''}`;
+const name=nativeAssetName(info.version,key);
 await mkdir(output,{recursive:true});await copyFile(binary,path.join(output,name));await chmod(path.join(output,name),0o755);
 const sha256=createHash('sha256').update(await readFile(binary)).digest('hex');
 const manifest={version:info.version,protocol_version:1,ui:info.ui,platforms:{[key]:{file:name,sha256,build_id:info.build_id}}};

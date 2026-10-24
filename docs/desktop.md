@@ -10,7 +10,7 @@
 | macOS | arm64、x64，分别打包 | `.app`、`.dmg` | 配置下限 14.5，尚待最低版本实测 |
 | Linux | x64/glibc | AppImage、`.deb` | 目标 Ubuntu 22.04 / Debian 12；必须在对应基线上打包验证 |
 
-**目标范围不是已验证承诺。** 2026-10-24 用户授权合并 PR #9，并仅按下列已验收环境范围发行桌面稳定版；随后明确将功能版本修正为 Desktop 1.1.0，重新构建、签名并验收从 1.0.1 升级。首发采用免费直装：Windows 不购买应用签名证书，Mac 使用 ad-hoc 签名，不申请 Developer ID 或公证。付费系统签名不作为发行前置条件；最终生产包的两端安装及公开 HTTPS 升级验收已完成。下载与已知限制见 [Desktop 1.1.0](https://github.com/luyh7/codex-usage-dashboard/releases/tag/desktop-v1.1.0)。最新证据见 [1.1.0 版本修正与升级验收](desktop-1.1.0-verification.md)，此前证据见 [审查与发行准备记录](desktop-review-2026-10-24.md)，更早证据见 [验证记录](desktop-verification.md)。
+**目标范围不是已验证承诺。** 2026-10-24 用户授权合并 PR #9，并仅按下列已验收环境范围发行桌面稳定版；随后明确将功能版本修正为 Desktop 1.1.0，重新构建、签名并验收从 1.0.1 升级。首发采用免费直装：Windows 不购买应用签名证书，Mac 使用 ad-hoc 签名，不申请 Developer ID 或公证。付费系统签名不作为发行前置条件；最终生产包的两端安装及公开 HTTPS 升级验收已完成。下载与已知限制见 [Desktop 1.1.0](https://github.com/luyh7/codex-usage-dashboard/releases/tag/v1.1.0)。最新证据见 [1.1.0 版本修正与升级验收](desktop-1.1.0-verification.md)，此前证据见 [审查与发行准备记录](desktop-review-2026-10-24.md)，更早证据见 [验证记录](desktop-verification.md)。
 
 | 首发稳定环境 | 本轮证据与范围 |
 | --- | --- |
@@ -130,7 +130,7 @@ node --test tools/runtime.test.mjs tools/security.test.mjs tools/desktop-update.
 
 ## 更新与发行
 
-用户已确定首发启用应用内自动更新。正式构建使用 [release.stable.json](../desktop/release.stable.json) 中的长期公钥和独立 HTTPS 地址 `https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json`。该固定频道与既有 CLI 版本发布分开；每个版本的制品名称包含版本号，保留旧完整包用于回退。本次候选先在 Release 草稿中准备，经授权公开为预发布并完成真实渠道验收，再经用户明确授权晋级稳定版。桌面频道不占用仓库 CLI 的 Latest 入口；后续稳定晋级也须复用已验收制品并保留限制说明。
+发布按一个版本一个 Release 整理：桌面安装包、命令行程序、更新清单和校验文件都在 `vVERSION` 下。下载名使用 `macos`，不附构建码；完整构建身份及 SHA256 保留在 `manifest.json` 和 `SHA256SUMS` 中。 用户选择移除独立更新频道，不保留兼容入口。已发布 1.0.1/1.1.0 客户端内置的旧地址将停止工作，需要手动下载完整安装包升级；保留配置和导入数据。后续构建使用统一入口 `https://github.com/luyh7/codex-usage-dashboard/releases/latest/download/latest.json`，并继续验证长期公钥更新签名及发行版本。此轮整理复用已验收的程序字节，未重新构建或扩大稳定支持范围。
 
 更新私钥及口令仅保存在维护者本机受保护目录并另行安全备份；仓库只包含公钥。Windows 构建可使用同一公钥/端点并暂不生成更新签名，将最终安装器送回签名机，以 `signer sign --app-version <version>` 生成 `.sig`。Mac 在签名机直接构建更新归档及 `.sig`。两端都使用生产 profile 和真实产品标识，不启用 `desktop-tests`。
 

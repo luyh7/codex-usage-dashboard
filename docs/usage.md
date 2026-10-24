@@ -40,16 +40,20 @@ Node.js 18+ is needed for the installer. The installed executable can subsequent
 
 The npm installer uses `~/.agents/skills/codex-usage-dashboard`, or `$CODEX_HOME/skills/codex-usage-dashboard` when `CODEX_HOME` is explicitly set. The Skills CLI may choose its own skill location.
 
+### Desktop app
+
+Desktop installers and CLI programs share [one Release per version](https://github.com/luyh7/codex-usage-dashboard/releases/latest). Choose `windows-x64-setup.exe` for Windows or `macos-arm64.dmg` for Apple Silicon Mac. See [desktop support and known limitations](desktop.md). Existing 1.0.1/1.1.0 desktop installations use a retired update address and need a manual full-package upgrade.
+
 ### Standalone executable
 
 Download the binary for your platform from [GitHub Releases](https://github.com/luyh7/codex-usage-dashboard/releases/latest). The skill installer uses these same native artifacts.
 
 | Platform | Filename contains | Notes |
 | --- | --- | --- |
-| Windows x64 | `windows-x64` | Ends in `.exe` |
-| Linux x64 | `linux-x64` | glibc; built on Ubuntu 22.04 |
-| macOS Intel | `darwin-x64` | Intel Macs |
-| macOS Apple Silicon | `darwin-arm64` | Apple Silicon Macs |
+| Windows x64 | `cli-windows-x64` | Ends in `.exe` |
+| Linux x64 | `cli-linux-x64` | glibc; built on Ubuntu 22.04 |
+| macOS Intel | `cli-macos-x64` | Intel Macs |
+| macOS Apple Silicon | `cli-macos-arm64` | Apple Silicon Macs |
 
 Linux ARM, Windows ARM, and musl/Alpine are not currently included. GitHub's **Source code** archives do not contain the executable.
 
