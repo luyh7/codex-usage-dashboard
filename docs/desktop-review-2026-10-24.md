@@ -75,7 +75,7 @@ Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832d
 
 用户明确选择“稳定版准备，仅承诺已验收的环境”。首发候选仅列上述 Windows 11 x64 / 已有 WebView2 与 macOS 26.6.2 arm64；Linux WSLg 通过的检查作为实验性证据，Intel Mac、最低系统和独立 Linux 桌面不进入首发稳定支持范围。完整硬件与旧系统矩阵保留为后续工作。
 
-发行组装器新增可重复 `--platform`，可以只组装 Windows x64 和 Mac arm64；默认仍要求四目标，选中目标缺包/缺签名、未知或重复平台均拒绝。先验证全部选中输入、拒绝非空输出目录，再通过排他锁保证同目录只有一个写入者。并发混包回归在加锁前失败、加锁后通过；独立复查确认解决。共 20 项路由、发行和更新清单测试通过。
+发行组装器新增可重复 `--platform`，可以只组装 Windows x64 和 Mac arm64；默认仍要求四目标，选中目标缺包/缺签名、未知或重复平台均拒绝。先验证全部选中输入、拒绝非空输出目录，再通过排他锁保证同目录只有一个写入者。并发混包回归在加锁前失败、加锁后通过；独立复查确认解决。共 20 项路由、发行和更新清单测试通过；其中更新清单 6 项另外在 Windows 与 Linux 分别运行，均通过。
 
 [发行步骤](desktop.md#更新与发行)给出限定平台命令、稳定/实验制品分离与发布前门槛。当前没有正式 Windows 签名、macOS Developer ID/公证或生产更新渠道；最终签名包仍须验证安装、更新、移除、保留数据及回退。准备工作不等于这些外部步骤已完成，也没有公开发布授权。
 
@@ -89,6 +89,10 @@ Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832d
 - [Native compatibility 40064637196](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637196)：四目标和候选组装全部通过，发布及公开下载步骤跳过。
 
 收尾时保留了远端并行加入的 CI 共享构建、缓存及推送差异路由（7100acd、8b2d13d）；应用源码相对 d54921d 没有变化。本地 15 项路由、发行和更新清单测试通过；[统一 Client CI 40065344097](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40065344097) 的共享检查、Native 四目标、Desktop 四目标及候选组装也全部通过，正式发布步骤跳过。新的工作流检查分工见 [CI 说明](development/ci.md)。
+
+最终发行工具提交 **f5de6a3** 的 [Client CI 40069212374](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40069212374) 已完整通过：共享检查（含 20 项路由/发行/更新清单测试）、Native 四目标、Desktop 四目标及候选组装均成功，发布和发布后下载步骤跳过。首次 Mac arm64 任务在编译和 ad-hoc 签名通过后，生成 DMG 时遇到 `hdiutil: create failed - Resource busy`；待整轮结束后仅重跑失败任务，DMG 及后续检查全部通过，其余成功任务没有重新执行。没有为该次资源占用错误修改产品代码。
+
+已下载并校验该轮 Mac 两架构的验证 ZIP，逐项核对严格更新报告：均为当前宿主源码摘要 `dcf923bd…`、六项通过、升级后 24K 与目录记录保留，各有 2 次导航前置重试。证据位于本地 `output/verification/pr9-final-intel-verification.zip` 和 `pr9-final-arm-verification.zip`，ZIP SHA256 分别为 `d612ada4534516ef95219c0c8eeb7792201e34d19da48d7be128b032fdab271e` / `09fcbafec87ea2787f2cd2c99aec9d24850a7b2cb8d89478fa5ab5e21a940a39`。后续收尾仅修改 README 与文档，应用和发行工具源码未变。
 
 当前源码 d54921d 的桌面开发制品已生成，ZIP 摘要来自对应 Actions artifact 元数据；包内文件摘要另见各自的 artifacts.json：
 

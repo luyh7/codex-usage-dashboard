@@ -144,7 +144,7 @@ macOS 使用钥匙串中已有的 Developer ID Application 身份，通过 `bund
 node tools/desktop-update.mjs <downloaded> <version> <https-base-url> <notes-file> <empty-staged-directory> --platform windows-x86_64 --platform darwin-aarch64
 ```
 
-平台参数可重复，可选值为 `windows-x86_64`、`darwin-aarch64`、`darwin-x86_64`、`linux-x86_64`。工具要求每个选中目标都有相同版本的 build manifest 和更新签名；未知、重复或缺失目标会失败，不会静默缩小范围。验证所有输入后才写入，输出目录必须为空，并用排他锁拒绝并发写入，避免平台或版本混包。生成不冲突的制品名称、只含选中目标的 `latest.json` 与校验清单；不上传或发布。实验平台使用独立空目录及渠道，不并入稳定清单。异常中断后保留现场，确认没有写入进程后换用新的空目录重新组装。Windows 应用签名、macOS Developer ID 签名/公证和更新签名分别管理。开发 CI 的 ad-hoc 签名或本地测试更新密钥均不代表正式发行信任。
+平台参数可重复，可选值为 `windows-x86_64`、`darwin-aarch64`、`darwin-x86_64`、`linux-x86_64`。工具要求每个选中目标都有相同版本的 build manifest 和更新签名；未知、重复或缺失目标会失败，不会静默缩小范围。输入的版本、构建标识、文件数量和签名文件格式检查全部通过后才写入；此处的签名格式检查不等于密码学验证，最终包仍须通过客户端公钥校验。输出目录必须为空，并用排他锁拒绝并发写入，避免平台或版本混包。生成不冲突的制品名称、只含选中目标的 `latest.json` 与校验清单；不上传或发布。实验平台使用独立空目录及渠道，不并入稳定清单。异常中断后保留现场，确认没有写入进程后换用新的空目录重新组装。Windows 应用签名、macOS Developer ID 签名/公证和更新签名分别管理。开发 CI 的 ad-hoc 签名或本地测试更新密钥均不代表正式发行信任。
 
 稳定版发布前仍须完成：
 
