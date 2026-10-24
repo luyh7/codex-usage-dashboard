@@ -3,7 +3,6 @@ use tokio::net::{TcpListener, TcpStream};
 
 // Windows can retain a WSL mirrored binding after its listener has exited.
 // Allow TCP cleanup to finish without sharing the port or changing the URL.
-pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(if cfg!(windows) { 360 } else { 60 });
 const RELEASE_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub async fn bind(address: SocketAddr) -> io::Result<TcpListener> {

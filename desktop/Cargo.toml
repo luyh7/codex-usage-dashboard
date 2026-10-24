@@ -1,0 +1,35 @@
+[package]
+name = "cousash-desktop"
+version = "1.0.1"
+edition = "2024"
+license = "MIT"
+build = "build.rs"
+
+[features]
+# Authenticated loopback test controls; excluded from every shipping build.
+desktop-tests = []
+
+[dependencies]
+usage-runtime = { path = "../crates/usage-runtime" }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSURL", "NSString"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[workspace]

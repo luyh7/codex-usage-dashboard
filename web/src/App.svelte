@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { HttpDashboard, DataError, cancelled } from './lib/data/http';
+  import { preferences, savePreferences } from './lib/data/preferences';
+  import { isDesktop, desktop } from './lib/data/desktop';
   import type {
     Query,
     Listing,
@@ -56,6 +58,15 @@
   let lang = $state<Language>(
     stored('language', deviceLanguage()),
   );
+  let settingsError = $state('');
+  async function setLanguage(value: Language) {
+    try { await savePreferences({ language: value }); lang = value; settingsError = ''; }
+    catch (e) { settingsError = String(e); }
+  }
+  async function setTimezone(value: string) {
+    try { await savePreferences({ timezone: value }); save('timezone', value); change('timezone', value); settingsError = ''; }
+    catch (e) { settingsError = String(e); }
+  }
   let t = $derived(words(lang));
   let listing = $state.raw<Listing<Project> | Listing<Session> | null>(null);
   let bundle = $state.raw<DetailBundle | null>(null);
@@ -202,7 +213,7 @@
       syncDetail(changedRevision);
     } catch (e) {
       if (!cancelled(e) && seq === listSequence && alive) {
-        error = e instanceof Error ? e.message : String(e);
+        error = e instanceof DataError && e.status === 503 && !listing ? '' : e instanceof Error ? e.message : String(e);
         if (e instanceof DataError && e.stale) {
           cursor = '';
           void load();
@@ -464,7 +475,23 @@
   }
   onMount(() => {
     persist(true);
-    void load();
+    void (async () => {
+      try {
+        let value = await preferences();
+        if (!value.schema_version) value = await savePreferences({ language: lang, timezone: query.timezone });
+        if (value.language) lang = value.language;
+        if (value.timezone) { query = { ...query, timezone: value.timezone }; save('timezone', value.timezone); }
+      } catch (e) { settingsError = String(e); }
+      if (alive) { persist(true); void load(); }
+    })();
+    const openSettings = () => navigate('settings');
+    window.addEventListener('cousash-settings', openSettings);
+    const shortcut = (event: KeyboardEvent) => {
+      if (!isDesktop() || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      if (event.key === ',') { event.preventDefault(); openSettings(); }
+      if (event.key.toLowerCase() === 'q') { event.preventDefault(); void desktop('quit_desktop').catch(e => settingsError = String(e)); }
+    };
+    window.addEventListener('keydown', shortcut);
     const unsubscribe = data.subscribe(
       (value) => {
         status = value;
@@ -487,6 +514,8 @@
       unsubscribe();
       data.close();
       window.removeEventListener('popstate', back);
+      window.removeEventListener('cousash-settings', openSettings);
+      window.removeEventListener('keydown', shortcut);
     };
   });
 </script>
@@ -519,8 +548,8 @@
   <main>
     {#if page === 'settings'}
       <SettingsPage {data} remotes={listing?.remotes || []} localDevice={listing?.current_device} {lang} timezone={query.timezone}
-        languageChanged={(value) => lang = value}
-        timezoneChanged={(value) => { save('timezone', value); change('timezone', value); }}
+        {settingsError} languageChanged={setLanguage}
+        timezoneChanged={setTimezone}
         changed={() => load()} />
     {/if}
     <div class="overview-page" hidden={page !== 'overview'} inert={page !== 'overview'}>

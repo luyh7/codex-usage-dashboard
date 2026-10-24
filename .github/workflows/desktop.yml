@@ -1,0 +1,99 @@
+name: Desktop clients
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      DESKTOP_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.target }}
+          workspaces: |
+            . -> target
+            desktop -> target
+          cache-workspace-crates: 'false'
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils xvfb
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - run: npm ci --prefix desktop
+      - run: node tools/desktop.mjs bundle --skip-web
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+      - name: Desktop Rust all-feature checks and unit tests
+        run: |
+          cargo clippy --manifest-path desktop/Cargo.toml --release --all-features --target ${{ matrix.target }} -- -D warnings
+          cargo test --manifest-path desktop/Cargo.toml --release --locked --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/target
+      - name: Native desktop startup and duplicate launch
+        if: runner.os != 'Linux'
+        run: |
+          node tools/desktop-smoke.mjs
+          node tools/desktop-concurrency.mjs
+      - name: Linux desktop startup under X11
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a node tools/desktop-smoke.mjs
+          xvfb-run -a node tools/desktop-concurrency.mjs
+      - name: Linux desktop entry integration
+        if: runner.os == 'Linux'
+        run: node --test tools/desktop-entry.test.mjs
+      - name: Verify macOS bundle resources
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP="desktop/target/${DESKTOP_TARGET}/release/bundle/macos/Codex Usage Dashboard.app"
+          test -x "$APP/Contents/MacOS/codex-usage-dashboard"
+          "$APP/Contents/MacOS/codex-usage-dashboard" --build-info
+          codesign --verify --deep --strict "$APP"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: |
+            desktop/target/${{ matrix.target }}/release/bundle/
+            desktop/service-build.json
+            desktop/target/${{ matrix.target }}/release/artifacts.json
+          if-no-files-found: error
+      # Upload production bundles before building the isolated test product.
+      - name: macOS signed update and recovery
+        if: runner.os == 'macOS'
+        run: |
+          node tools/desktop-update-e2e.mjs build
+          node tools/desktop-update-e2e.mjs run
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-verification-${{ matrix.target }}
+          path: output/verification/

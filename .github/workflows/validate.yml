@@ -1,0 +1,146 @@
+name: Client validation
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  checks:
+    name: Shared checks and web build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: node tools/check_release.mjs
+      - run: npm run validate
+      - run: node --check tools/verify_published.mjs
+      - run: node --test tools/release.test.mjs tools/desktop-update.test.mjs tools/ci-changes.test.mjs
+      - name: Rust formatting
+        run: |
+          cargo fmt --check
+          cargo fmt --manifest-path desktop/Cargo.toml -- --check
+      - run: npm ci --prefix web
+      - run: npm run check --prefix web
+      - run: npm test --prefix web
+      - run: npm run build --prefix web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 3
+  native:
+    name: Native (${{ matrix.platform }})
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: windows-2022
+            platform: windows-x64
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: macos-15
+            platform: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      PYTHONUTF8: "1"
+      TZ: UTC
+      RELEASE_PLATFORM: ${{ matrix.platform }}
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          # The frozen legacy oracle includes CPython 3.14.5 timestamp semantics.
+          python-version: '3.14.5'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: native-${{ matrix.platform }}
+          workspaces: . -> target
+          cache-workspace-crates: 'false'
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Clear historical validation reports
+        shell: bash
+        run: rm -f "benchmarks/implementation/results/native-only-${RELEASE_PLATFORM}.json" benchmarks/implementation/results/core-correctness.json
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --examples --bin codex-usage-dashboard --locked
+        env:
+          COUSASH_REQUIRE_WEB: '1'
+      - name: Native protocol, source isolation and installer safety
+        run: node --test tools/runtime.test.mjs tools/security.test.mjs
+        env:
+          AUDIT_BINARY: ${{ runner.os == 'Windows' && 'target/release/codex-usage-dashboard.exe' || 'target/release/codex-usage-dashboard' }}
+      - name: Check standalone Windows runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -property installationPath
+          $dumpbin = Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$dumpbin) { throw 'dumpbin not found' }
+          $dependencies = & $dumpbin.FullName /dependents target/release/codex-usage-dashboard.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect executable dependencies' }
+          $dependencies
+          if ($dependencies -match 'VCRUNTIME|MSVCP|api-ms-win-crt-') { throw 'Executable requires an external C/C++ runtime' }
+      - run: python tools/verify_core.py
+      - run: node tools/package_release.mjs --skip-build
+      - run: node tools/verify_native.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: dist/release/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-${{ matrix.platform }}
+          path: |
+            benchmarks/implementation/results/native-only-${{ matrix.platform }}.json
+            benchmarks/implementation/results/core-correctness.json
+  desktop:
+    name: Desktop
+    needs: checks
+    uses: ./.github/workflows/desktop.yml
+  assemble:
+    name: Assemble release candidate
+    needs: native
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: downloaded
+      - run: node tools/merge_release.mjs downloaded dist/publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate
+          path: dist/publish/
+          if-no-files-found: error

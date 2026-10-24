@@ -1,4 +1,4 @@
-name: Native compatibility and artifacts
+name: Client CI
 on:
   workflow_dispatch:
   pull_request:
@@ -8,27 +8,12 @@ on:
 permissions:
   contents: read
 jobs:
-  native:
-    name: Native (${{ matrix.platform }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            platform: linux-x64
-          - os: windows-2022
-            platform: windows-x64
-          - os: macos-15-intel
-            platform: darwin-x64
-          - os: macos-15
-            platform: darwin-arm64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    env:
-      PYTHONUTF8: "1"
-      TZ: UTC
-      RELEASE_PLATFORM: ${{ matrix.platform }}
-      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+  changes:
+    name: Plan validation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      rebuild: ${{ steps.changes.outputs.rebuild }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,86 +21,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: actions/setup-python@v5
-        with:
-          # The frozen legacy oracle includes CPython 3.14.5 timestamp semantics.
-          python-version: '3.14.5'
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
-      - run: node tools/check_release.mjs
-      - name: Clear historical validation reports
-        shell: bash
-        run: rm -f "benchmarks/implementation/results/native-only-${RELEASE_PLATFORM}.json" benchmarks/implementation/results/core-correctness.json
-      - run: npm run validate
-      - run: node --check tools/verify_published.mjs
-      - run: node --test tools/release.test.mjs
-      - run: npm ci
-        working-directory: web
-      - run: npm run check
-        working-directory: web
-      - run: npm test
-        working-directory: web
-      - run: npm run build
-        working-directory: web
-      - run: cargo fmt --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace --locked
-      - run: cargo build --release --examples --bin codex-usage-dashboard --locked
-        env:
-          COUSASH_REQUIRE_WEB: '1'
-      - name: Verify native API and installer safety
-        run: node --test tools/security.test.mjs
-        env:
-          AUDIT_BINARY: ${{ runner.os == 'Windows' && 'target/release/codex-usage-dashboard.exe' || 'target/release/codex-usage-dashboard' }}
-      - name: Check standalone Windows runtime
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -property installationPath
-          $dumpbin = Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1
-          if (!$dumpbin) { throw 'dumpbin not found' }
-          $dependencies = & $dumpbin.FullName /dependents target/release/codex-usage-dashboard.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect executable dependencies' }
-          $dependencies
-          if ($dependencies -match 'VCRUNTIME|MSVCP|api-ms-win-crt-') { throw 'Executable requires an external C/C++ runtime' }
-      - run: python tools/verify_core.py
-      - run: node tools/package_release.mjs --skip-build
-      - run: node tools/verify_native.mjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-${{ matrix.platform }}
-          path: dist/release/
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: validation-${{ matrix.platform }}
-          path: |
-            benchmarks/implementation/results/native-only-${{ matrix.platform }}.json
-            benchmarks/implementation/results/core-correctness.json
-  assemble:
-    name: Assemble release candidate
-    needs: native
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: native-*
-          path: downloaded
-      - run: node tools/merge_release.mjs downloaded dist/publish
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-candidate
-          path: dist/publish/
-          if-no-files-found: error
+      - id: changes
+        run: node tools/ci-changes.mjs
+  validate:
+    name: Validate clients
+    needs: changes
+    if: needs.changes.outputs.rebuild == 'true'
+    # A docs-only push skips this job and leaves earlier code validation alive.
+    # A code push replaces the complete old validation, including both matrices.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/validate.yml
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: assemble
+    needs: validate
     runs-on: ubuntu-22.04
     permissions:
       contents: write

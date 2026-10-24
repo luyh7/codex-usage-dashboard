@@ -10,6 +10,7 @@ name = "codex-usage-dashboard"
 path = "src/main.rs"
 
 [dependencies]
+usage-runtime = { path = "../usage-runtime" }
 usage-core = { path = "../usage-core" }
 serde.workspace = true
 serde_json.workspace = true

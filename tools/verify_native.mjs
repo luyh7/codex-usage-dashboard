@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fresh installation and real native lifecycle, on 8765, with no Python on PATH.
+// Fresh installation and native lifecycle in an isolated configuration, without interpreters.
 import assert from 'node:assert/strict';
 import {execFileSync,spawn} from 'node:child_process';
 import {mkdtemp,mkdir,readFile,writeFile,rm,copyFile,readdir,chmod,realpath,symlink} from 'node:fs/promises';
@@ -10,18 +10,18 @@ import os from 'node:os';
 import {gunzipSync} from 'node:zlib';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {binaryName,platformKey} from '../skills/codex-usage-dashboard/scripts/install_runtime.mjs';
+import {runtimeDir,cacheDir} from './runtime-paths.mjs';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const worktree=path.join(process.env.CARGO_TARGET_DIR || path.join(root,'target'),'release',binaryName());
-const base='http://127.0.0.1:8765';
-const replace=process.argv.includes('--replace-worktree');
-const occupied=()=>new Promise(resolve=>{const socket=net.connect(8765,'127.0.0.1');socket.once('connect',()=>{socket.destroy();resolve(true)});socket.once('error',()=>resolve(false))});
+let base;
+const occupied=(port=Number(new URL(base).port))=>new Promise(resolve=>{const socket=net.connect(port,'127.0.0.1');socket.once('connect',()=>{socket.destroy();resolve(true)});socket.once('error',()=>resolve(false))});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const until=async test=>{const end=Date.now()+60000;while(!await test()){if(Date.now()>end)throw Error('Timed out');await sleep(50)}};
-if(replace) execFileSync(worktree,['--stop']);
-assert(!await occupied(),'8765 must be free; existing process was not stopped');
+assert(!process.argv.includes('--replace-worktree'),'This verifier never replaces another worktree service');
+assert(!await occupied(8765),'Legacy launcher compatibility requires a free 8765; use an isolated runner/network namespace. Existing listeners were left running.');
 const tmp=await realpath(await mkdtemp(path.join(os.tmpdir(),'native-only-')));
 const codex=path.join(tmp,'codex');await mkdir(path.join(codex,'sessions'),{recursive:true});
 const config=path.join(tmp,'config');
+const runtimeState=runtimeDir(config);
 const emptyPath=path.join(tmp,'no-interpreters');await mkdir(emptyPath);
 const env={...process.env,PATH:emptyPath,CODEX_HOME:codex,COUSASH_CONFIG_DIR:config,TZ:'UTC'};
 const skill=path.join(codex,'skills/codex-usage-dashboard');
@@ -39,13 +39,16 @@ const installArgs=[install,'--runtime-manifest',manifestPath,'--offline'];
 const launchArgs=['--no-browser','--codex-home',codex,'--no-auto-windows','--timezone','UTC'];
 // Synchronous launcher calls can close a server before Node processes pooled
 // socket EOF events. Probe each new process using a fresh, unpooled connection.
-const health=()=>new Promise((resolve,reject)=>{
+const health=async()=>{
+ base='http://'+JSON.parse(await readFile(path.join(runtimeState,'instance.json'),'utf8')).address;
+ return new Promise((resolve,reject)=>{
  const request=http.get(base+'/api/health',{agent:false},response=>{
   let body='';response.setEncoding('utf8');response.on('data',chunk=>body+=chunk);
   response.on('error',reject);response.on('end',()=>{try{assert.equal(response.statusCode,200);resolve(JSON.parse(body))}catch(error){reject(error)}});
  });
  request.on('error',reject);request.setTimeout(5000,()=>request.destroy(Error('Health probe timed out')));
-});
+ });
+};
 const checks=[];
 try {
  assert.equal(run(process.execPath,[install,'--offline'],false),null);checks.push('missing offline artifact fails without fallback');
@@ -123,9 +126,10 @@ try {
  run(binary,launchArgs);assert.equal((await health()).ui,'svelte');
  checks.push('skills CLI update replaces stale runtime with the skill release and preserves obsolete files');
  run(process.execPath,installArgs);run(binary,launchArgs);run(process.execPath,[path.join(skill,'scripts/install_runtime.mjs'),'--rollback']);run(binary,launchArgs);checks.push('verified native-only rollback');
- // Explicit source changes must replace the service even for the same build.
+ // A conflicting source request must preserve the live owner until explicit stop.
  const oldPid=(await health()).pid;const empty=path.join(tmp,'empty');await mkdir(empty);
- run(binary,['--no-browser','--codex-home',empty,'--no-auto-windows']);assert.notEqual((await health()).pid,oldPid);assert.deepEqual((await health()).codex_homes,[process.platform==='win32'?path.toNamespacedPath(empty):empty]);checks.push('source changes replace managed process');
+ assert.equal(run(binary,['--no-browser','--codex-home',empty,'--no-auto-windows'],false),null);assert.equal((await health()).pid,oldPid);
+ run(binary,['--stop']);run(binary,['--no-browser','--codex-home',empty,'--no-auto-windows']);assert.notEqual((await health()).pid,oldPid);assert.deepEqual((await health()).codex_homes,[process.platform==='win32'?path.toNamespacedPath(empty):empty]);checks.push('source conflict preserves owner; explicit stop permits source change');
  if(process.platform==='win32') {
   run(binary,['--stop']);
   const powershell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
@@ -135,7 +139,7 @@ try {
   holderDone.catch(()=>{});
   try {
    await until(async()=>{if(holder.exitCode!==null)throw Error(errors);return output.includes('holding')});
-   assert(!await occupied(),'bound socket must be invisible to connection probes');
+   assert(!await occupied(8765),'bound socket must be invisible to connection probes');
    const probe=net.createServer();
    const bindError=await new Promise(resolve=>{probe.once('error',resolve);probe.listen(8765,'127.0.0.1',()=>probe.close(()=>resolve(null)))});
    assert.equal(bindError?.code,'EADDRINUSE','fixture must retain the real Windows binding');
@@ -144,12 +148,12 @@ try {
    launchDone.catch(()=>{});
    await until(async()=>{
     if(launch.exitCode!==null)throw Error(`Delayed launcher exit ${launch.exitCode}`);
-    return (await readFile(path.join(config,'dashboard.log'),'utf8')).includes('Waiting for Windows to release port 8765');
+    return (await readFile(path.join(runtimeState,'dashboard.log'),'utf8')).includes('Waiting for Windows to release port 8765');
    });
    assert.equal(launch.exitCode,null,'launcher must wait for release instead of failing');
    holder.stdin.end('\n');await holderDone;await launchDone;
    assert.equal((await health()).build_id,entry.build_id);
-   assert((await readFile(path.join(config,'dashboard.log'),'utf8')).includes('Waiting for Windows to release port 8765'));
+   assert((await readFile(path.join(runtimeState,'dashboard.log'),'utf8')).includes('Waiting for Windows to release port 8765'));
    checks.push('Windows waits for an invisible previous binding, then launches on the same port');
   } finally {
    if(holder.exitCode===null)holder.stdin.end('\n');
@@ -159,13 +163,13 @@ try {
  const stream=await fetch(base+'/api/revisions');const reader=stream.body.getReader();await reader.read();run(binary,['--stop']);await reader.cancel();assert(!await occupied());checks.push('authenticated stop closes SSE and releases writer/port');
  // Child process invocation cannot block this Node HTTP handler: run async here.
  const foreign=http.createServer((req,res)=>{res.end(JSON.stringify({app:'unrelated'}))});await new Promise(r=>foreign.listen(8765,'127.0.0.1',r));
- try {const code=await new Promise((resolve,reject)=>{const child=spawn(binary,launchArgs,{env,cwd:tmp,stdio:'ignore'});child.on('error',reject);child.on('exit',resolve)});assert.notEqual(code,0);assert(await occupied())}
+ try {const code=await new Promise((resolve,reject)=>{const child=spawn(binary,launchArgs,{env,cwd:tmp,stdio:'ignore'});child.on('error',reject);child.on('exit',resolve)});assert.notEqual(code,0);assert(await occupied(8765))}
  finally {await new Promise(r=>foreign.close(r))}
- checks.push('foreign port owner remains running');
+ checks.push('legacy fixed-port launcher preserves foreign owner; desktop dynamic ports are tested separately');
  const report={passed:true,platform:platformKey(),version:manifest.version,ui:manifest.ui,build_id:entry.build_id,python_on_path:false,checks};
  await mkdir(path.join(root,'benchmarks/implementation/results'),{recursive:true});await writeFile(path.join(root,'benchmarks/implementation/results',`native-only-${platformKey()}.json`),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
-} catch(error) { console.error('Completed checks:',checks); console.error(await readFile(path.join(config,'dashboard.log'),'utf8').catch(()=>'')); throw error; } finally {
- if(await occupied()) {try{run(binary,['--stop'])}catch(e){console.error(e.message)}}
+} catch(error) { console.error('Completed checks:',checks); console.error(await readFile(path.join(runtimeState,'dashboard.log'),'utf8').catch(()=>'')); throw error; } finally {
+ try{run(binary,['--stop'])}catch(e){console.error(e.message)}
+ if(process.platform!=='win32'){const cache=cacheDir(config);assert.match(path.basename(cache),/^[a-f0-9]{64}$/);await rm(cache,{recursive:true,force:true});}
  await rm(tmp,{recursive:true,force:true});
- if(replace) execFileSync(worktree,['--no-browser'],{stdio:'inherit'});
 }

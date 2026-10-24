@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/usage-core", "crates/usage-server"]
-exclude = ["benchmarks/refactor/rust"]
+members = ["crates/usage-core", "crates/usage-server", "crates/usage-runtime"]
+exclude = ["benchmarks/refactor/rust", "desktop"]
 resolver = "3"
 
 [workspace.package]

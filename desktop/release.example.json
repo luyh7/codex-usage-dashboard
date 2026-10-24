@@ -1,0 +1,10 @@
+{
+  "bundle": { "createUpdaterArtifacts": true },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_PUBLIC_UPDATER_KEY",
+      "endpoints": ["https://YOUR_RELEASE_HOST/cousash/latest.json"],
+      "requireSignedVersion": true
+    }
+  }
+}

@@ -33,25 +33,7 @@ pub fn wsl() -> bool {
         })
 }
 pub fn config_dir() -> PathBuf {
-    if let Ok(path) = env::var("COUSASH_CONFIG_DIR")
-        && !path.is_empty()
-    {
-        return expand_home(&path);
-    }
-    let home = expand_home("~");
-    match platform() {
-        "Darwin" => home.join("Library/Application Support/cousash"),
-        "Windows" => env::var_os("APPDATA")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("AppData/Roaming"))
-            .join("cousash"),
-        _ => env::var_os("XDG_CONFIG_HOME")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".config"))
-            .join("cousash"),
-    }
+    usage_runtime::config_dir()
 }
 pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
     let parent = path

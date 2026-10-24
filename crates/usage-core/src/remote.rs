@@ -15,7 +15,7 @@ use sha1::{Digest, Sha1};
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
-    io::Write,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -76,8 +76,12 @@ fn write(path: &Path, value: &Value) -> Result<(), Error> {
     let parent = path.parent().unwrap();
     fs::create_dir_all(parent)?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(&mut file, value)?;
-    file.write_all(b"\n")?;
+    {
+        let mut buffered = BufWriter::with_capacity(256 * 1024, &mut file);
+        serde_json::to_writer_pretty(&mut buffered, value)?;
+        buffered.write_all(b"\n")?;
+        buffered.flush()?;
+    }
     file.as_file().sync_all()?;
     file.persist(path).map_err(|e| e.error)?;
     #[cfg(unix)]

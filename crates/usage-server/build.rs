@@ -29,6 +29,8 @@ fn main() {
         "crates/usage-server/src",
         "crates/usage-server/build.rs",
         "crates/usage-server/Cargo.toml",
+        "crates/usage-runtime/src",
+        "crates/usage-runtime/Cargo.toml",
     ] {
         collect(&root.join(path), &mut hash);
     }

@@ -2,6 +2,10 @@
 
 [← README](../../README.md) · [Usage guide](../usage.md)
 
+Desktop clients: [build, runtime protocol and distribution](../desktop.md) · [platform verification](../desktop-verification.md).
+
+[CI routing, caches and platform checks](ci.md) describes the shared validation pipeline and documentation-only pushes.
+
 ## Prerequisites
 
 - Rust stable.

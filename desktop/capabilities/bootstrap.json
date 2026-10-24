@@ -1,0 +1,5 @@
+{
+  "identifier": "bootstrap",
+  "windows": ["main"],
+  "permissions": ["allow-retry-service"]
+}

@@ -1,7 +1,9 @@
+mod commands;
 mod config;
 mod http;
 mod launcher;
 mod network;
+mod preferences;
 mod redact;
 mod security;
 mod service;
@@ -11,6 +13,10 @@ use std::{net::SocketAddr, path::PathBuf};
 #[derive(Parser)]
 #[command(version, about = "Local read-only Codex Usage Dashboard")]
 struct Args {
+    #[command(subcommand)]
+    action: Option<commands::Action>,
+    #[arg(long, hide = true, requires = "serve")]
+    managed: bool,
     #[arg(long)]
     codex_home: Vec<PathBuf>,
     #[arg(long)]
@@ -50,6 +56,8 @@ struct Args {
     redact: bool,
     #[arg(long)]
     build_info: bool,
+    #[arg(long, hide = true, requires = "build_info")]
+    resolve_sources: bool,
     #[arg(long)]
     timezone: Option<String>,
 }
@@ -57,10 +65,28 @@ struct Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     if args.build_info {
-        println!(
-            "{}",
-            serde_json::json!({"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"ui":env!("COUSASH_UI")})
-        );
+        let mut info = serde_json::json!({"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"ui":env!("COUSASH_UI")});
+        if args.resolve_sources {
+            let homes = if args.codex_home.is_empty() {
+                preferences::load()?.codex_homes
+            } else {
+                args.codex_home
+            };
+            info["sources_id"] = serde_json::to_value(
+                usage_runtime::sources_id(
+                    &config::sources(&homes, !args.no_auto_windows)
+                        .iter()
+                        .map(|source| source.home.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .map_err(|error| error.to_string())?,
+            )?;
+        }
+        println!("{info}");
+        return Ok(());
+    }
+    if let Some(action) = args.action {
+        commands::run(action);
         return Ok(());
     }
     if args.port != 8765 && !args.serve {
@@ -76,19 +102,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !args.serve && !args.once && args.export_snapshot.is_none() {
         return launcher::run(&args);
     }
+    let preferences = preferences::load()?;
     let zone = args
         .timezone
+        .or(preferences.timezone)
         .or_else(|| std::env::var("TZ").ok())
         .or_else(|| iana_time_zone::get_timezone().ok())
         .unwrap_or_else(|| "UTC".into())
         .parse()?;
-    let sources = config::sources(&args.codex_home, !args.no_auto_windows);
+    let homes = if args.codex_home.is_empty() {
+        preferences.codex_homes
+    } else {
+        args.codex_home.clone()
+    };
+    let sources = config::sources(&homes, !args.no_auto_windows);
     // Claim the requested port before opening the index. A previous Windows/WSL
     // binding can outlive its process, and waiting must not hold the index lock.
     let listener = if args.serve {
         let address = SocketAddr::new(args.host.parse()?, args.port);
         security::require_loopback(address)?;
         Some(network::bind(address).await?)
+    } else {
+        None
+    };
+    let _registration = if args.managed {
+        Some(
+            usage_runtime::register(usage_runtime::Record {
+                schema_version: 1,
+                address: listener.as_ref().unwrap().local_addr()?,
+                pid: std::process::id(),
+                instance_id: std::env::var("COUSASH_INSTANCE_ID")?,
+                version: env!("CARGO_PKG_VERSION").into(),
+                build_id: env!("COUSASH_BUILD_ID").into(),
+                protocol_version: usage_runtime::PROTOCOL,
+                config_dir: config::config_dir(),
+                codex_homes: sources.iter().map(|source| source.home.clone()).collect(),
+                executable: std::env::current_exe()?,
+                auto_windows: !args.no_auto_windows,
+                shutdown_token: std::env::var("COUSASH_SHUTDOWN_TOKEN")?,
+            })
+            .map_err(|e| e.to_string())?,
+        )
     } else {
         None
     };
@@ -187,6 +241,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let listener = listener.expect("server listener was bound before indexing");
     let address = listener.local_addr()?;
+    if let Ok(pid) = std::env::var("COUSASH_OWNER_PID")
+        && let Ok(pid) = pid.parse::<u32>()
+    {
+        let owner = usage_runtime::OwnerProcess::capture(pid).map_err(|e| e.to_string())?;
+        let state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if !owner.is_alive() {
+                    state.shutdown.notify_one();
+                    break;
+                }
+            }
+        });
+    }
     if args.open && !args.no_browser {
         std::thread::spawn(move || {
             let _ = launcher::open_browser_url(&format!("http://{address}/"));
