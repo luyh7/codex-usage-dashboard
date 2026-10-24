@@ -98,3 +98,60 @@ test('missing and empty session directories are reported without inventing usage
     }
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('automatic and saved source changes reject stale services without exporting their data',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'cousash-source-conflict-'));
+  const state=path.join(dir,'state'),first=path.join(dir,'日志 A'),second=path.join(dir,'日志 B');
+  await mkdir(state);await mkdir(path.join(first,'sessions'),{recursive:true});await mkdir(path.join(second,'sessions'),{recursive:true});
+  const fixture=[
+    {type:'session_meta',payload:{id:'source-conflict',model:'gpt-5',cwd:'/synthetic/source'}},
+    {timestamp:'2026-10-23T00:00:00Z',type:'event_msg',payload:{type:'token_count',info:{total_token_usage:{input_tokens:100,output_tokens:20,total_tokens:120}}}},
+  ].map(JSON.stringify).join('\n')+'\n';
+  await writeFile(path.join(first,'sessions/test.jsonl'),fixture);
+  const env={...process.env,COUSASH_CONFIG_DIR:state,CODEX_HOME:first};
+  try{
+    assert.equal((await cli(['summary','--period','all','--json'],env)).value.data.summary.usage.total_tokens,120);
+    const record=JSON.parse(await readFile(path.join(runtimeDir(state),'instance.json'),'utf8'));
+    const base='http://'+record.address;
+    const output=path.join(dir,'keep.json');await writeFile(output,'keep');
+    const changed={...env,CODEX_HOME:second};
+    for(const args of [['summary','--period','all','--json'],['export','--output',output,'--json']]){
+      const result=await cli(args,changed);assert.equal(result.code,1);assert.match(result.value.error.message,/log source owns this configuration/);
+    }
+    const launch=await cli(['--launch','--no-browser','--no-auto-windows'],changed,false);
+    assert.equal(launch.code,1);assert.match(launch.err,/log source owns this configuration/);
+    assert.equal(await readFile(output,'utf8'),'keep');
+    assert.equal((await(await fetch(base+'/api/health')).json()).pid,record.pid);
+    // A changed preference must be checked even when CODEX_HOME is unchanged.
+    const token=(await(await fetch(base+'/api/security/token')).json()).token;
+    assert.equal((await fetch(base+'/api/settings',{method:'POST',headers:{'Content-Type':'application/json','x-codex-write-token':token},body:JSON.stringify({codex_homes:[second]})})).status,200);
+    const saved=await cli(['summary','--period','all','--json'],env);
+    assert.equal(saved.code,1);assert.match(saved.value.error.message,/log source owns this configuration/);
+    assert.equal((await cli(['status','--json'],env)).value.data.pid,record.pid);
+    await cli(['--stop'],env,false);
+    assert.equal((await cli(['summary','--period','all','--json'],env)).value.data.summary.session_count,0);
+  }finally{
+    await cli(['--stop'],env,false);
+    if(process.platform!=='win32')await rm(cacheDir(state),{recursive:true,force:true});
+    await rm(dir,{recursive:true,force:true});
+  }
+});
+
+test('WSL launch and CLI reuse the same effective explicit sources across discovery modes',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'cousash-discovery-mode-'));
+  const state=path.join(dir,'state'),home=path.join(dir,'logs');await mkdir(state);await mkdir(home);
+  await writeFile(path.join(state,'preferences.json'),JSON.stringify({schema_version:1,codex_homes:[home]}));
+  const env={...process.env,COUSASH_CONFIG_DIR:state,CODEX_HOME:home,WSL_DISTRO_NAME:'cousash-test'};
+  try{
+    assert.equal((await cli(['summary','--period','all','--json'],env)).code,0);
+    const before=(await cli(['status','--json'],env)).value.data.pid;
+    const launch=await cli(['--launch','--no-browser'],env,false);
+    assert.equal(launch.code,0,launch.err);
+    assert.equal((await cli(['summary','--period','all','--json'],env)).code,0);
+    assert.equal((await cli(['status','--json'],env)).value.data.pid,before);
+  }finally{
+    await cli(['--stop'],env,false);
+    if(process.platform!=='win32')await rm(cacheDir(state),{recursive:true,force:true});
+    await rm(dir,{recursive:true,force:true});
+  }
+});

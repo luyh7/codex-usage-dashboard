@@ -47,16 +47,8 @@ pub enum Action {
 }
 fn record(start: bool) -> Result<Option<Record>> {
     let root = crate::config::config_dir();
-    if let Some(r) = (if start {
-        Record::read(&root).ok().flatten()
-    } else {
-        Record::read(&root)?
-    }) && r.health().is_ok()
-    {
-        return Ok(Some(r));
-    }
     if !start {
-        return Ok(None);
+        return Ok(Record::read(&root)?.filter(|record| record.health().is_ok()));
     }
     let homes = crate::preferences::load()?.codex_homes;
     Ok(Some(

@@ -56,6 +56,8 @@ struct Args {
     redact: bool,
     #[arg(long)]
     build_info: bool,
+    #[arg(long, hide = true, requires = "build_info")]
+    resolve_sources: bool,
     #[arg(long)]
     timezone: Option<String>,
 }
@@ -63,10 +65,24 @@ struct Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     if args.build_info {
-        println!(
-            "{}",
-            serde_json::json!({"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"ui":env!("COUSASH_UI")})
-        );
+        let mut info = serde_json::json!({"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"ui":env!("COUSASH_UI")});
+        if args.resolve_sources {
+            let homes = if args.codex_home.is_empty() {
+                preferences::load()?.codex_homes
+            } else {
+                args.codex_home
+            };
+            info["sources_id"] = serde_json::to_value(
+                usage_runtime::sources_id(
+                    &config::sources(&homes, !args.no_auto_windows)
+                        .iter()
+                        .map(|source| source.home.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .map_err(|error| error.to_string())?,
+            )?;
+        }
+        println!("{info}");
         return Ok(());
     }
     if let Some(action) = args.action {
@@ -120,7 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 build_id: env!("COUSASH_BUILD_ID").into(),
                 protocol_version: usage_runtime::PROTOCOL,
                 config_dir: config::config_dir(),
-                codex_homes: homes,
+                codex_homes: sources.iter().map(|source| source.home.clone()).collect(),
                 executable: std::env::current_exe()?,
                 auto_windows: !args.no_auto_windows,
                 shutdown_token: std::env::var("COUSASH_SHUTDOWN_TOKEN")?,

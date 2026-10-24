@@ -120,22 +120,50 @@ pub async fn choose_source(
 pub async fn apply_sources(
     window: WebviewWindow,
     app: tauri::AppHandle,
+    codex_homes: Vec<PathBuf>,
 ) -> std::result::Result<(), String> {
     trusted_live(&window, &app).await?;
     tauri::async_runtime::spawn_blocking(move || -> std::result::Result<(), String> {
         let state = app.state::<Desktop>();
-        let mut service = state.service.lock().unwrap();
-        if let Some(current) = service.as_ref() {
+        if state.busy.swap(true, Ordering::SeqCst) {
+            return Err("The application is still starting or reconnecting. Retry shortly.".into());
+        }
+        let result = (|| -> Result<()> {
+            let mut service = state.service.lock().unwrap();
+            let current = service.as_ref().ok_or("service stopped")?;
             if !current.owned {
                 return Err(
                     "Quit the independently running dashboard before changing its log sources."
                         .into(),
                 );
             }
-            current.record.stop().map_err(|e| e.to_string())?;
-        }
-        *service = None;
-        drop(service);
+            let base = current.record.url();
+            let previous = usage_runtime::get_json(&format!("{base}/api/settings"))?;
+            let token = usage_runtime::get_json(&format!("{base}/api/security/token"))?;
+            let save = |homes: Value| -> Result<()> {
+                usage_runtime::agent()
+                    .post(format!("{base}/api/settings"))
+                    .header(
+                        "x-codex-write-token",
+                        token["token"].as_str().ok_or("missing write token")?,
+                    )
+                    .send_json(json!({"codex_homes": homes}))?;
+                Ok(())
+            };
+            save(json!(codex_homes))?;
+            if let Err(error) = current.record.stop() {
+                if let Err(rollback) = save(previous["codex_homes"].clone()) {
+                    return Err(
+                        format!("{error}; could not restore log sources: {rollback}").into(),
+                    );
+                }
+                return Err(error);
+            }
+            *service = None;
+            Ok(())
+        })();
+        state.busy.store(false, Ordering::SeqCst);
+        result.map_err(|e| e.to_string())?;
         window
             .navigate(bootstrap_url())
             .map_err(|e| e.to_string())?;

@@ -6,7 +6,7 @@
   import RemoteManager from './RemoteManager.svelte';
   import DesktopSettings from './DesktopSettings.svelte';
   import { isDesktop, desktop } from '../lib/data/desktop';
-  import { preferences, savePreferences } from '../lib/data/preferences';
+  import { preferences } from '../lib/data/preferences';
   import { onMount } from 'svelte';
 
   let { data, remotes, localDevice, lang, timezone, languageChanged, timezoneChanged, changed, settingsError = '' }: {
@@ -22,7 +22,7 @@
   } = $props();
   let t = $derived(words(lang));
   const supportedTimezones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : ['Asia/Shanghai', 'Asia/Tokyo', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris'];
-  let homes = $state<string[]>([]), sourceError = $state(''), sourceSaved = $state(false);
+  let homes = $state<string[]>([]), sourceError = $state('');
   let effectiveSources = $state<{ path: string; status: string }[]>([]);
   let sourceBusy = $state(false);
   const sourceLabels: Record<string, [string, string]> = { missing: ['未找到日志文件夹', 'Log folder not found'], unreadable: ['无法读取日志文件夹', 'Cannot read log folder'], empty: ['此文件夹尚无 Codex 日志', 'No Codex logs in this folder'] };
@@ -32,7 +32,7 @@
   });
   async function saveSources(paths: string[]) {
     sourceBusy = true; sourceError = '';
-    try { await savePreferences({ codex_homes: paths }); homes = paths; sourceSaved = true; await desktop('apply_sources'); }
+    try { await desktop('apply_sources', { codexHomes: paths }); homes = paths; }
     catch (e) { sourceError = String(e); } finally { sourceBusy = false; }
   }
   async function chooseSource() {
@@ -73,7 +73,6 @@
         {#each effectiveSources as source}<p class="source-path">{source.path}</p>{#if sourceLabels[source.status]}<p role="status">{sourceLabels[source.status][lang === 'zh' ? 0 : 1]}</p>{/if}{/each}
         <button disabled={sourceBusy} onclick={chooseSource}>{lang === 'zh' ? '选择文件夹' : 'Choose folder'}</button>
         {#if homes.length}<button disabled={sourceBusy} onclick={() => saveSources([])}>{lang === 'zh' ? '恢复自动发现' : 'Discover automatically'}</button>{/if}
-        {#if sourceSaved}<p role="status">{lang === 'zh' ? '已保存，退出并重新打开应用后生效。' : 'Saved. Quit and reopen the application to apply.'}</p>{/if}
         {#if sourceError}<p class="error" role="alert">{sourceError}</p>{/if}
       </section>
     {/if}

@@ -21,6 +21,10 @@ pub fn scope_id(root: &Path) -> String {
         Sha256::digest(absolute(root).to_string_lossy().as_bytes())
     )
 }
+pub fn sources_id(homes: &[PathBuf]) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(homes)?)))
+}
 pub const TIMEOUT: Duration = Duration::from_secs(90);
 pub fn ureq_url(value: &str) -> Result<url::Url> {
     Ok(url::Url::parse(value)?)
@@ -433,8 +437,17 @@ pub fn ensure_service_options(
     private_dir(&runtime)?;
     let _lock = lock(&runtime, "startup.lock", TIMEOUT)?;
     use wait_timeout::ChildExt;
-    let mut inspection = hidden(&mut Command::new(binary))
-        .arg("--build-info")
+    let mut inspection_command = Command::new(binary);
+    inspection_command
+        .args(["--build-info", "--resolve-sources"])
+        .env("COUSASH_CONFIG_DIR", root);
+    if !auto_windows {
+        inspection_command.arg("--no-auto-windows");
+    }
+    for home in homes {
+        inspection_command.arg("--codex-home").arg(home);
+    }
+    let mut inspection = hidden(&mut inspection_command)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -449,6 +462,9 @@ pub fn ensure_service_options(
         return Err("cannot inspect bundled service".into());
     }
     let info: Value = serde_json::from_slice(&output.stdout)?;
+    let resolved_sources = info["sources_id"]
+        .as_str()
+        .ok_or("missing source identity")?;
     let discovered = match Record::read(root) {
         Ok(record) => record,
         Err(error) => {
@@ -465,9 +481,7 @@ pub fn ensure_service_options(
         && let Ok(health) = record.health()
     {
         if record.build_id != info["build_id"].as_str().unwrap_or("")
-            || record.codex_homes != homes
-            || (std::env::var_os("WSL_DISTRO_NAME").is_some()
-                && record.auto_windows != auto_windows)
+            || sources_id(&record.codex_homes)? != resolved_sources
             || timezone.is_some_and(|zone| health["timezone"] != zone)
         {
             return Err("another service version or log source owns this configuration; quit it before retrying, or choose a separate COUSASH_CONFIG_DIR".into());
