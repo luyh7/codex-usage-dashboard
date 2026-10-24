@@ -10,7 +10,14 @@
 | macOS | arm64、x64，分别打包 | `.app`、`.dmg` | 配置下限 14.5，尚待最低版本实测 |
 | Linux | x64/glibc | AppImage、`.deb` | 目标 Ubuntu 22.04 / Debian 12；必须在对应基线上打包验证 |
 
-**目标范围不是已验证承诺。** 本次实际环境、制品及缺口见 [验证记录](desktop-verification.md)。在更新系统上生成 AppImage 不代表它能在旧系统上运行。Windows ARM、Linux ARM/musl 和 macOS Universal 不在首批范围内。
+**目标范围不是已验证承诺。** 2026-10-24 用户将本轮目标明确为“稳定版准备，仅承诺已验收的环境”。首发候选范围如下；当前制品仍是开发包，正式签名及渠道验收通过前不标记为稳定发行。最新证据见 [审查与发行准备记录](desktop-review-2026-10-24.md)，更早证据见 [验证记录](desktop-verification.md)。
+
+| 首发候选环境 | 本轮证据与范围 |
+| --- | --- |
+| Windows 11 x64，系统 build 22631，已有 WebView2 155.0.4283.62 | 当前 CI 包宿主的界面、原生来源/文件操作、服务隔离，以及同源码隔离产品的严格更新/恢复检查通过；不承诺 Windows 10 或全新/离线 WebView2 部署 |
+| macOS 26.6.2（25G83），Apple Silicon arm64 | 当前生产配置包的原生界面、大快照、来源与服务恢复，以及同源码隔离产品的严格更新/恢复检查通过；不扩展为最低 14.5 或 Intel 承诺 |
+
+Linux AppImage 在 Ubuntu 26.04 / WSLg 的当前包烟测、并发及同源码更新/恢复通过，暂保留实验性质；Intel Mac 和其余未验收系统也不进入首发稳定更新清单。多屏、高 DPI 切换、睡眠唤醒、真实登录启动和长期运行仍未完整验收，不能用上述核心流程检查覆盖。在更新系统上生成 AppImage 不代表它能在旧系统上运行。Windows ARM、Linux ARM/musl 和 macOS Universal 不在首批范围内。
 
 Windows 安装器在没有 WebView2 时联网安装运行库；离线环境须预先安装 WebView2。Linux `.deb` 声明 WebKitGTK 4.1 和托盘依赖，AppImage 的运行仍受宿主内核、glibc 和图形环境限制。运行库与编译工具是不同的要求。
 
@@ -131,13 +138,19 @@ node --test tools/runtime.test.mjs tools/security.test.mjs tools/desktop-update.
 
 macOS 使用钥匙串中已有的 Developer ID Application 身份，通过 `bundle.macOS.signingIdentity` 或 `APPLE_SIGNING_IDENTITY` 指定。公证凭据使用 `APPLE_API_ISSUER`、`APPLE_API_KEY`（Key ID）和 `APPLE_API_KEY_PATH`（私钥文件路径），或 Apple ID 对应的三项凭据；不把值写入仓库。构建后检查整个 app、包内辅助程序以及公证票据：`codesign --verify --deep --strict <app>`、`spctl --assess --type execute --verbose <app>`、`xcrun stapler validate <app>`。具体证书导入和公证步骤见 [Tauri macOS 签名](https://v2.tauri.app/distribute/sign/macos/)。当前 PR 的 CI 固定使用 ad-hoc 开发签名，不消费正式证书或公证凭据；正式签名构建及凭据注入尚未实测，不能把这些配置说明算作验证通过。
 
-签名构建完成后，下载四份 `desktop-<Rust target>` 制品到同一目录，生成更新源：
+签名构建完成后，将所选平台的 `desktop-<Rust target>` 制品下载到同一目录，生成更新源。省略 `--platform` 时仍要求四种架构；首发候选范围使用显式选择：
 
 ```text
-node tools/desktop-update.mjs <downloaded> <version> <https-base-url> <notes-file> <staged-directory>
+node tools/desktop-update.mjs <downloaded> <version> <https-base-url> <notes-file> <empty-staged-directory> --platform windows-x86_64 --platform darwin-aarch64
 ```
 
-该工具要求四种架构、相同版本的 build manifest 和每份更新签名，生成不冲突的制品名称、`latest.json` 与校验清单；不上传或发布。Windows 应用签名、macOS Developer ID 签名/公证和更新签名分别管理。开发 CI 的 ad-hoc 签名或本地测试更新密钥均不代表正式发行信任。
+平台参数可重复，可选值为 `windows-x86_64`、`darwin-aarch64`、`darwin-x86_64`、`linux-x86_64`。工具要求每个选中目标都有相同版本的 build manifest 和更新签名；未知、重复或缺失目标会失败，不会静默缩小范围。验证所有输入后才写入，输出目录必须为空，并用排他锁拒绝并发写入，避免平台或版本混包。生成不冲突的制品名称、只含选中目标的 `latest.json` 与校验清单；不上传或发布。实验平台使用独立空目录及渠道，不并入稳定清单。异常中断后保留现场，确认没有写入进程后换用新的空目录重新组装。Windows 应用签名、macOS Developer ID 签名/公证和更新签名分别管理。开发 CI 的 ad-hoc 签名或本地测试更新密钥均不代表正式发行信任。
+
+稳定版发布前仍须完成：
+
+1. 提供正式 Windows 签名、macOS Developer ID/公证和生产更新密钥/HTTPS 端点；按上述命令验证实际最终包。当前测试密钥和 ad-hoc 签名不作替代。
+2. 用最终签名包在候选环境做干净安装、首次打开、完整包升级/移除与保留数据检查，并在真实生产渠道验证版本绑定、下载、签名、安装/重启及失败恢复。更新测试产品的通过不能替代这一步。
+3. 冻结版本、制品摘要、支持说明和回退完整包；复查稳定更新清单只列已验收目标。取得公开发布授权后再上传、打标签或发布。
 
 `node tools/desktop-update-e2e.mjs build` / `run` 在 Windows、macOS 两架构和 Linux AppImage 上构建并测试隔离更新产品，版本为 1.0.1 → 1.0.2。它使用本地源、临时密钥和 `desktop-tests` feature，所有测试数据留在忽略的 `output/` 内。测试接口只存在该 feature 构建中，没有加入 WebView 权限或生产默认配置。测试后必须重新执行正常 `bundle`，交付不带该 feature 的制品。
 

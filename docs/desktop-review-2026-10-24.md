@@ -1,4 +1,4 @@
-# PR #9 审查与 Mac 实机补验
+# PR #9 审查与发行准备验证
 
 审查基线为 main 的 38b9d03 至 PR 原始 HEAD 7f1fde5（15 个提交、75 个文件）。规范与需求两条审查分别执行。规范审查没有确认的违规；需求审查确认并修复三项 P2 来源一致性问题，应用源码提交为 **d54921d**。修复后的独立复查确认三项均解决，没有发现新引入的可操作缺陷。
 
@@ -41,6 +41,44 @@
 
 本机正常 1.0.1 arm64 DMG 的 SHA256 为 `ceeb097908862d99793da9581f32c91a1cfd115a39903a0d767f90f9121a7526`，位于 `desktop/target/aarch64-apple-darwin/release/bundle/dmg/Codex Usage Dashboard_1.0.1_aarch64.dmg`。本地包与 CI 包分别构建，摘要及 build ID 不混用。
 
+## 当前 Windows 与 Linux 补验
+
+本轮从统一 Client CI 40065344097 下载 Windows、Linux 开发制品，核对 ZIP 摘要后在独立临时目录运行；应用源码相对 d54921d 未变，没有用历史包替代当前来源修复验证。Windows 为 Windows 11 x64（build 22631），现有 WebView2 155.0.4283.62；Linux 为 Ubuntu 26.04 / WSL2 / WSLg、WebKitGTK 2.52.6、GTK 3.24.52，不能当作独立 Linux 桌面验收。既有远端工作树及业务数据不改动，所有日志与快照均为隔离合成数据。
+
+| 当前下载 | ZIP SHA256 |
+| --- | --- |
+| [Windows Desktop 12549362831](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40065344097/artifacts/12549362831) | `57aa2548714a2f8efb0e0819a8a4030577c4ea68cbcddbc5928e46762e2982a9` |
+| [Linux Desktop 12549328028](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40065344097/artifacts/12549328028) | `54ee4723e6227af58dac3f95b668c2682e0972cf51e6fef52f5f7dd2d0ebc79e` |
+| [Linux Native 12548833968](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40065344097/artifacts/12548833968) | `20672c1addd8e1c467c5606a420b04ac5f7c3affba5375784496efd979a86671` |
+
+Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832da25b636f0e8933dff95a4691`；Linux 为 `3e9a54dc1065e9a410cd3b620eb59df29896a8bdaea1bc5b5ca441c6c4e388b7`。各自服务身份与包内 manifest 核对，不要求跨平台 build ID 相等。
+
+已通过：
+
+- Windows 当前辅助程序的协议、安全、来源回归、快捷入口及离线 Skill 安装器 8 项检查；Linux 7 项通过、Windows 专属项跳过。Windows 测试需要独立 helper 布局，不能用含桌面宿主的目录测试“未安装桌面”分支。
+- Windows 当前 CI 安装器解出的宿主启动、单实例、同配置并发、双配置隔离、退出隔离和 1380×900 窗口尺寸往返；Linux 当前 AppImage 的 extract-and-run 启动及同样并发/隔离/窗口往返。Linux 必须经过 AppRun 设置运行环境，直接运行内层 ELF 曾因缺少 WebKitNetworkProcess 失败，正确入口复验通过。
+- 1,000 会话、100,000 条事件、12M 合成负载的单轮冷启动：Windows 4,576 ms、Linux WSL 文件系统 1,793 ms；5 次摘要中位数分别 0.5 / 0.6 ms。只作当前单轮观察，不扩展为性能保证。
+- 两端当前宿主源码的隔离临时签名更新产品均严格通过六项：离线、下载中断、错误签名、版本不符、已签名但无效的安装包恢复，以及 1.0.1 → 1.0.2 安装/重启。设置、身份、导入快照、目录记录及 24K 保留，宿主退出码 0；Windows 测试产品卸载退出码 0。源码摘要均为 `dcf923bd8d29a4ae78fd91329c55a9a526c76a76c061640a0a79c30d0fbd4e35`。测试产物和生产 CI 包在不同 target 目录，未覆盖交付包。
+
+另通过远程实际操作 Windows 原生窗口：
+
+- 当前包界面与原生来源选择框切到中文/空格目录，服务 PID、端口改变，12K → 24K；CLI open 能激活原窗口。
+- 原生完整及脱敏保存成功，解压分别 8,000 / 7,382 bytes；完整保留虚构消息和路径，脱敏去除二者。系统文件选择框导入脱敏快照后为 2 会话、48K。取消保存不写目录记录。
+- 独立 CLI 服务连接时，界面恢复自动发现被明确拒绝，preferences.json 逐字节相同，原 PID 不变且仍提供 48K。退出宿主后独立服务仍存活，再通过其认证接口停止本轮服务。
+- 监视进程的完整保存/导入重跑及独立服务拒绝检查，最终主动退出均为 0；本轮远端宿主与辅助程序已清理。
+
+初次未捕获宿主退出码的 Windows 界面尝试中曾没有导出文件、随后宿主消失，原因未定位。原生对话框后来可复现拒绝正斜杠 Windows 文件名；改用系统目录和反斜杠后，监视进程的重跑全部通过，但这不证明首次宿主消失的根因已修复。没有据此改动产品或宣称已排除历史启动超时/WSLg 堆损坏风险。
+
+证据保存在忽略目录 `output/verification/remote-windows-current/` 和 `remote-linux-current/`，包括协议日志、desktop-smoke/concurrency/performance/update-e2e 报告；Windows 另含 native-export-check.json、gui-import-check.json、independent-source-rejection.json、两次宿主退出报告及来源切换/拒绝截图。不会提交运行令牌、真实用户数据或密钥。
+
+## 本轮稳定版准备范围
+
+用户明确选择“稳定版准备，仅承诺已验收的环境”。首发候选仅列上述 Windows 11 x64 / 已有 WebView2 与 macOS 26.6.2 arm64；Linux WSLg 通过的检查作为实验性证据，Intel Mac、最低系统和独立 Linux 桌面不进入首发稳定支持范围。完整硬件与旧系统矩阵保留为后续工作。
+
+发行组装器新增可重复 `--platform`，可以只组装 Windows x64 和 Mac arm64；默认仍要求四目标，选中目标缺包/缺签名、未知或重复平台均拒绝。先验证全部选中输入、拒绝非空输出目录，再通过排他锁保证同目录只有一个写入者。并发混包回归在加锁前失败、加锁后通过；独立复查确认解决。共 20 项路由、发行和更新清单测试通过。
+
+[发行步骤](desktop.md#更新与发行)给出限定平台命令、稳定/实验制品分离与发布前门槛。当前没有正式 Windows 签名、macOS Developer ID/公证或生产更新渠道；最终签名包仍须验证安装、更新、移除、保留数据及回退。准备工作不等于这些外部步骤已完成，也没有公开发布授权。
+
 ## 当前验证与边界
 
 本机 Rust workspace 57 项测试、桌面目录记录 3 项测试、前端 49 项测试、Svelte 检查、workspace/桌面 all-feature clippy、格式检查及发布/更新清单 6 项测试已通过。新增来源回归在当前 arm64 辅助程序通过。
@@ -61,7 +99,7 @@
 | macOS x64 | [app / dmg](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199/artifacts/12549043948) | `a425e8ceb9618196a63776c1d9c9164147c3afb19d88fc14cab6d52d93f95688` |
 | Linux x64 | [AppImage / deb](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199/artifacts/12549361635) | `9df783681d192bff1972e930a5223fb587d3ca153f8dfc837168e0d7cb563168` |
 
-此前 Windows/Linux 的 GUI、安装和大快照证据仍见 [原验证记录](desktop-verification.md)，属于对应历史源码。新改动不能只凭旧包结果宣称跨平台验证完成。
+更早 Windows/Linux 的 GUI、安装和大快照证据仍见 [原验证记录](desktop-verification.md)，属于对应历史源码。新改动不能只凭旧包结果宣称跨平台验证完成。
 
 仍需独立环境或外部资源的项目：Intel Mac GUI、最低 macOS 14.5、Finder 安装/移除与 Dock 菜单完整矩阵；Windows 10/全新或离线 WebView2；独立 Linux 桌面及无托盘交互；真实登录、多显示器、高 DPI 切换、睡眠唤醒及长期运行；极限快照规模和完整提示框性能矩阵。正式 Windows 签名、macOS Developer ID/公证及正式更新渠道仍缺资源。保留此前未定位的 Windows 启动超时和 WSLg 堆损坏风险，不以本轮通过宣称根因已经修复。
 
