@@ -50,6 +50,8 @@
 - [Desktop clients 40064637199](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199)：四目标全部通过，包含生产打包、格式/all-feature clippy、目录记录及 workspace 测试、协议、安全、启动/并发和包校验。Mac 两架构均通过全部六项签名更新/恢复检查，升级后保留 24K 及目录记录；Intel 报告的宿主源码摘要与本地 `dcf923bd…` 一致，宿主退出码 0，经历 3 次导航前置拒绝后正常继续。
 - [Native compatibility 40064637196](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637196)：四目标和候选组装全部通过，发布及公开下载步骤跳过。
 
+收尾时保留了远端并行加入的 CI 共享构建、缓存及推送差异路由（7100acd、8b2d13d）；应用源码相对 d54921d 没有变化。本地 15 项路由、发行和更新清单测试通过；[统一 Client CI 40065344097](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40065344097) 的共享检查、Native 四目标、Desktop 四目标及候选组装也全部通过，正式发布步骤跳过。新的工作流检查分工见 [CI 说明](development/ci.md)。
+
 当前源码 d54921d 的桌面开发制品已生成，ZIP 摘要来自对应 Actions artifact 元数据；包内文件摘要另见各自的 artifacts.json：
 
 | 目标 | 下载 | ZIP SHA256 |
