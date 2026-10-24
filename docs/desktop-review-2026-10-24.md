@@ -126,6 +126,6 @@ Windows 随包服务 build ID 为 `711fc396b682fb07d46b2e72a87afc60d24d4cc6216e1
 
 在上述 Windows 11 / 已有 WebView2 与 Mac arm64 实机，使用隔离合成数据、中文/空格安装目录和同产品标识的内部 1.0.0 基线，两端均已通过：全新安装 1.0.1、同版本重装、卸载保留业务数据、卸载后安装旧完整包回退，以及 1.0.0 → 1.0.1 完整包覆盖升级。Windows 覆盖升级时旧宿主正在运行，安装器正常停止本轮宿主及随包服务，捕获的退出码均为 0。升级后准确的 24,000 tokens、语言/时区与来源设置、设备身份、导入快照、目录记录和窗口尺寸保留。原有独立用户服务未停止。两端实际原生界面均已检查并保存截图。
 
-最终 7 项候选资产（两端安装/更新文件、更新签名、`latest.json` 与 `SHA256SUMS`）已上传 [Release 草稿](https://github.com/luyh7/codex-usage-dashboard/releases/tag/untagged-d7a56e400292ca41b82c)，GitHub 资产摘要与本地文件一致。固定更新入口为 `https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json`，清单仅列 Windows x64 与 Mac arm64。草稿不能匿名下载；需明确允许公开为预发布后，才能完成真实 HTTPS 发现、下载、签名验证、安装/重启和数据保留验收。当前两端已准备 1.0.0 基线，未将这一步记录为通过。浏览器下载触发的 Gatekeeper/SmartScreen 首次打开体验也仍需验证；本地复制或 CLI 下载不替代该证据。
+最终 7 项候选资产（两端安装/更新文件、更新签名、`latest.json` 与 `SHA256SUMS`）已上传 [Release 草稿](https://github.com/luyh7/codex-usage-dashboard/releases/tag/untagged-ad4497152307866b46dd)，GitHub 资产摘要与本地文件一致。固定更新入口为 `https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json`，清单仅列 Windows x64 与 Mac arm64。草稿不能匿名下载；需明确允许公开为预发布后，才能完成真实 HTTPS 发现、下载、签名验证、安装/重启和数据保留验收。当前两端已准备 1.0.0 基线，未将这一步记录为通过。浏览器下载触发的 Gatekeeper/SmartScreen 首次打开体验也仍需验证；本地复制或 CLI 下载不替代该证据。
 
 本地证据位于忽略目录 `output/free-release/`：`acceptance-mac-auto/progress.json`、从 Windows 复制的 `windows-acceptance-progress.json`、两端 `*-configured-installed-24k.png`、发行清单及签名验证工具。运行令牌、合成日志、签名私钥和口令均不提交。PR 保持草稿，Release 保持草稿，没有合并或公开候选。
