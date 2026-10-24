@@ -77,7 +77,7 @@ Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832d
 
 发行组装器新增可重复 `--platform`，可以只组装 Windows x64 和 Mac arm64；默认仍要求四目标，选中目标缺包/缺签名、未知或重复平台均拒绝。先验证全部选中输入、拒绝非空输出目录，再通过排他锁保证同目录只有一个写入者。并发混包回归在加锁前失败、加锁后通过；独立复查确认解决。共 20 项路由、发行和更新清单测试通过；其中更新清单 6 项另外在 Windows 与 Linux 分别运行，均通过。
 
-[发行步骤](desktop.md#更新与发行)给出限定平台命令、稳定/实验制品分离与发布前门槛。用户随后明确选择 Windows 和 Mac 免费直装发行：Windows 不购买应用签名证书，Mac 使用 ad-hoc 签名，Developer ID 和公证不作首发门槛。最终生产配置包的安装、手动升级、移除、重装、保留数据及回退继续验收；生产自动更新渠道尚未配置，不能称其已通过。当前只推进发行准备和验收，尚未公开发布。
+[发行步骤](desktop.md#更新与发行)给出限定平台命令、稳定/实验制品分离与发布前门槛。用户随后明确选择 Windows 和 Mac 免费直装发行：Windows 不购买应用签名证书，Mac 使用 ad-hoc 签名，Developer ID 和公证不作首发门槛。用户随后进一步要求首发启用自动更新。长期公钥与 GitHub Releases 独立 HTTPS 频道已配置，最终生产包的手动安装/升级证据及真实渠道进度见下节；尚未公开发布。
 
 ## 当前验证与边界
 
@@ -105,6 +105,27 @@ Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832d
 
 更早 Windows/Linux 的 GUI、安装和大快照证据仍见 [原验证记录](desktop-verification.md)，属于对应历史源码。新改动不能只凭旧包结果宣称跨平台验证完成。
 
-仍需独立环境或外部资源的项目：Intel Mac GUI、最低 macOS 14.5、Finder 安装/移除与 Dock 菜单完整矩阵；Windows 10/全新或离线 WebView2；独立 Linux 桌面及无托盘交互；真实登录、多显示器、高 DPI 切换、睡眠唤醒及长期运行；极限快照规模和完整提示框性能矩阵。付费 Windows 签名及 Mac Developer ID/公证列为可选改进；正式自动更新渠道尚未配置，独立列为后续工作。保留此前未定位的 Windows 启动超时和 WSLg 堆损坏风险，不以本轮通过宣称根因已经修复。
+仍需独立环境或外部资源的项目：Intel Mac GUI、最低 macOS 14.5、Finder 安装/移除与 Dock 菜单完整矩阵；Windows 10/全新或离线 WebView2；独立 Linux 桌面及无托盘交互；真实登录、多显示器、高 DPI 切换、睡眠唤醒及长期运行；极限快照规模和完整提示框性能矩阵。付费 Windows 签名及 Mac Developer ID/公证列为可选改进；正式自动更新渠道已配置，实际公开 HTTPS 更新验收仍待完成。保留此前未定位的 Windows 启动超时和 WSLg 堆损坏风险，不以本轮通过宣称根因已经修复。
 
 PR 保持草稿；没有合并、打发布标签或正式发布。
+
+
+## 免费直装最终候选与 HTTPS 渠道
+
+应用变更 **051b5b9** 修正未配置自动更新时的提示，避免将正常直装包误称为开发包；**dccc59d** 加入正式更新公钥及 HTTPS 配置。该提交的 [Client CI 40080145122](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40080145122) 全部通过：共享检查、Native 四目标、Desktop 四目标和候选组装成功；Mac 两架构的签名更新/恢复通过，公开发布和发布后下载步骤跳过。此处 CI 的隔离更新产品证据与下述真实产品验收分别记录。
+
+最终候选使用生产 profile、真实产品标识 `io.github.luyh7.cousash`，没有启用 `desktop-tests`。Windows 为未购买系统签名的 NSIS；Mac app/helper 的完整 ad-hoc 签名验证通过。更新签名使用长期密钥，私钥/口令不进入仓库、远端 Windows 或制品。两端更新文件均已用仓库公钥做密码学验证，签名绑定 `version:1.0.1`，篡改字节被拒绝。
+
+| 最终候选文件 | SHA256 |
+| --- | --- |
+| `cousash-1.0.1-windows-x64.exe` | `88f83391937882397fb41dc92496a03fec66eeda152ddf115721646a7cb5ea74` |
+| `cousash-1.0.1-darwin-arm64.dmg` | `2ad0b9b6e2c3baab905ce74a32ed3cae775f1877188dd673c6c8a93eb2bd0e93` |
+| `cousash-1.0.1-darwin-arm64.app.tar.gz` | `862ce1e1c16556c0b633b01029fd70626d382925196ff2089aea34c1246670f2` |
+
+Windows 随包服务 build ID 为 `711fc396b682fb07d46b2e72a87afc60d24d4cc6216e1f8d77c84fae8fd9fa49`；Mac 为 `8eec4d84bfe740c4db51d7853cf20598482adb222ce37f1c353a85231ee474c6`。与上文历史包摘要分别对应，不能混用。
+
+在上述 Windows 11 / 已有 WebView2 与 Mac arm64 实机，使用隔离合成数据、中文/空格安装目录和同产品标识的内部 1.0.0 基线，两端均已通过：全新安装 1.0.1、同版本重装、卸载保留业务数据、卸载后安装旧完整包回退，以及 1.0.0 → 1.0.1 完整包覆盖升级。Windows 覆盖升级时旧宿主正在运行，安装器正常停止本轮宿主及随包服务，捕获的退出码均为 0。升级后准确的 24,000 tokens、语言/时区与来源设置、设备身份、导入快照、目录记录和窗口尺寸保留。原有独立用户服务未停止。两端实际原生界面均已检查并保存截图。
+
+最终 7 项候选资产（两端安装/更新文件、更新签名、`latest.json` 与 `SHA256SUMS`）已上传 [Release 草稿](https://github.com/luyh7/codex-usage-dashboard/releases/tag/untagged-d7a56e400292ca41b82c)，GitHub 资产摘要与本地文件一致。固定更新入口为 `https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json`，清单仅列 Windows x64 与 Mac arm64。草稿不能匿名下载；需明确允许公开为预发布后，才能完成真实 HTTPS 发现、下载、签名验证、安装/重启和数据保留验收。当前两端已准备 1.0.0 基线，未将这一步记录为通过。浏览器下载触发的 Gatekeeper/SmartScreen 首次打开体验也仍需验证；本地复制或 CLI 下载不替代该证据。
+
+本地证据位于忽略目录 `output/free-release/`：`acceptance-mac-auto/progress.json`、从 Windows 复制的 `windows-acceptance-progress.json`、两端 `*-configured-installed-24k.png`、发行清单及签名验证工具。运行令牌、合成日志、签名私钥和口令均不提交。PR 保持草稿，Release 保持草稿，没有合并或公开候选。
