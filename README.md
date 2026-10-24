@@ -32,7 +32,7 @@
 
 ## Quick start
 
-Standalone desktop clients are available as development builds: [build and use](docs/desktop.md) · [current validation](docs/desktop-review-2026-10-24.md). Stable-release preparation targets the validated Windows 11 x64 / existing WebView2 and macOS 26.6.2 arm64 environments; other environments remain experimental. Production signing/notarization and final-package/channel acceptance are pending. The clients include the native runtime and do not require a skill or an Agensi account.
+Standalone desktop clients are available as development builds: [build and use](docs/desktop.md) · [current validation](docs/desktop-review-2026-10-24.md). Stable-release preparation targets the validated Windows 11 x64 / existing WebView2 and macOS 26.6.2 arm64 environments; other environments remain experimental. The chosen release path is free direct installation: unsigned Windows installers and ad-hoc-signed, unnotarized Mac apps. Paid OS signing is optional; final-package installation and upgrade acceptance is in progress. The clients include the native runtime and do not require a skill or an Agensi account.
 
 Install the Codex skill:
 

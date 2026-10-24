@@ -228,7 +228,7 @@ pub async fn check_update(
         .is_none_or(str::is_empty)
     {
         return Ok(
-            json!({"state":"unavailable","message":"This development package has no signed update channel."}),
+            json!({"state":"unavailable","message":"Automatic updates are not configured. Use the newer full installer to upgrade."}),
         );
     }
     let updater = app

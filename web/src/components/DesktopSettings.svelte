@@ -33,7 +33,7 @@
     <div class="row"><label for="autostart">{lang === 'zh' ? '登录时启动' : 'Start at login'}</label><input id="autostart" type="checkbox" checked={value.autostart} disabled={busy} onchange={e => { const autostart = e.currentTarget.checked; e.currentTarget.checked = value?.autostart ?? false; void save({ autostart }); }} /></div>
     <div class="row"><span>{value.version}</span><button disabled={busy} onclick={() => check()}>{lang === 'zh' ? '检查更新' : 'Check for updates'}</button></div>
     {#if update?.state === 'current'}<p role="status">{lang === 'zh' ? '已是最新版本' : 'Up to date'}</p>{/if}
-    {#if update?.state === 'unavailable'}<p role="status">{lang === 'zh' ? '此开发包尚未配置签名更新渠道。' : update.message}</p>{/if}
+    {#if update?.state === 'unavailable'}<p role="status">{lang === 'zh' ? '尚未配置自动更新，请使用新版完整安装包升级。' : update.message}</p>{/if}
     {#if update?.state === 'package'}<p role="status">{lang === 'zh' ? '请通过包管理器或新版安装包更新。' : update.message}</p>{/if}
     {#if update?.state === 'available'}<p>{update.version}</p><p class="notes">{update.notes}</p><button class="primary" disabled={busy} onclick={() => check(true)}>{lang === 'zh' ? '安装并重启' : 'Install and restart'}</button>{/if}
     {#if busy && total > 0}<progress value={downloaded} max={total}></progress>{/if}

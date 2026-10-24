@@ -10,7 +10,7 @@
 | macOS | arm64、x64，分别打包 | `.app`、`.dmg` | 配置下限 14.5，尚待最低版本实测 |
 | Linux | x64/glibc | AppImage、`.deb` | 目标 Ubuntu 22.04 / Debian 12；必须在对应基线上打包验证 |
 
-**目标范围不是已验证承诺。** 2026-10-24 用户将本轮目标明确为“稳定版准备，仅承诺已验收的环境”。首发候选范围如下；当前制品仍是开发包，正式签名及渠道验收通过前不标记为稳定发行。最新证据见 [审查与发行准备记录](desktop-review-2026-10-24.md)，更早证据见 [验证记录](desktop-verification.md)。
+**目标范围不是已验证承诺。** 2026-10-24 用户将本轮目标明确为“稳定版准备，仅承诺已验收的环境”。首发候选范围如下；首发按免费直装发行推进：Windows 不购买应用签名证书，Mac 使用 ad-hoc 签名，不申请 Developer ID 或公证。付费系统签名不作为发行前置条件；仍须完成最终候选包的安装和升级验收。最新证据见 [审查与发行准备记录](desktop-review-2026-10-24.md)，更早证据见 [验证记录](desktop-verification.md)。
 
 | 首发候选环境 | 本轮证据与范围 |
 | --- | --- |
@@ -22,6 +22,8 @@ Linux AppImage 在 Ubuntu 26.04 / WSLg 的当前包烟测、并发及同源码�
 Windows 安装器在没有 WebView2 时联网安装运行库；离线环境须预先安装 WebView2。Linux `.deb` 声明 WebKitGTK 4.1 和托盘依赖，AppImage 的运行仍受宿主内核、glibc 和图形环境限制。运行库与编译工具是不同的要求。
 
 ## 使用
+
+免费直装包从项目正式下载地址获取，并核对对应版本的 SHA256。Windows 可能显示未知发布者或 SmartScreen 提示；Mac 的 ad-hoc 包不具备 Apple 开发者认证，首次打开可能需要用户在“系统设置 → 隐私与安全性”确认允许。公司管理的电脑可能禁止这类应用，应遵循设备管理策略。按单个可信应用处理系统提示，不要求关闭全局安全保护。说明依据见 [Microsoft SmartScreen](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation) 和 [Apple 未知开发者应用说明](https://support.apple.com/zh-cn/guide/mac-help/mh40616/mac)。
 
 Windows 从开始菜单启动；macOS 将 `.app` 放入 Applications 后打开；Linux 为 AppImage 添加执行权限后打开，或通过系统包管理器安装 `.deb`。升级 `.deb` 前退出客户端，完成后重新打开，以加载整套新版本。
 
@@ -134,11 +136,11 @@ node --test tools/runtime.test.mjs tools/security.test.mjs tools/desktop-update.
 
 发行时将 `desktop/release.example.json` 复制到受保护的本地配置，填写更新**公钥**和端点，通过 `DESKTOP_RELEASE_CONFIG` 指向它。签名私钥只通过 `TAURI_SIGNING_PRIVATE_KEY` 和相应口令环境变量或 CI secret 提供；不要把私钥写入配置、仓库、日志或安装包。
 
-应用签名配置也放在同一受保护的发布覆盖文件中。Windows 在 `bundle.windows` 设置证书存储中的 `certificateThumbprint`、`digestAlgorithm: "sha256"` 和证书提供方的 `timestampUrl`；证书及私钥先由维护者安装到构建机的证书存储，具体服务型签名可使用 Tauri 的 `signCommand`。构建后分别对安装器、宿主和辅助程序执行 `signtool verify /pa /all`，任一漏签或校验失败都不作为可信发行包。配置依据见 [Tauri Windows 签名](https://v2.tauri.app/distribute/sign/windows/)。
+以下系统签名为可选升级，不阻塞免费直装首发；应用签名配置放在同一受保护的发布覆盖文件中。Windows 在 `bundle.windows` 设置证书存储中的 `certificateThumbprint`、`digestAlgorithm: "sha256"` 和证书提供方的 `timestampUrl`；证书及私钥先由维护者安装到构建机的证书存储，具体服务型签名可使用 Tauri 的 `signCommand`。构建后分别对安装器、宿主和辅助程序执行 `signtool verify /pa /all`，任一漏签或校验失败都不作为可信发行包。配置依据见 [Tauri Windows 签名](https://v2.tauri.app/distribute/sign/windows/)。
 
-macOS 使用钥匙串中已有的 Developer ID Application 身份，通过 `bundle.macOS.signingIdentity` 或 `APPLE_SIGNING_IDENTITY` 指定。公证凭据使用 `APPLE_API_ISSUER`、`APPLE_API_KEY`（Key ID）和 `APPLE_API_KEY_PATH`（私钥文件路径），或 Apple ID 对应的三项凭据；不把值写入仓库。构建后检查整个 app、包内辅助程序以及公证票据：`codesign --verify --deep --strict <app>`、`spctl --assess --type execute --verbose <app>`、`xcrun stapler validate <app>`。具体证书导入和公证步骤见 [Tauri macOS 签名](https://v2.tauri.app/distribute/sign/macos/)。当前 PR 的 CI 固定使用 ad-hoc 开发签名，不消费正式证书或公证凭据；正式签名构建及凭据注入尚未实测，不能把这些配置说明算作验证通过。
+macOS 使用钥匙串中已有的 Developer ID Application 身份，通过 `bundle.macOS.signingIdentity` 或 `APPLE_SIGNING_IDENTITY` 指定。公证凭据使用 `APPLE_API_ISSUER`、`APPLE_API_KEY`（Key ID）和 `APPLE_API_KEY_PATH`（私钥文件路径），或 Apple ID 对应的三项凭据；不把值写入仓库。构建后检查整个 app、包内辅助程序以及公证票据：`codesign --verify --deep --strict <app>`、`spctl --assess --type execute --verbose <app>`、`xcrun stapler validate <app>`。具体证书导入和公证步骤见 [Tauri macOS 签名](https://v2.tauri.app/distribute/sign/macos/)。当前 PR 的 CI 固定使用适用于免费直装的 ad-hoc 签名，不消费正式证书或公证凭据；正式签名构建及凭据注入尚未实测，不能把这些配置说明算作验证通过。
 
-签名构建完成后，将所选平台的 `desktop-<Rust target>` 制品下载到同一目录，生成更新源。省略 `--platform` 时仍要求四种架构；首发候选范围使用显式选择：
+启用应用内自动更新时，先完成更新制品签名，再将所选平台的 `desktop-<Rust target>` 制品下载到同一目录，生成更新源。省略 `--platform` 时仍要求四种架构；首发候选范围使用显式选择：
 
 ```text
 node tools/desktop-update.mjs <downloaded> <version> <https-base-url> <notes-file> <empty-staged-directory> --platform windows-x86_64 --platform darwin-aarch64
@@ -148,9 +150,9 @@ node tools/desktop-update.mjs <downloaded> <version> <https-base-url> <notes-fil
 
 稳定版发布前仍须完成：
 
-1. 提供正式 Windows 签名、macOS Developer ID/公证和生产更新密钥/HTTPS 端点；按上述命令验证实际最终包。当前测试密钥和 ad-hoc 签名不作替代。
-2. 用最终签名包在候选环境做干净安装、首次打开、完整包升级/移除与保留数据检查，并在真实生产渠道验证版本绑定、下载、签名、安装/重启及失败恢复。更新测试产品的通过不能替代这一步。
-3. 冻结版本、制品摘要、支持说明和回退完整包；复查稳定更新清单只列已验收目标。取得公开发布授权后再上传、打标签或发布。
+1. 用最终生产配置候选包在已验收环境完成干净安装、首次打开、原产品标识下的完整包升级/移除、重装、数据保留及回退检查。Windows 允许未签名包；Mac 要求完整有效的 ad-hoc 签名，Developer ID/公证可选。隔离更新测试产品的通过不能替代这一步。
+2. 明确首发升级方式。手动升级使用新版本完整安装包，并保留业务数据；尚未配置自动更新时界面应如实显示未配置。若首发启用自动更新，则需长期更新密钥和 HTTPS 端点，并对真实渠道验证版本绑定、下载、密码学签名、安装/重启及失败恢复。更新签名密钥可免费生成，与付费系统签名无关。
+3. 冻结版本、制品摘要、支持说明、系统提示处理说明和回退完整包；稳定自动更新清单只列已验收目标。最后另行执行公开上传、标签和发布操作。
 
 `node tools/desktop-update-e2e.mjs build` / `run` 在 Windows、macOS 两架构和 Linux AppImage 上构建并测试隔离更新产品，版本为 1.0.1 → 1.0.2。它使用本地源、临时密钥和 `desktop-tests` feature，所有测试数据留在忽略的 `output/` 内。测试接口只存在该 feature 构建中，没有加入 WebView 权限或生产默认配置。测试后必须重新执行正常 `bundle`，交付不带该 feature 的制品。
 
