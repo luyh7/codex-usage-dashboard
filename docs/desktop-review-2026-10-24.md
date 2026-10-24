@@ -130,6 +130,6 @@ Windows 随包服务 build ID 为 `711fc396b682fb07d46b2e72a87afc60d24d4cc6216e1
 
 两端真实生产产品均通过界面从该公开入口发现 1.0.1、下载、校验长期公钥签名、安装并重启；内部基线为同产品标识的 1.0.0。宿主及服务 PID 均改变，包内 helper、健康接口及预期候选 build ID 一致；24,000 tokens、设置、设备身份、导入快照及目录记录保留。Windows 更新显示一次安装语言确认，确认后自动继续安装与重启。随后两端均通过更新后的卸载保留数据、最终完整包重装恢复 24K 与再次卸载；两份真实产品报告各有 8 项通过，没有启用测试接口。
 
-Windows Chrome 从公开页面下载的 EXE 摘要与上表一致，首次打开进入原生安装欢迎页，检查后取消。该主机下载文件未带 `Zone.Identifier`，本轮没有观察到 SmartScreen；不能将它当作标准 Internet Zone 拦截/放行路径的验证。Mac 由用户接手 Chrome 下载后，DMG 摘要与上表一致，带 Chrome 隔离标记；经 Finder 复制到隔离 Applications 目录后仍保留隔离标记且 ad-hoc 完整签名通过。系统启用 Gatekeeper，首次打开实际显示“Apple 无法验证”并拦截，系统设置提供该应用的“仍要打开”。当前在等待用户对此单应用例外的明确确认，未修改全局安全设置，也未将例外后的首次启动记为通过。
+Windows Chrome 从公开页面下载的 EXE 摘要与上表一致，首次打开进入原生安装欢迎页，检查后取消。该主机下载文件未带 `Zone.Identifier`，本轮没有观察到 SmartScreen；不能将它当作标准 Internet Zone 拦截/放行路径的验证。Mac 由用户接手 Chrome 下载后，DMG 摘要与上表一致，带 Chrome 隔离标记；经 Finder 复制到隔离 Applications 目录后仍保留隔离标记且 ad-hoc 完整签名通过。系统启用 Gatekeeper，首次打开实际显示“Apple 无法验证”并拦截，系统设置提供该应用的“仍要打开”。用户明确授权仅对此候选添加“仍要打开”例外，并在本机完成管理员认证后，应用正常启动；原生设置显示 1.0.1，随包服务健康接口和候选 build ID 一致。正常退出后宿主与 helper 均停止，再次打开无需新的安全确认且界面、健康接口正常。Gatekeeper 保持启用，未修改全局安全设置。验收副本退出后移入废纸篓，下载的 DMG 保留。
 
 本地证据位于忽略目录 `output/free-release/`：`acceptance-mac-auto/report.json`、从 Windows 复制的 `windows-final-acceptance-report.json`、两端 `*-https-update-available.png` / `*-https-update-retained-24k.png`、浏览器首开截图、`https-downloads/verification.json`、发行清单及签名验证工具。运行令牌、合成日志、签名私钥和口令均不提交。PR 保持草稿，Release 为公开预发布，没有合并或转为稳定版。
