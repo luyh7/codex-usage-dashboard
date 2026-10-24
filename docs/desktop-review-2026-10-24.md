@@ -1,6 +1,6 @@
 # PR #9 审查与 Mac 实机补验
 
-审查基线为 main 的 38b9d03 至 PR 原始 HEAD 7f1fde5（15 个提交、75 个文件）。规范与需求两条审查分别执行。规范审查没有确认的违规；需求审查确认并修复三个来源一致性问题，应用源码提交为 **d54921d**。
+审查基线为 main 的 38b9d03 至 PR 原始 HEAD 7f1fde5（15 个提交、75 个文件）。规范与需求两条审查分别执行。规范审查没有确认的违规；需求审查确认并修复三项 P2 来源一致性问题，应用源码提交为 **d54921d**。修复后的独立复查确认三项均解决，没有发现新引入的可操作缺陷。
 
 ## 审查修复
 
@@ -28,14 +28,16 @@
 - 连接独立 CLI 服务时，恢复自动发现显示明确错误，preferences.json 逐字节不变，原服务继续提供 24K 数据。
 - 通过系统文件选择框导入 12K 脱敏快照，设备列表出现导入设备，汇总成为 2 会话、36K。
 - Cmd+Q 退出自己拥有的宿主和服务后，两个运行记录均清除。关闭窗口后 CLI open 可恢复原宿主窗口；没有把此检查记为 Dock 点击验证。
+- 另从 Finder 的 Applications 入口再次打开已运行的应用，原窗口及 36K 数据恢复；实际应用菜单显示窗口、设置、重新连接和退出入口，选择“退出”后宿主、服务及记录均清理。此轮没有验证 Finder 冷安装/移除或 Dock 点击。
 - 服务正常退出后，宿主自动恢复，宿主 PID 保持、服务 PID 改变，导入数据和 36K 保留；单次恢复约 3.7 秒。
 - 单实例、同配置并发冷启动、双配置隔离、退出隔离和窗口尺寸往返通过；原生协议、设置、来源冲突、HTTP 安全和离线安装器检查通过（7 项，Windows 专属项跳过）。
 - 图表键盘检查可打开用量提示框，内容没有时区标签，Escape 关闭提示框并保留详情；已保存打开状态截图。
+- 800×650 窗口下详情弹层和键盘图表提示通过，提示框保持在视口内，Escape 先关闭提示再保留详情。通过界面切换 English 和 UTC 后关闭重开，端口改变，设置和 24M 保留；图表时间相应由 08:00 改为 00:00，没有在设置外增加时区标签。
 - 中文/空格的 Applications 安装路径下，1,000 会话、100,000 条事件、12M 用量的完整及脱敏原生导出通过，解压分别为 48,682,699 / 46,206,183 bytes；逐项核对会话数、事件数、用量和消息脱敏。通过原生选择框重新导入脱敏快照后为 2,000 会话、24M。
 - 同规模合成负载的单次冷启动为 2,345 ms，5 次摘要请求的中位数为 0.6 ms。这是本机单轮观测，不是跨平台性能承诺。
 - 当前宿主源码在隔离的临时签名更新产品中通过全部六项更新/恢复检查：离线、下载中断、错误签名、版本不符、已签名但无效的安装包，以及成功更新/重启。升级至 1.0.2 后设置、设备身份、导入快照、目录记录和 24K 保留，宿主退出码 0；测试产品和密钥不进入生产包。测试后已重建正常 1.0.1 生产配置包。
 
-本地证据保存在忽略的 output/verification/：mac-native-settings.png、mac-source-rejection.png、mac-keyboard-chart-tooltip.png、mac-source-switch.json、mac-independent-source-rejection.json、mac-service-recovery.json、long-source-inspection.json、desktop-concurrency-darwin.json、desktop-performance-darwin-arm64.json、mac-large-native-export.json、mac-large-import.json、desktop-update-e2e-darwin.json。临时日志、截图、运行令牌、用户数据和签名密钥不加入 Git。
+本地证据保存在忽略的 output/verification/：mac-native-settings.png、mac-source-rejection.png、mac-keyboard-chart-tooltip.png、mac-narrow-keyboard-tooltip.png、mac-language-timezone-reopen.png、mac-source-switch.json、mac-independent-source-rejection.json、mac-service-recovery.json、long-source-inspection.json、desktop-concurrency-darwin.json、desktop-performance-darwin-arm64.json、mac-large-native-export.json、mac-large-import.json、mac-large-reopen.json、mac-settings-persistence.json、desktop-update-e2e-darwin.json。临时日志、截图、运行令牌、用户数据和签名密钥不加入 Git。
 
 本机正常 1.0.1 arm64 DMG 的 SHA256 为 `ceeb097908862d99793da9581f32c91a1cfd115a39903a0d767f90f9121a7526`，位于 `desktop/target/aarch64-apple-darwin/release/bundle/dmg/Codex Usage Dashboard_1.0.1_aarch64.dmg`。本地包与 CI 包分别构建，摘要及 build ID 不混用。
 
@@ -45,8 +47,17 @@
 
 当前源码的云端矩阵：
 
-- [Desktop clients 40064637199](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199)：已启动，等待四目标结果。
-- [Native compatibility 40064637196](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637196)：已启动，等待四目标及候选组装结果。
+- [Desktop clients 40064637199](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199)：四目标全部通过，包含生产打包、格式/all-feature clippy、目录记录及 workspace 测试、协议、安全、启动/并发和包校验。Mac 两架构均通过全部六项签名更新/恢复检查，升级后保留 24K 及目录记录；Intel 报告的宿主源码摘要与本地 `dcf923bd…` 一致，宿主退出码 0，经历 3 次导航前置拒绝后正常继续。
+- [Native compatibility 40064637196](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637196)：四目标和候选组装全部通过，发布及公开下载步骤跳过。
+
+当前源码 d54921d 的桌面开发制品已生成，ZIP 摘要来自对应 Actions artifact 元数据；包内文件摘要另见各自的 artifacts.json：
+
+| 目标 | 下载 | ZIP SHA256 |
+| --- | --- | --- |
+| Windows x64 | [NSIS](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199/artifacts/12549167391) | `dfed6f81d110d2e7745fa7ad7308585dceaf077fb07940220b5697a644254811` |
+| macOS arm64 | [app / dmg](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199/artifacts/12549390279) | `76ee7626137c6a9e93354b19f8fbe4137366626f413eabedcd3c51188b56cbb1` |
+| macOS x64 | [app / dmg](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199/artifacts/12549043948) | `a425e8ceb9618196a63776c1d9c9164147c3afb19d88fc14cab6d52d93f95688` |
+| Linux x64 | [AppImage / deb](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40064637199/artifacts/12549361635) | `9df783681d192bff1972e930a5223fb587d3ca153f8dfc837168e0d7cb563168` |
 
 此前 Windows/Linux 的 GUI、安装和大快照证据仍见 [原验证记录](desktop-verification.md)，属于对应历史源码。新改动不能只凭旧包结果宣称跨平台验证完成。
 
