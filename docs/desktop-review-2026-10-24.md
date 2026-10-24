@@ -77,7 +77,7 @@ Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832d
 
 发行组装器新增可重复 `--platform`，可以只组装 Windows x64 和 Mac arm64；默认仍要求四目标，选中目标缺包/缺签名、未知或重复平台均拒绝。先验证全部选中输入、拒绝非空输出目录，再通过排他锁保证同目录只有一个写入者。并发混包回归在加锁前失败、加锁后通过；独立复查确认解决。共 20 项路由、发行和更新清单测试通过；其中更新清单 6 项另外在 Windows 与 Linux 分别运行，均通过。
 
-[发行步骤](desktop.md#更新与发行)给出限定平台命令、稳定/实验制品分离与发布前门槛。用户随后明确选择 Windows 和 Mac 免费直装发行：Windows 不购买应用签名证书，Mac 使用 ad-hoc 签名，Developer ID 和公证不作首发门槛。用户随后进一步要求首发启用自动更新。长期公钥与 GitHub Releases 独立 HTTPS 频道已配置，最终生产包的手动安装/升级证据及真实渠道进度见下节；尚未公开发布。
+[发行步骤](desktop.md#更新与发行)给出限定平台命令、稳定/实验制品分离与发布前门槛。用户随后明确选择 Windows 和 Mac 免费直装发行：Windows 不购买应用签名证书，Mac 使用 ad-hoc 签名，Developer ID 和公证不作首发门槛。用户随后进一步要求首发启用自动更新。长期公钥与 GitHub Releases 独立 HTTPS 频道已配置，最终生产包的手动安装/升级证据及真实渠道进度见下节；候选预发布状态与真实 HTTPS 验收见文末。
 
 ## 当前验证与边界
 
@@ -105,9 +105,9 @@ Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832d
 
 更早 Windows/Linux 的 GUI、安装和大快照证据仍见 [原验证记录](desktop-verification.md)，属于对应历史源码。新改动不能只凭旧包结果宣称跨平台验证完成。
 
-仍需独立环境或外部资源的项目：Intel Mac GUI、最低 macOS 14.5、Finder 安装/移除与 Dock 菜单完整矩阵；Windows 10/全新或离线 WebView2；独立 Linux 桌面及无托盘交互；真实登录、多显示器、高 DPI 切换、睡眠唤醒及长期运行；极限快照规模和完整提示框性能矩阵。付费 Windows 签名及 Mac Developer ID/公证列为可选改进；正式自动更新渠道已配置，实际公开 HTTPS 更新验收仍待完成。保留此前未定位的 Windows 启动超时和 WSLg 堆损坏风险，不以本轮通过宣称根因已经修复。
+仍需独立环境或外部资源的项目：Intel Mac GUI、最低 macOS 14.5、Finder 安装/移除与 Dock 菜单完整矩阵；Windows 10/全新或离线 WebView2；独立 Linux 桌面及无托盘交互；真实登录、多显示器、高 DPI 切换、睡眠唤醒及长期运行；极限快照规模和完整提示框性能矩阵。付费 Windows 签名及 Mac Developer ID/公证列为可选改进；正式自动更新渠道及两端公开 HTTPS 更新验收已完成。保留此前未定位的 Windows 启动超时和 WSLg 堆损坏风险，不以本轮通过宣称根因已经修复。
 
-PR 保持草稿；没有合并、打发布标签或正式发布。
+PR 保持草稿；候选预发布进度见文末，没有合并或转为稳定版。
 
 
 ## 免费直装最终候选与 HTTPS 渠道
@@ -126,6 +126,10 @@ Windows 随包服务 build ID 为 `711fc396b682fb07d46b2e72a87afc60d24d4cc6216e1
 
 在上述 Windows 11 / 已有 WebView2 与 Mac arm64 实机，使用隔离合成数据、中文/空格安装目录和同产品标识的内部 1.0.0 基线，两端均已通过：全新安装 1.0.1、同版本重装、卸载保留业务数据、卸载后安装旧完整包回退，以及 1.0.0 → 1.0.1 完整包覆盖升级。Windows 覆盖升级时旧宿主正在运行，安装器正常停止本轮宿主及随包服务，捕获的退出码均为 0。升级后准确的 24,000 tokens、语言/时区与来源设置、设备身份、导入快照、目录记录和窗口尺寸保留。原有独立用户服务未停止。两端实际原生界面均已检查并保存截图。
 
-最终 7 项候选资产（两端安装/更新文件、更新签名、`latest.json` 与 `SHA256SUMS`）已上传 [Release 草稿](https://github.com/luyh7/codex-usage-dashboard/releases/tag/untagged-ad4497152307866b46dd)，GitHub 资产摘要与本地文件一致。固定更新入口为 `https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json`，清单仅列 Windows x64 与 Mac arm64。草稿不能匿名下载；需明确允许公开为预发布后，才能完成真实 HTTPS 发现、下载、签名验证、安装/重启和数据保留验收。当前两端已准备 1.0.0 基线，未将这一步记录为通过。浏览器下载触发的 Gatekeeper/SmartScreen 首次打开体验也仍需验证；本地复制或 CLI 下载不替代该证据。
+用户明确授权后，最终 7 项候选资产（两端安装/更新文件、更新签名、`latest.json` 与 `SHA256SUMS`）已公开为 [预发布](https://github.com/luyh7/codex-usage-dashboard/releases/tag/desktop-updates)，保持 prerelease，未设置为 Latest。固定更新入口为 `https://github.com/luyh7/codex-usage-dashboard/releases/download/desktop-updates/latest.json`，清单仅列 Windows x64 与 Mac arm64。匿名 HTTPS 重新下载的清单、校验文件和全部制品与本地候选逐字节相同。
 
-本地证据位于忽略目录 `output/free-release/`：`acceptance-mac-auto/progress.json`、从 Windows 复制的 `windows-acceptance-progress.json`、两端 `*-configured-installed-24k.png`、发行清单及签名验证工具。运行令牌、合成日志、签名私钥和口令均不提交。PR 保持草稿，Release 保持草稿，没有合并或公开候选。
+两端真实生产产品均通过界面从该公开入口发现 1.0.1、下载、校验长期公钥签名、安装并重启；内部基线为同产品标识的 1.0.0。宿主及服务 PID 均改变，包内 helper、健康接口及预期候选 build ID 一致；24,000 tokens、设置、设备身份、导入快照及目录记录保留。Windows 更新显示一次安装语言确认，确认后自动继续安装与重启。随后两端均通过更新后的卸载保留数据、最终完整包重装恢复 24K 与再次卸载；两份真实产品报告各有 8 项通过，没有启用测试接口。
+
+Windows Chrome 从公开页面下载的 EXE 摘要与上表一致，首次打开进入原生安装欢迎页，检查后取消。该主机下载文件未带 `Zone.Identifier`，本轮没有观察到 SmartScreen；不能将它当作标准 Internet Zone 拦截/放行路径的验证。Mac 由用户接手 Chrome 下载后，DMG 摘要与上表一致，带 Chrome 隔离标记；经 Finder 复制到隔离 Applications 目录后仍保留隔离标记且 ad-hoc 完整签名通过。系统启用 Gatekeeper，首次打开实际显示“Apple 无法验证”并拦截，系统设置提供该应用的“仍要打开”。当前在等待用户对此单应用例外的明确确认，未修改全局安全设置，也未将例外后的首次启动记为通过。
+
+本地证据位于忽略目录 `output/free-release/`：`acceptance-mac-auto/report.json`、从 Windows 复制的 `windows-final-acceptance-report.json`、两端 `*-https-update-available.png` / `*-https-update-retained-24k.png`、浏览器首开截图、`https-downloads/verification.json`、发行清单及签名验证工具。运行令牌、合成日志、签名私钥和口令均不提交。PR 保持草稿，Release 为公开预发布，没有合并或转为稳定版。
