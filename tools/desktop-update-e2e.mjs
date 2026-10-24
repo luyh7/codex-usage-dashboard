@@ -43,7 +43,7 @@ if(process.argv[2]==='build'){
     const results={port,target,versions:{}};
     for(const version of ['1.0.1','1.0.2']){
       for(const file of ['Cargo.toml','desktop/Cargo.toml']){
-        const full=path.join(source,file);await writeFile(full,(await readFile(full,'utf8')).replace(/version = "1\.0\.[12]"/,'version = "'+version+'"'));
+        const full=path.join(source,file);await writeFile(full,(await readFile(full,'utf8')).replace(/^version = "[^"\r\n]+"$/m,'version = "'+version+'"'));
       }
       const tauri=await json(path.join(source,'desktop/tauri.conf.json'));tauri.version=version;await save(path.join(source,'desktop/tauri.conf.json'),tauri);
       run('cargo',['build','--release','--target',target,'--bin','codex-usage-dashboard'],source,{CARGO_TARGET_DIR:nativeTarget});
