@@ -1,8 +1,6 @@
 name: Desktop clients
 on:
-  workflow_dispatch:
-  pull_request:
-    paths: ['desktop/**', 'crates/**', 'web/**', 'tools/desktop*', 'tools/runtime*', 'Cargo*', '.github/workflows/desktop.yml']
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -28,22 +26,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.target }}
+          workspaces: |
+            . -> target
+            desktop -> target
+          cache-workspace-crates: 'false'
       - name: Linux desktop dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils xvfb
-      - run: npm ci --prefix web
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
       - run: npm ci --prefix desktop
-      - run: npm run check --prefix web
-      - run: npm test --prefix web
-      - run: node --test tools/desktop-update.test.mjs
-      - run: node tools/desktop.mjs bundle
+      - run: node tools/desktop.mjs bundle --skip-web
         env:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
-      - name: Desktop Rust formatting and all-feature checks
+      - name: Desktop Rust all-feature checks and unit tests
         run: |
-          node --test tools/desktop-entry.test.mjs
-          cargo fmt --manifest-path desktop/Cargo.toml -- --check
           cargo clippy --manifest-path desktop/Cargo.toml --release --all-features --target ${{ matrix.target }} -- -D warnings
           cargo test --manifest-path desktop/Cargo.toml --release --locked --target ${{ matrix.target }}
         env:
@@ -58,10 +65,9 @@ jobs:
         run: |
           xvfb-run -a node tools/desktop-smoke.mjs
           xvfb-run -a node tools/desktop-concurrency.mjs
-      - run: cargo test --workspace --locked
-      - name: Shared protocol and fixture smoke test
-        shell: bash
-        run: AUDIT_BINARY="target/${DESKTOP_TARGET}/release/codex-usage-dashboard${{ runner.os == 'Windows' && '.exe' || '' }}" node --test tools/runtime.test.mjs tools/security.test.mjs
+      - name: Linux desktop entry integration
+        if: runner.os == 'Linux'
+        run: node --test tools/desktop-entry.test.mjs
       - name: Verify macOS bundle resources
         if: runner.os == 'macOS'
         shell: bash
