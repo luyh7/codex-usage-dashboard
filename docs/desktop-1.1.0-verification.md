@@ -28,6 +28,6 @@ Mac helper build ID 为 `4cc59a3099dfe7c66165fc1a09249967e63de56dc2d85453c6f3aeb
 
 版本一致性检查与 20 项发行/路由/清单测试通过。首次 CI 的 Mac 隔离更新构建暴露了测试脚本只替换 `1.0.x` 的问题，实际 helper 为 1.1.0，却断言测试基线为 1.0.1。修正只作用于隔离测试源的版本替换，保持其 1.0.1 → 1.0.2 测试矩阵；不改变生产应用或已验收字节。修正后的完整 [Client CI 40091756932](https://github.com/luyh7/codex-usage-dashboard/actions/runs/40091756932) 与最终发行状态见 PR #10。
 
-全部既有未验收项和历史未定位风险继续保留，详见 [1.1.0 发行说明](releases/desktop-v1.1.0.md)与 [1.0.1 原验收记录](desktop-review-2026-10-24.md)。1.1.0 没有重复 Windows 标准 Internet Zone/SmartScreen 或 Mac 浏览器隔离首开路径；不将 1.0.1 的单应用 Gatekeeper 例外视为对新包的自动放行保证。
+全部既有未验收项和历史未定位风险继续保留，详见[桌面实现与验收记录](implementation/desktop-client.md#平台与交付范围)与 [1.0.1 原验收记录](desktop-review-2026-10-24.md)。1.1.0 没有重复 Windows 标准 Internet Zone/SmartScreen 或 Mac 浏览器隔离首开路径；不将 1.0.1 的单应用 Gatekeeper 例外视为对新包的自动放行保证。
 
 本地证据位于忽略目录 `output/release-1.1.0/`：生产包、签名验证、两端报告、原生版本与更新界面、公开下载校验。合成数据、运行令牌与签名私钥不提交。
