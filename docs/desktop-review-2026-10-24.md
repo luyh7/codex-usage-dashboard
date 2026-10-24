@@ -107,7 +107,7 @@ Windows 随包 helper 的 build ID 为 `bca396102ddd0d8d25cdad285fa37bd6154f832d
 
 仍需独立环境或外部资源的项目：Intel Mac GUI、最低 macOS 14.5、Finder 安装/移除与 Dock 菜单完整矩阵；Windows 10/全新或离线 WebView2；独立 Linux 桌面及无托盘交互；真实登录、多显示器、高 DPI 切换、睡眠唤醒及长期运行；极限快照规模和完整提示框性能矩阵。付费 Windows 签名及 Mac Developer ID/公证列为可选改进；正式自动更新渠道及两端公开 HTTPS 更新验收已完成。保留此前未定位的 Windows 启动超时和 WSLg 堆损坏风险，不以本轮通过宣称根因已经修复。
 
-PR 保持草稿；候选预发布进度见文末，没有合并或转为稳定版。
+上述为准备阶段状态；后续渠道验收及用户批准的稳定发行范围见文末。
 
 
 ## 免费直装最终候选与 HTTPS 渠道
@@ -132,4 +132,13 @@ Windows 随包服务 build ID 为 `711fc396b682fb07d46b2e72a87afc60d24d4cc6216e1
 
 Windows Chrome 从公开页面下载的 EXE 摘要与上表一致，首次打开进入原生安装欢迎页，检查后取消。该主机下载文件未带 `Zone.Identifier`，本轮没有观察到 SmartScreen；不能将它当作标准 Internet Zone 拦截/放行路径的验证。Mac 由用户接手 Chrome 下载后，DMG 摘要与上表一致，带 Chrome 隔离标记；经 Finder 复制到隔离 Applications 目录后仍保留隔离标记且 ad-hoc 完整签名通过。系统启用 Gatekeeper，首次打开实际显示“Apple 无法验证”并拦截，系统设置提供该应用的“仍要打开”。用户明确授权仅对此候选添加“仍要打开”例外，并在本机完成管理员认证后，应用正常启动；原生设置显示 1.0.1，随包服务健康接口和候选 build ID 一致。正常退出后宿主与 helper 均停止，再次打开无需新的安全确认且界面、健康接口正常。Gatekeeper 保持启用，未修改全局安全设置。验收副本退出后移入废纸篓，下载的 DMG 保留。
 
-本地证据位于忽略目录 `output/free-release/`：`acceptance-mac-auto/report.json`、从 Windows 复制的 `windows-final-acceptance-report.json`、两端 `*-https-update-available.png` / `*-https-update-retained-24k.png`、浏览器首开截图、`https-downloads/verification.json`、发行清单及签名验证工具。运行令牌、合成日志、签名私钥和口令均不提交。PR 保持草稿，Release 为公开预发布，没有合并或转为稳定版。
+本地证据位于忽略目录 `output/free-release/`：`acceptance-mac-auto/report.json`、从 Windows 复制的 `windows-final-acceptance-report.json`、两端 `*-https-update-available.png` / `*-https-update-retained-24k.png`、浏览器首开截图、`https-downloads/verification.json`、发行清单及签名验证工具。运行令牌、合成日志、签名私钥和口令均不提交。上述证据在公开预发布阶段取得；后续稳定发行决定如下。
+
+
+## 稳定发行决定（2026-10-24）
+
+用户明确授权合并 [PR #9](https://github.com/luyh7/codex-usage-dashboard/pull/9)，将已验收候选按有限环境范围晋级为 [Desktop 1.0.1 稳定版](https://github.com/luyh7/codex-usage-dashboard/releases/tag/desktop-updates)，并保留全部已知限制。稳定承诺仅限 Windows 11 x64/build 22631/已有 WebView2 155.0.4283.62 与 macOS 26.6.2（25G83）arm64；Intel、旧系统及独立 Linux 不因源码或 CI 支持而纳入承诺。
+
+安装包、更新归档、公钥、更新签名及平台选择均复用已验收字节。正式晋级仅更新 Release 的稳定状态、标题与说明，并同步 `latest.json` 的版本说明及对应 `SHA256SUMS` 条目；版本、平台 URL 和更新签名不变。预发布时清单摘要对应此前验收时点，稳定晋级后须重新匿名下载核对最终资产。桌面固定频道与 CLI 分开，保留 CLI 的仓库 Latest 入口；稳定源码使用独立版本标签 `desktop-v1.0.1`。
+
+保留上文全部未验收项目和历史未定位风险，特别是 Windows 标准 Internet Zone / SmartScreen 放行路径、多屏/睡眠/登录/长期运行矩阵及历史 Windows/WSLg 退出风险。Windows 更新有一次语言确认；Mac 免费包需处理单应用 Gatekeeper 提示，不承诺免提示。完整对外支持范围与限制列于 [发行说明](releases/desktop-v1.0.1.md)。
