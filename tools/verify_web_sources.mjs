@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { gunzipSync } from 'node:zlib';
 
 const root = process.cwd();
@@ -132,8 +133,11 @@ try {
   let listing = await json('/api/v2/sessions?period=all');
   assert.equal(listing.page.summary.usage.total_tokens, 36);
   assert.equal(listing.current_device.sources.length, 2);
-  const record = JSON.parse(await readFile(path.join(config, 'runtime', 'instance.json'), 'utf8'));
-  assert.deepEqual(record.codex_homes, (await json('/api/health')).codex_homes);
+  const health = await json('/api/health');
+  const cache = process.platform === 'darwin' ? path.join(homedir(), 'Library/Caches') : (process.env.XDG_CACHE_HOME || path.join(homedir(), '.cache'));
+  const runtime = process.platform === 'win32' ? path.join(config, 'runtime') : path.join(cache, 'cousash/scopes', health.config_scope, 'runtime');
+  const record = JSON.parse(await readFile(path.join(runtime, 'instance.json'), 'utf8'));
+  assert.deepEqual(record.codex_homes, health.codex_homes);
   const combinedExport = await exportJob();
   assert.notEqual(combinedExport.id, originalExport.id);
   assert.equal(combinedExport.value.snapshot.summary.usage.total_tokens, 36);
