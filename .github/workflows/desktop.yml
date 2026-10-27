@@ -46,9 +46,13 @@ jobs:
           name: web-dist
           path: web/dist
       - run: npm ci --prefix desktop
+      - name: Configure Windows updater for local signing
+        if: runner.os == 'Windows'
+        run: node -e "const fs = require('fs'); const config = require('./desktop/release.stable.json'); config.bundle.createUpdaterArtifacts = false; fs.writeFileSync('desktop/ci-release.json', JSON.stringify(config))"
       - run: node tools/desktop.mjs bundle --skip-web
         env:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+          DESKTOP_RELEASE_CONFIG: ${{ runner.os == 'Windows' && 'ci-release.json' || '' }}
       - name: Desktop Rust all-feature checks and unit tests
         run: |
           cargo clippy --manifest-path desktop/Cargo.toml --release --all-features --target ${{ matrix.target }} -- -D warnings
