@@ -49,7 +49,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-candidate
-          path: dist/publish
+          path: dist/native
       - name: Verify tag belongs to main
         run: |
           node tools/check_release.mjs "$RELEASE_TAG"
@@ -57,7 +57,17 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-      - run: gh release create "$RELEASE_TAG" dist/publish/* --verify-tag --notes-file "docs/releases/$RELEASE_TAG.md" --title "$RELEASE_TAG"
+      - name: Assemble and publish staged desktop and native assets
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release download "$RELEASE_TAG" --dir dist/desktop
+          version="${RELEASE_TAG#v}"
+          test -f "dist/desktop/cousash-${version}-windows-x64-setup.exe"
+          test -f "dist/desktop/cousash-${version}-macos-arm64.dmg"
+          node -e 'const p = require("./dist/desktop/latest.json").platforms; if (!p?.["windows-x86_64"] || !p?.["darwin-aarch64"]) process.exit(1)'
+          node tools/assemble-release.mjs dist/native dist/desktop dist/publish "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" dist/publish/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}

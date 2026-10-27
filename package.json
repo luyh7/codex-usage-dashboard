@@ -1,6 +1,6 @@
 {
   "name": "codex-usage-dashboard-skill",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Codex Usage Dashboard is a Codex-only skill for local per-conversation usage, tokens, output, cost estimates, cache hit rate, models, and reasoning effort.",
   "repository": {
     "type": "git",

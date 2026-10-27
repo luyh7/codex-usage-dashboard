@@ -122,6 +122,7 @@
     {#if isDesktop()}
       <div class="settings-card"><DesktopSettings {lang} /></div>
     {/if}
+    {#if localDevice && localDevice.platform !== 'Darwin'}
       <section class="settings-card"><h2>{lang === 'zh' ? 'Codex 日志来源' : 'Codex log sources'}</h2>
         <ul class="source-list">
           {#each effectiveSources as source (source.path)}
@@ -137,6 +138,7 @@
         </div>
         {#if sourceError}<p class="error" role="alert">{sourceError}</p>{/if}
       </section>
+    {/if}
     <div class="settings-card"><RemoteManager {data} {remotes} {localDevice} {lang} {changed} /></div>
   </div>
 </div>

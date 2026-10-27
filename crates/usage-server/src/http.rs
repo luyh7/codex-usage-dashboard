@@ -282,7 +282,7 @@ fn current_device(state: &State, published: &crate::service::Published) -> Value
     let sources: Vec<_> = published.local_sources.iter().map(|source| {
         json!({"id":source.id,"label":source.label,"session_count":counts.get(source.id.as_str()).copied().unwrap_or(0)})
     }).collect();
-    json!({"device_short_code":state.device,"label":state.hostname,"session_count":published.local.sessions.len(),"sources":sources})
+    json!({"device_short_code":state.device,"label":state.hostname,"platform":crate::config::platform(),"session_count":published.local.sessions.len(),"sources":sources})
 }
 async fn paged(
     Extract(state): Extract<Arc<State>>,

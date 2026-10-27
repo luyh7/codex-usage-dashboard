@@ -128,7 +128,7 @@ The dashboard reads active and archived logs from each configured Codex home:
 
 Both `.jsonl` and Codex's compressed `.jsonl.zst` histories are supported. Log compression and resumption do not cause both representations to be counted as separate usage.
 
-In Settings → Codex log sources, use the folder picker to add Codex home folders or remove existing ones. Adding a folder preserves the currently discovered folders; use Discover automatically to restore discovery. On Windows, an accessible WSL home can be added as `\\wsl.localhost\<distribution>\home\<user>\.codex` alongside the Windows home. The browser's picker opens on the machine running the dashboard and requires a graphical desktop session; Linux also needs an XDG Desktop Portal file chooser or zenity. Explicit `--codex-home` launch options override saved sources on the next startup.
+On Windows and Linux, in Settings → Codex log sources, use the folder picker to add Codex home folders or remove existing ones. Adding a folder preserves the currently discovered folders; use Discover automatically to restore discovery. On Windows, an accessible WSL home can be added as `\\wsl.localhost\<distribution>\home\<user>\.codex` alongside the Windows home. The browser's picker opens on the machine running the dashboard and requires a graphical desktop session; Linux also needs an XDG Desktop Portal file chooser or zenity. Explicit `--codex-home` launch options override saved sources on the next startup.
 
 Under WSL, automatic discovery also looks for accessible Windows profiles:
 
@@ -157,7 +157,7 @@ The dollar figure estimates the API-equivalent cost of usage recorded in local C
 
 The pricing table is bundled with the application. It uses effective dates so earlier usage retains its historical rate, and applies model-specific short/long-context and service-tier rules. It is not a live fetch of the latest public prices.
 
-The current implementation covers the GPT-5.6, GPT-6 Astra/Sol/Luna, and GPT-6.1 Sol families, along with special model aliases. The bundled [price table](../crates/usage-core/data/prices-v1.json) defines supported models, effective dates, context boundaries, and Fast/Ultrafast multipliers; the [pricing implementation](../crates/usage-core/src/pricing.rs) applies those rules.
+The current implementation covers the GPT-5.6, GPT-6 Astra/Sol/Luna, and GPT-6.1 Sol/Terra families, along with special model aliases. The bundled [price table](../crates/usage-core/data/prices-v1.json) defines supported models, effective dates, context boundaries, and Fast/Ultrafast multipliers; the [pricing implementation](../crates/usage-core/src/pricing.rs) applies those rules.
 
 Pricing references used by the project: [OpenAI API pricing](https://developers.openai.com/api/docs/pricing), [API changelog](https://developers.openai.com/api/docs/changelog), and [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode).
 

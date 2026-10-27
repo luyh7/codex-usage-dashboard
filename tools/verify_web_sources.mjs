@@ -88,6 +88,13 @@ try {
   const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || '../benchmarks/refactor/frontend/node_modules/playwright/index.mjs');
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH || undefined, headless: true });
   const page = await browser.newPage({ viewport: { width: 1536, height: 960 }, locale: 'zh-CN', reducedMotion: 'reduce' });
+  await page.route(/\/api\/v2\/(projects|sessions)\?/, async route => {
+    const response = await route.fetch();
+    if (response.status() !== 200) return route.fulfill({ response });
+    const listing = await response.json();
+    if (listing.current_device) listing.current_device.platform = 'Windows';
+    return route.fulfill({ response, json: listing });
+  });
   let selected = null, holdPicker = false, releasePicker;
   await page.route('**/api/sources/choose', async route => {
     assert.ok(route.request().headers()['x-codex-write-token']);
