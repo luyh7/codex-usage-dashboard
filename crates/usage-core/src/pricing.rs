@@ -494,6 +494,62 @@ mod tests {
         assert_eq!(unchanged.effective_until, None);
     }
     #[test]
+    fn gpt_6_1_terra_prices_follow_release_date_context_and_fast_mode() {
+        let schedule = PriceSchedule::bundled();
+        let model = "gpt-6.1-terra-2026-10-26";
+        assert!(
+            schedule
+                .quote(
+                    model,
+                    Some("2026-10-25T23:59:59Z"),
+                    Some(272_000),
+                    "standard"
+                )
+                .is_none()
+        );
+        let quote =
+            |input, tier| schedule.quote(model, Some("2026-10-26T00:00:00Z"), Some(input), tier);
+        let short = quote(272_000, "standard").unwrap();
+        assert_eq!(short.effective_at.as_deref(), Some("2026-10-26T00:00:00Z"));
+        assert_eq!(short.context_tier.as_deref(), Some("short"));
+        assert_eq!(
+            short.prices,
+            Prices {
+                input: 1.0,
+                cached_input: 0.05,
+                output: 5.0,
+                cache_write_input: None
+            }
+        );
+        let long = quote(272_001, "standard").unwrap();
+        assert_eq!(long.context_tier.as_deref(), Some("long"));
+        assert_eq!(
+            long.prices,
+            Prices {
+                input: 2.0,
+                cached_input: 0.1,
+                output: 7.5,
+                cache_write_input: None
+            }
+        );
+        let fast = quote(272_001, "fast").unwrap();
+        assert_eq!(fast.cost_multiplier, 2.0);
+        assert_eq!(
+            fast.prices,
+            Prices {
+                input: 4.0,
+                cached_input: 0.2,
+                output: 15.0,
+                cache_write_input: None
+            }
+        );
+        assert_eq!(
+            quote(272_000, "priority").unwrap().prices,
+            short.prices.scaled(2.0)
+        );
+        assert!(quote(272_000, "ultrafast").is_none());
+    }
+    #[test]
     fn costs_unknown_and_reasoning_subset() {
         let schedule = PriceSchedule::bundled();
         let usage = Usage {

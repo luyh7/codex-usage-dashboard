@@ -87,7 +87,7 @@ npm 更新成功后删除旧安装目录中已知的 Python 脚本，保留外�
 PR、main 推送和手动运行都会合并四个平台制品，生成 `release-candidate` CI artifact，不创建 Release。
 开发分支的普通推送不触发工作流；通过 PR 运行验收。
 只有 `v*` 标签的 push 事件才允许发布，且必须通过全部验收、标签版本检查和 main 祖先检查。
-发布使用 `docs/releases/vVERSION.md` 的说明，不提前手动创建同名 Release。
+发布使用 `docs/releases/vVERSION.md` 的说明。推送版本标签后，立即创建同名草稿 Release，并上传已验收、使用长期密钥签名的桌面暂存文件（含 `latest.json` 和 `SHA256SUMS`）。标签工作流等待跨平台验收后，从草稿下载桌面文件、合并 CLI 制品和校验文件，再发布草稿。草稿或桌面文件缺失时工作流会失败，不会发布不完整版本；补齐后可重跑失败任务。
 合并工具拒绝缺失/重复平台、校验失败、版本不匹配和非空输出目录。未执行的 CI 不算验收通过。
 完整操作边界见[发布准备清单](../releases/prepare-1.0.1.md)。
 
@@ -122,7 +122,7 @@ Python 仅用于可选的历史差分测试，不是构建、打包、安装或�
 
 CLI 仍使用原来的内部平台键（例如 `darwin-arm64`），安装器读取 manifest 中的新文件名，无需修改平台识别或牺牲完整性校验。桌面包与 CLI 的 Windows 文件分别使用 `-setup.exe` 和 `-cli-windows-x64.exe`，避免混淆。
 
-经原生验收并完成长期密钥签名后，把桌面产物放到同一个 `vVERSION` 的暂存目录；不要再创建 `desktop-vVERSION` 或 `desktop-updates` Release。使用同一套校验文件合并工具，防止桌面清单覆盖 CLI 校验项：
+Windows CI 安装包内置长期更新公钥和统一入口，但不接收私钥；下载验收通过的安装包后，在受保护的 Mac 上用长期密钥对安装包按版本签名。Mac 使用同一密钥构建和签名。经原生验收并完成长期密钥签名后，把桌面产物放到同一个 `vVERSION` 的暂存目录；不要再创建 `desktop-vVERSION` 或 `desktop-updates` Release。使用同一套校验文件合并工具，防止桌面清单覆盖 CLI 校验项：
 
 ```bash
 node tools/merge_release.mjs downloaded-native dist/native vVERSION
