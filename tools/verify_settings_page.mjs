@@ -8,6 +8,12 @@ const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_E
 const context = await browser.newContext({ viewport: { width: 1536, height: 960 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai', reducedMotion: 'reduce' });
 await installMintFixture(context);
 await context.route('**/api/security/token', route => route.fulfill({ json: { token: 'settings-fixture-token' } }));
+let preferences = { schema_version: 1, language: 'zh', timezone: 'Asia/Shanghai', codex_homes: [] };
+await context.route('**/api/settings', route => {
+  if (route.request().method() === 'POST') preferences = { ...preferences, ...route.request().postDataJSON() };
+  return route.fulfill({ json: preferences });
+});
+await context.route('**/api/sources', route => route.fulfill({ json: [{ path: '/demo/.codex', status: 'available' }] }));
 let remotes = [];
 await context.route('**/api/v2/projects?**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
   page: { items: [], summary: summary(sessions), total: 0, offset: 0, limit: 100, revision: 'settings-test', query_token: 'settings-test' },
@@ -64,7 +70,7 @@ try {
   assert.equal(await localDevice.getByRole('button').count(), 2);
   assert.equal(await localDevice.getByRole('button', { name: '完整导出', exact: true }).count(), 1);
   assert.equal(await localDevice.getByRole('button', { name: '脱敏导出', exact: true }).count(), 1);
-  assert.equal(await page.locator('.remote-actions').getByRole('button').count(), 1);
+  assert.equal(await page.locator('.device-header').getByRole('button').count(), 1);
   await page.reload();
   await page.getByRole('heading', { name: '设置', exact: true }).waitFor();
   await page.getByRole('button', { name: '概览', exact: true }).click();
@@ -93,6 +99,7 @@ try {
   await page.getByRole('textbox', { name: '搜索时区', exact: true }).fill('协调');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
+  await page.waitForFunction(() => new URL(location.href).searchParams.get('timezone') === 'UTC');
   assert.equal(new URL(page.url()).searchParams.get('timezone'), 'UTC');
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cousash:v2:timezone'))), 'UTC');
   await page.goto(base + '/?page=settings');
@@ -163,6 +170,7 @@ try {
     const nextZone = width === 390 ? 'Asia/Shanghai' : 'UTC';
     await page.getByRole('textbox', { name: '搜索时区', exact: true }).fill(nextZone);
     await zones.locator(`[data-option="${nextZone}"]`).click();
+    await page.waitForFunction(zone => new URL(location.href).searchParams.get('timezone') === zone, nextZone);
     assert.equal(new URL(page.url()).searchParams.get('timezone'), nextZone);
     await page.screenshot({ path: `${output}/mobile-${width}.png` });
     await page.getByRole('button', { name: '概览', exact: true }).click();

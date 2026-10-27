@@ -128,6 +128,8 @@ The dashboard reads active and archived logs from each configured Codex home:
 
 Both `.jsonl` and Codex's compressed `.jsonl.zst` histories are supported. Log compression and resumption do not cause both representations to be counted as separate usage.
 
+In Settings → Codex log sources, use the folder picker to add Codex home folders or remove existing ones. Adding a folder preserves the currently discovered folders; use Discover automatically to restore discovery. On Windows, an accessible WSL home can be added as `\\wsl.localhost\<distribution>\home\<user>\.codex` alongside the Windows home. The browser's picker opens on the machine running the dashboard and requires a graphical desktop session; Linux also needs an XDG Desktop Portal file chooser or zenity. Explicit `--codex-home` launch options override saved sources on the next startup.
+
 Under WSL, automatic discovery also looks for accessible Windows profiles:
 
 ```text

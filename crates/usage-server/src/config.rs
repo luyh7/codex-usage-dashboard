@@ -161,6 +161,24 @@ fn has_logs(path: &Path) -> bool {
         .iter()
         .any(|s| path.join(s).exists())
 }
+#[cfg(windows)]
+fn windows_wsl_path(path: &Path) -> bool {
+    use std::path::Prefix;
+    match path.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::UNC(host, _) | Prefix::VerbatimUNC(host, _) => {
+                let host = host.to_string_lossy();
+                host.eq_ignore_ascii_case("wsl$") || host.eq_ignore_ascii_case("wsl.localhost")
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+#[cfg(not(windows))]
+fn windows_wsl_path(_: &Path) -> bool {
+    false
+}
 pub fn sources(homes: &[PathBuf], auto_windows: bool) -> Vec<LogSource> {
     let mut paths = if homes.is_empty() {
         vec![
@@ -210,7 +228,9 @@ pub fn sources(homes: &[PathBuf], auto_windows: bool) -> Vec<LogSource> {
         if !seen.insert(home.clone()) {
             continue;
         }
-        let label = if is_wsl {
+        let label = if windows_wsl_path(&home) {
+            "WSL"
+        } else if is_wsl {
             if home.starts_with("/mnt/c/Users") {
                 "Windows"
             } else {
@@ -223,15 +243,19 @@ pub fn sources(homes: &[PathBuf], auto_windows: bool) -> Vec<LogSource> {
         };
         let base = slug(label);
         let mut id = base.clone();
-        let mut n = 2;
+        let mut n = 1;
         while ids.contains(&id) {
-            id = format!("{base}-{n}");
             n += 1;
+            id = format!("{base}-{n}");
         }
         ids.insert(id.clone());
         result.push(LogSource {
             id,
-            label: label.into(),
+            label: if n == 1 {
+                label.into()
+            } else {
+                format!("{label} {n}")
+            },
             home,
         });
     }
@@ -256,4 +280,36 @@ pub fn homes_display(sources: &[LogSource]) -> String {
 pub fn index_path(root: &Path, sources: &[LogSource]) -> PathBuf {
     let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(sources).unwrap()));
     root.join("index-v1").join(format!("{hash}.sqlite3"))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_wsl_unc_paths() {
+        for path in [
+            r"\\wsl.localhost\Ubuntu\home\user\.codex",
+            r"\\wsl$\Ubuntu\home\user\.codex",
+            r"\\?\UNC\wsl.localhost\Ubuntu\home\user\.codex",
+            r"\\?\UNC\WSL$\Ubuntu\home\user\.codex",
+        ] {
+            assert!(windows_wsl_path(Path::new(path)), "{path}");
+        }
+        assert!(!windows_wsl_path(Path::new(
+            r"\\wsl.localhost.example\share\logs"
+        )));
+        assert!(!windows_wsl_path(Path::new(r"C:\Users\user\.codex")));
+    }
+
+    #[test]
+    fn multiple_sources_have_distinct_labels() {
+        let root = tempfile::tempdir().unwrap();
+        let homes = [root.path().join("first"), root.path().join("second")];
+        let sources = sources(&homes, false);
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].label, "Windows");
+        assert_eq!(sources[1].label, "Windows 2");
+        assert_ne!(sources[0].id, sources[1].id);
+    }
 }

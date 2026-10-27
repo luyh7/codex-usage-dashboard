@@ -10,7 +10,7 @@ use axum::{
     },
     routing::{get, post},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::HashMap, convert::Infallible, sync::Arc};
 use tokio_stream::{StreamExt, wrappers::WatchStream};
@@ -83,7 +83,7 @@ async fn blocking(
 async fn health(Extract(state): Extract<Arc<State>>) -> Response {
     response(
         StatusCode::OK,
-        &json!({"ok":true,"app":"codex-usage-dashboard","protocol_version":1,"implementation":"rust","ui":env!("COUSASH_UI"),"timezone":state.zone.name(),"config_scope":usage_runtime::scope_id(&crate::config::config_dir()),"source_sha256":env!("COUSASH_BUILD_ID"),"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"pid":std::process::id(),"codex_homes":state.sources.iter().map(|s|s.home.to_string_lossy()).collect::<Vec<_>>(),"instance_id":std::env::var("COUSASH_INSTANCE_ID").unwrap_or_default(),"features":["paged-events-v1","separate-chart-v1","indexed-search-v1","periods","period-deltas","all-period","multi-codex-home","remote-snapshot-v1","background-index-v1","sse-revision-v1"],"device_short_code":state.device,"index":*state.status.read().unwrap()}),
+        &json!({"ok":true,"app":"codex-usage-dashboard","protocol_version":1,"implementation":"rust","ui":env!("COUSASH_UI"),"timezone":state.zone.name(),"config_scope":usage_runtime::scope_id(&crate::config::config_dir()),"source_sha256":env!("COUSASH_BUILD_ID"),"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"pid":std::process::id(),"codex_homes":state.active_sources().iter().map(|s|s.home.to_string_lossy().into_owned()).collect::<Vec<_>>(),"instance_id":std::env::var("COUSASH_INSTANCE_ID").unwrap_or_default(),"features":["paged-events-v1","separate-chart-v1","indexed-search-v1","periods","period-deltas","all-period","multi-codex-home","remote-snapshot-v1","background-index-v1","sse-revision-v1"],"device_short_code":state.device,"index":*state.status.read().unwrap()}),
     )
 }
 async fn settings() -> Response {
@@ -102,7 +102,7 @@ async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
             .collect::<std::collections::HashSet<_>>()
     });
     let sources: Vec<_> = state
-        .sources
+        .active_sources()
         .iter()
         .map(|s| {
             let status = match std::fs::read_dir(&s.home) {
@@ -127,6 +127,88 @@ async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
         })
         .collect();
     response(StatusCode::OK, &sources)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceUpdate {
+    codex_homes: Vec<std::path::PathBuf>,
+    expected_homes: Vec<std::path::PathBuf>,
+}
+async fn update_sources(
+    Extract(state): Extract<Arc<State>>,
+    axum::Json(update): axum::Json<SourceUpdate>,
+) -> Response {
+    let value = crate::preferences::Preferences {
+        codex_homes: update.codex_homes.clone(),
+        ..Default::default()
+    };
+    if let Err(error) = crate::preferences::validate(&value) {
+        return response(StatusCode::BAD_REQUEST, &json!({"error":error}));
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if state
+        .sender
+        .try_send(crate::service::Command::Sources(
+            update.codex_homes,
+            update.expected_homes,
+            tx,
+        ))
+        .is_err()
+    {
+        return response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &json!({"error":"index worker is busy"}),
+        );
+    }
+    match rx.await {
+        Ok(Ok(value)) => response(StatusCode::OK, &value),
+        Ok(Err(Error::InvalidData(message))) if message == crate::service::SOURCE_CONFLICT => {
+            response(StatusCode::CONFLICT, &json!({"error":message}))
+        }
+        Ok(Err(error)) => response(StatusCode::BAD_REQUEST, &json!({"error":error.to_string()})),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
+}
+async fn choose_source(Extract(state): Extract<Arc<State>>) -> Response {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static ACTIVE: AtomicBool = AtomicBool::new(false);
+    struct PickerLease;
+    impl Drop for PickerLease {
+        fn drop(&mut self) {
+            ACTIVE.store(false, Ordering::Release);
+        }
+    }
+    if ACTIVE
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        return response(
+            StatusCode::CONFLICT,
+            &json!({"error":"Folder picker is already open"}),
+        );
+    }
+    let initial = state
+        .active_sources()
+        .first()
+        .map(|source| source.home.clone());
+    let _lease = PickerLease;
+    let mut updates = state.events.subscribe();
+    tokio::select! {
+        result = crate::picker::request(initial) => match result {
+            Ok(selection) => response(StatusCode::OK, &selection),
+            Err(error) => response(StatusCode::INTERNAL_SERVER_ERROR, &json!({"error":error})),
+        },
+        _ = async {
+            loop {
+                if updates.borrow()["phase"] == "shutdown" {
+                    break;
+                }
+                if updates.changed().await.is_err() {
+                    break;
+                }
+            }
+        } => response(StatusCode::SERVICE_UNAVAILABLE, &json!({"error":"Dashboard is shutting down"})),
+    }
 }
 async fn save_settings(axum::Json(value): axum::Json<Value>) -> Response {
     match tokio::task::spawn_blocking(move || crate::preferences::save_patch(value)).await {
@@ -197,7 +279,7 @@ fn current_device(state: &State, published: &crate::service::Published) -> Value
             .entry(session.detail.environment_id.as_str())
             .or_default() += 1;
     }
-    let sources: Vec<_> = state.sources.iter().map(|source| {
+    let sources: Vec<_> = published.local_sources.iter().map(|source| {
         json!({"id":source.id,"label":source.label,"session_count":counts.get(source.id.as_str()).copied().unwrap_or(0)})
     }).collect();
     json!({"device_short_code":state.device,"label":state.hostname,"session_count":published.local.sessions.len(),"sources":sources})
@@ -432,8 +514,8 @@ async fn export_gzip(
         );
     }
     blocking(state.clone(), move || {
-        let view = state.local_view()?;
-        let document = state.export_document(&view, None)?;
+        let (view, published) = state.local_view()?;
+        let document = state.export_document(&view, &published.local_sources, None)?;
         let bytes = if redacted {
             crate::snapshot::gzip(&state.redact(&serde_json::to_value(document)?))?
         } else {
@@ -460,9 +542,8 @@ async fn start_export(
     if let Some(job) = jobs.iter().rev().find(|job| {
         let result = job.result.lock().unwrap();
         job.redacted == redacted
-            && (result.is_none()
-                || (job.revision == published.local.revision
-                    && matches!(result.as_ref(), Some(Ok(_)))))
+            && job.revision == published.snapshot.revision
+            && (result.is_none() || matches!(result.as_ref(), Some(Ok(_))))
     }) {
         return response(StatusCode::OK, &job.status());
     }
@@ -471,10 +552,10 @@ async fn start_export(
         id: format!(
             "{}-{}-{}",
             if redacted { "shared" } else { "full" },
-            published.local.revision,
+            published.snapshot.revision,
             chrono::Utc::now().timestamp_micros()
         ),
-        revision: published.local.revision,
+        revision: published.snapshot.revision,
         percent: AtomicUsize::new(1),
         result: std::sync::Mutex::new(None),
     });
@@ -501,7 +582,8 @@ async fn start_export(
                 state.zone,
                 &usage_core::PriceSchedule::bundled(),
             )?;
-            let document = state.export_document(&view, Some(&job.percent))?;
+            let document =
+                state.export_document(&view, &published.local_sources, Some(&job.percent))?;
             Ok(if redacted {
                 crate::snapshot::gzip(&state.redact(&serde_json::to_value(document)?))?
             } else {
@@ -663,7 +745,8 @@ pub fn router(state: Arc<State>) -> Router {
         .fallback(static_file)
         .route("/api/health", get(health))
         .route("/api/settings", get(settings).post(save_settings))
-        .route("/api/sources", get(sources))
+        .route("/api/sources", get(sources).post(update_sources))
+        .route("/api/sources/choose", post(choose_source))
         .route("/api/summary", get(summary))
         .route("/api/refresh", post(refresh))
         .route("/api/shutdown", post(shutdown))

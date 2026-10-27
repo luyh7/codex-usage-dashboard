@@ -18,7 +18,7 @@ chrono.workspace = true
 regex.workspace = true
 chrono-tz = "0.10"
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "process", "signal", "sync", "time", "macros"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 notify = "8"
 clap = { version = "4", features = ["derive"] }
@@ -35,6 +35,12 @@ sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.11.1", default-features = false, features = ["tokio"] }
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+rfd = { version = "0.16.1", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }

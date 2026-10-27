@@ -3,6 +3,7 @@ mod config;
 mod http;
 mod launcher;
 mod network;
+mod picker;
 mod preferences;
 mod redact;
 mod security;
@@ -60,10 +61,17 @@ struct Args {
     resolve_sources: bool,
     #[arg(long)]
     timezone: Option<String>,
+    #[arg(long, hide = true)]
+    choose_source_dialog: bool,
+    #[arg(long, hide = true, requires = "choose_source_dialog")]
+    picker_start: Option<PathBuf>,
 }
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    if args.choose_source_dialog {
+        return picker::show(args.picker_start).await;
+    }
     if args.build_info {
         let mut info = serde_json::json!({"build_id":env!("COUSASH_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"ui":env!("COUSASH_UI")});
         if args.resolve_sources {
@@ -154,7 +162,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database = once_index
         .as_ref()
         .map(|dir| dir.path().join("index.sqlite3"));
-    let (state, worker) = service::start(config::config_dir(), sources, zone, database)?;
+    let (state, worker) = service::start(
+        config::config_dir(),
+        sources,
+        zone,
+        database,
+        !args.no_auto_windows,
+        args.managed,
+    )?;
     if args.once || args.export_snapshot.is_some() {
         loop {
             if state.current.read().unwrap().is_some() {
@@ -200,11 +215,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 config::atomic_json(&path, &state.export().map_err(|e| format!("{e:?}"))?)?;
             } else {
-                let view = state.local_view().map_err(|e| format!("{e:?}"))?;
+                let (view, published) = state.local_view().map_err(|e| format!("{e:?}"))?;
                 snapshot::write_gzip(
                     &path,
                     &state
-                        .export_document(&view, None)
+                        .export_document(&view, &published.local_sources, None)
                         .map_err(|e| format!("{e:?}"))?,
                 )?;
             }
@@ -220,13 +235,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(
-                        &serde_json::json!({"generated_at":view.generated_at,"codex_home":config::homes_display(&state.sources),"codex_sources":published.sources,"summary":view.summary().map_err(|e|format!("{e:?}"))?,"sessions":view.wire_summaries()?,"cache_metrics":state.status.read().unwrap()["metrics"]})
+                        &serde_json::json!({"generated_at":view.generated_at,"codex_home":config::homes_display(&published.local_sources),"codex_sources":published.sources,"summary":view.summary().map_err(|e|format!("{e:?}"))?,"sessions":view.wire_summaries()?,"cache_metrics":state.status.read().unwrap()["metrics"]})
                     )?
                 );
             } else {
                 println!(
                     "Codex homes: {}\nSessions: {}\nTotal tokens: {}",
-                    config::homes_display(&state.sources),
+                    config::homes_display(&published.local_sources),
                     view.summaries().count(),
                     view.summary()
                         .map_err(|e| format!("{e:?}"))?

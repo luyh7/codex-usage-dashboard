@@ -11,7 +11,9 @@
 - **Windows**：运行 `.exe`，按提示完成安装，从开始菜单打开。
 - **Mac**：打开 `.dmg`，将应用拖入 Applications，再打开应用。
 
-客户端会自动发现本机 Codex 日志。需要使用其他目录时，在“设置”中选择日志文件夹。
+客户端会自动发现本机 Codex 日志。在“设置 → Codex 日志来源”中可继续添加其他 Codex 主目录，也可逐个移除或恢复自动发现。选择包含 `sessions` 和 `archived_sessions` 的主目录，而不是这些子文件夹。
+
+Windows 客户端可同时读取 Windows 和 WSL 的日志。例如添加 `\\wsl.localhost\Ubuntu\home\<用户名>\.codex`，其中发行版和用户名以实际环境为准；该发行版的文件系统需可从 Windows 访问。
 
 ## 使用
 

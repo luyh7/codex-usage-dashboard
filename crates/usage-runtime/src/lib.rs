@@ -25,6 +25,12 @@ pub fn sources_id(homes: &[PathBuf]) -> Result<String> {
     use sha2::{Digest, Sha256};
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(homes)?)))
 }
+fn sources_match(recorded: &[PathBuf], health: &Value, expected: &str) -> Result<bool> {
+    let Ok(active) = serde_json::from_value::<Vec<PathBuf>>(health["codex_homes"].clone()) else {
+        return Ok(false);
+    };
+    Ok(sources_id(recorded)? == expected && sources_id(&active)? == expected)
+}
 pub const TIMEOUT: Duration = Duration::from_secs(90);
 pub fn ureq_url(value: &str) -> Result<url::Url> {
     Ok(url::Url::parse(value)?)
@@ -481,7 +487,7 @@ pub fn ensure_service_options(
         && let Ok(health) = record.health()
     {
         if record.build_id != info["build_id"].as_str().unwrap_or("")
-            || sources_id(&record.codex_homes)? != resolved_sources
+            || !sources_match(&record.codex_homes, &health, resolved_sources)?
             || timezone.is_some_and(|zone| health["timezone"] != zone)
         {
             return Err("another service version or log source owns this configuration; quit it before retrying, or choose a separate COUSASH_CONFIG_DIR".into());
@@ -602,6 +608,15 @@ impl Drop for Registration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_reuse_requires_the_running_publication_to_match_the_record() {
+        let old = vec![PathBuf::from("/old")];
+        let new = vec![PathBuf::from("/old"), PathBuf::from("/new")];
+        let expected = sources_id(&new).unwrap();
+        assert!(!sources_match(&new, &json!({"codex_homes":old}), &expected).unwrap());
+        assert!(!sources_match(&new, &json!({}), &expected).unwrap());
+        assert!(sources_match(&new, &json!({"codex_homes":new}), &expected).unwrap());
+    }
     #[test]
     fn lock_has_bounded_wait_and_recovers() {
         let d = tempfile::tempdir().unwrap();

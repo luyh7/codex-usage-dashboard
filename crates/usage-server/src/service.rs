@@ -22,6 +22,7 @@ use usage_core::{
 pub struct Published {
     pub snapshot: Arc<Snapshot>,
     pub local: Arc<Snapshot>,
+    pub local_sources: Vec<LogSource>,
     pub sources: Vec<Value>,
     pub remotes: Vec<Metadata>,
 }
@@ -29,6 +30,11 @@ pub enum Command {
     Refresh(oneshot::Sender<Result<Value, Error>>),
     Wake(Vec<PathBuf>),
     Remote(String, Value, oneshot::Sender<Result<Value, Error>>),
+    Sources(
+        Vec<PathBuf>,
+        Vec<PathBuf>,
+        oneshot::Sender<Result<Value, Error>>,
+    ),
     Stop,
 }
 type CachedView = (String, Arc<View>, Arc<Published>);
@@ -48,6 +54,14 @@ pub struct State {
     pub exports: Mutex<VecDeque<Arc<crate::snapshot::ExportJob>>>,
 }
 impl State {
+    pub fn active_sources(&self) -> Vec<LogSource> {
+        self.current
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|publication| publication.local_sources.clone())
+            .unwrap_or_else(|| self.sources.clone())
+    }
     pub fn redact(&self, value: &Value) -> Value {
         crate::redact::Redactor(&self.redaction_key).document(value)
     }
@@ -121,7 +135,7 @@ impl State {
         }
         Ok((view, current))
     }
-    pub fn local_view(&self) -> Result<Arc<View>, QueryError> {
+    pub fn local_view(&self) -> Result<(Arc<View>, Arc<Published>), QueryError> {
         let current = self.publication()?;
         let period = Period::bounds(
             "all",
@@ -130,21 +144,22 @@ impl State {
             self.zone,
             usage_core::timestamp::parse(&current.local.generated_at).unwrap_or_else(Utc::now),
         )?;
-        Ok(Arc::new(View::new(
+        let view = Arc::new(View::new(
             &current.local,
             period,
             self.zone,
             &PriceSchedule::bundled(),
-        )?))
+        )?);
+        Ok((view, current))
     }
     pub fn export(&self) -> Result<Value, QueryError> {
-        let view = self.local_view()?;
+        let (view, published) = self.local_view()?;
         let details: serde_json::Map<String, Value> = view
             .details()
             .map(|d| Ok((d.identity.uid.clone(), serde_json::to_value(d)?)))
             .collect::<Result<_, serde_json::Error>>()?;
         Ok(
-            json!({"schema":usage_core::remote::SCHEMA,"version":1,"exported_at":usage_core::timestamp::format(Utc::now()),"device":{"short_code":self.device,"label":self.hostname,"platform":config::platform(),"hostname":self.hostname},"snapshot":{"generated_at":view.generated_at,"codex_home":config::homes_display(&self.sources),"codex_sources":config::source_rows(&self.sources),"summary":view.summary()?,"sessions":view.summaries().collect::<Vec<_>>(),"details_by_uid":details,"daily_usage":view.daily_usage}}),
+            json!({"schema":usage_core::remote::SCHEMA,"version":1,"exported_at":usage_core::timestamp::format(Utc::now()),"device":{"short_code":self.device,"label":self.hostname,"platform":config::platform(),"hostname":self.hostname},"snapshot":{"generated_at":view.generated_at,"codex_home":config::homes_display(&published.local_sources),"codex_sources":config::source_rows(&published.local_sources),"summary":view.summary()?,"sessions":view.summaries().collect::<Vec<_>>(),"details_by_uid":details,"daily_usage":view.daily_usage}}),
         )
     }
 }
@@ -152,12 +167,13 @@ impl State {
     pub fn export_document<'a>(
         &self,
         view: &'a View,
+        sources: &[LogSource],
         progress: Option<&'a std::sync::atomic::AtomicUsize>,
     ) -> Result<crate::snapshot::Document<'a>, QueryError> {
         crate::snapshot::document(
             view,
             json!({"short_code":self.device,"label":self.hostname,"platform":config::platform(),"hostname":self.hostname}),
-            &self.sources,
+            sources,
             progress,
         )
     }
@@ -177,6 +193,8 @@ pub fn start(
     sources: Vec<LogSource>,
     zone: Tz,
     database: Option<PathBuf>,
+    auto_windows: bool,
+    managed: bool,
 ) -> Result<(Arc<State>, std::thread::JoinHandle<()>), Error> {
     let device = config::device_code(&root)?;
     let hostname = config::hostname();
@@ -202,7 +220,12 @@ pub fn start(
     let handle = std::thread::Builder::new()
         .name("usage-index-writer".into())
         .spawn(move || {
-            if let Err(error) = run_worker(&shared, root, sources, zone, receiver, database) {
+            let options = WorkerOptions {
+                database,
+                auto_windows,
+                managed,
+            };
+            if let Err(error) = run_worker(&shared, root, sources, zone, receiver, options) {
                 update_status(
                     &shared,
                     json!({"phase":"error","error":error.to_string(),"revision":0}),
@@ -233,6 +256,25 @@ fn refresh_watches(
     let Some(watcher) = watcher.as_mut() else {
         return 0;
     };
+    let desired: std::collections::HashSet<_> = sources
+        .iter()
+        .flat_map(|source| {
+            [
+                source.home.clone(),
+                source.home.join("sessions"),
+                source.home.join("archived_sessions"),
+            ]
+        })
+        .collect();
+    let removed: Vec<_> = watched
+        .keys()
+        .filter(|path| !desired.contains(*path))
+        .cloned()
+        .collect();
+    for path in removed {
+        let _ = watcher.unwatch(&path);
+        watched.remove(&path);
+    }
     for source in sources {
         for (path, mode) in [
             (source.home.clone(), notify::RecursiveMode::NonRecursive),
@@ -266,23 +308,88 @@ fn refresh_watches(
     watched.len()
 }
 type RemoteReply = oneshot::Sender<Result<Value, Error>>;
+pub const SOURCE_CONFLICT: &str = "log sources changed in another window; reload and retry";
+
+fn save_sources(
+    root: &std::path::Path,
+    homes: &[PathBuf],
+    sources: &[LogSource],
+    managed: bool,
+) -> Result<(), Error> {
+    let previous = crate::preferences::load().map_err(Error::InvalidData)?;
+    let runtime = usage_runtime::runtime_dir(root);
+    let _lock = if managed {
+        Some(
+            usage_runtime::lock(&runtime, "startup.lock", Duration::from_secs(10))
+                .map_err(|e| Error::InvalidData(e.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let mut record = if managed {
+        let record = usage_runtime::Record::read(root)
+            .map_err(|e| Error::InvalidData(e.to_string()))?
+            .ok_or_else(|| Error::InvalidData("managed service record is missing".into()))?;
+        if record.pid != std::process::id()
+            || std::env::var("COUSASH_INSTANCE_ID").ok().as_deref()
+                != Some(record.instance_id.as_str())
+        {
+            return Err(Error::InvalidData(
+                "managed service identity mismatch".into(),
+            ));
+        }
+        Some(record)
+    } else {
+        None
+    };
+    crate::preferences::save_patch(json!({"codex_homes":homes})).map_err(|error| match error {
+        crate::preferences::SaveError::Invalid(e) | crate::preferences::SaveError::Storage(e) => {
+            Error::InvalidData(e)
+        }
+    })?;
+    if let Some(record) = record.as_mut() {
+        record.codex_homes = sources.iter().map(|source| source.home.clone()).collect();
+        if let Err(error) = usage_runtime::atomic_json(&runtime.join("instance.json"), record) {
+            let rollback =
+                crate::preferences::save_patch(json!({"codex_homes":previous.codex_homes}));
+            return Err(Error::InvalidData(match rollback {
+                Ok(_) => error.to_string(),
+                Err(
+                    crate::preferences::SaveError::Invalid(e)
+                    | crate::preferences::SaveError::Storage(e),
+                ) => format!("{error}; could not restore log sources: {e}"),
+            }));
+        }
+    }
+    Ok(())
+}
+
+struct WorkerOptions {
+    database: Option<PathBuf>,
+    auto_windows: bool,
+    managed: bool,
+}
+
 fn run_worker(
     shared: &Arc<State>,
     root: PathBuf,
-    sources: Vec<LogSource>,
+    mut sources: Vec<LogSource>,
     zone: Tz,
     receiver: mpsc::Receiver<Command>,
-    database: Option<PathBuf>,
+    options: WorkerOptions,
 ) -> Result<(), Error> {
     let mut index = Index::open(IndexConfig {
-        database: database.unwrap_or_else(|| config::index_path(&root, &sources)),
+        database: options
+            .database
+            .unwrap_or_else(|| config::index_path(&root, &sources)),
         sources: sources.clone(),
     })?;
     let mut store = Store::new(root.join("remotes"), shared.device.clone(), zone);
     let prices = PriceSchedule::bundled();
     let mut publication = 0u64;
     let tx = shared.sender.clone();
-    let watch_sources = sources.clone();
+    let watch_sources = Arc::new(RwLock::new(sources.clone()));
+    let callback_sources = watch_sources.clone();
     let mut watcher =
         notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
             if let Ok(event) = result
@@ -291,7 +398,7 @@ fn run_worker(
                 let paths: Vec<_> = event
                     .paths
                     .into_iter()
-                    .filter(|path| relevant_event(path, &watch_sources))
+                    .filter(|path| relevant_event(path, &callback_sources.read().unwrap()))
                     .collect();
                 if !paths.is_empty() {
                     let _ = tx.try_send(Command::Wake(paths));
@@ -312,12 +419,12 @@ fn run_worker(
                     publication += 1;
                     let local = index.snapshot();
                     let mut sessions = local.sessions.clone();
-                    let mut sources = config::source_rows(&sources);
+                    let mut source_rows = config::source_rows(&sources);
                     let mut metadata = Vec::new();
                     for remote in remotes {
                         sessions.extend(remote.sessions.iter().cloned());
                         let meta = &remote.metadata;
-                        sources.push(json!({"id":format!("remote-{}",meta.device_short_code),"label":meta.label,"codex_home":format!("remote:{}",meta.device_short_code),"is_remote":true}));
+                        source_rows.push(json!({"id":format!("remote-{}",meta.device_short_code),"label":meta.label,"codex_home":format!("remote:{}",meta.device_short_code),"is_remote":true}));
                         metadata.push(meta.clone());
                     }
                     metadata.sort_by(|a, b| a.label.cmp(&b.label));
@@ -329,7 +436,8 @@ fn run_worker(
                     *shared.current.write().unwrap() = Some(Arc::new(Published {
                         snapshot,
                         local,
-                        sources,
+                        local_sources: sources.clone(),
+                        sources: source_rows,
                         remotes: metadata,
                     }));
                     progressed = true;
@@ -375,6 +483,78 @@ fn run_worker(
                     for path in paths {
                         index.invalidate(&path)
                     }
+                }
+                Command::Sources(homes, expected, reply) => {
+                    let result = (|| -> Result<Value, Error> {
+                        let current: Vec<_> =
+                            sources.iter().map(|source| source.home.clone()).collect();
+                        if current != expected {
+                            return Err(Error::InvalidData(SOURCE_CONFLICT.into()));
+                        }
+                        let next_sources = config::sources(&homes, options.auto_windows);
+                        let changed = config::index_path(&root, &next_sources)
+                            != config::index_path(&root, &sources);
+                        let next_index = if changed {
+                            let mut next = Index::open(IndexConfig {
+                                database: config::index_path(&root, &next_sources),
+                                sources: next_sources.clone(),
+                            })?;
+                            next.refresh(|_| {})?;
+                            Some(next)
+                        } else {
+                            None
+                        };
+                        save_sources(&root, &homes, &next_sources, options.managed)?;
+                        if let Some(next) = next_index {
+                            index = next;
+                            sources = next_sources;
+                            *watch_sources.write().unwrap() = sources.clone();
+                            let previous = shared.current.read().unwrap().clone();
+                            let local = index.snapshot();
+                            let mut sessions = local.sessions.clone();
+                            let mut source_rows = config::source_rows(&sources);
+                            let mut remotes = Vec::new();
+                            if let Some(previous) = previous {
+                                sessions.extend(
+                                    previous
+                                        .snapshot
+                                        .sessions
+                                        .iter()
+                                        .skip(previous.local.sessions.len())
+                                        .cloned(),
+                                );
+                                source_rows.extend(
+                                    previous
+                                        .sources
+                                        .iter()
+                                        .filter(|source| source["is_remote"] == true)
+                                        .cloned(),
+                                );
+                                remotes = previous.remotes.clone();
+                            }
+                            publication += 1;
+                            let snapshot = Arc::new(Snapshot {
+                                revision: publication,
+                                generated_at: usage_core::timestamp::format(Utc::now()),
+                                sessions,
+                            });
+                            *shared.current.write().unwrap() = Some(Arc::new(Published {
+                                snapshot,
+                                local,
+                                local_sources: sources.clone(),
+                                sources: source_rows,
+                                remotes,
+                            }));
+                            let watch_count = refresh_watches(&mut watcher, &sources, &mut watched);
+                            update_status(
+                                shared,
+                                json!({"phase":"ready","revision":publication,"metrics":index.metrics,"watch_roots":watch_count,"poll_interval_ms":2000}),
+                                true,
+                            );
+                        }
+                        Ok(json!({"ok":true}))
+                    })();
+                    let _ = reply.send(result);
                 }
                 Command::Remote(action, mut body, reply) => {
                     let result = match action.as_str() {

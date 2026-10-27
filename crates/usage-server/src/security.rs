@@ -214,6 +214,7 @@ mod tests {
             "/api/remotes/rename",
             "/api/remotes/delete",
             "/api/export/start",
+            "/api/sources/choose",
         ] {
             assert!(check("POST", path, &headers).is_ok());
             let mut bad = headers.clone();

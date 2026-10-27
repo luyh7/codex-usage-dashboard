@@ -33,8 +33,9 @@ impl FileStamp {
                 os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
             };
             use windows_sys::Win32::Storage::FileSystem::{
-                FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO, FILE_READ_ATTRIBUTES,
-                FileBasicInfo, FileIdInfo, GetFileInformationByHandleEx,
+                BY_HANDLE_FILE_INFORMATION, FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+                FILE_ID_INFO, FILE_READ_ATTRIBUTES, FileBasicInfo, FileIdInfo,
+                GetFileInformationByHandle, GetFileInformationByHandleEx,
             };
             let file = OpenOptions::new()
                 .access_mode(FILE_READ_ATTRIBUTES)
@@ -43,8 +44,8 @@ impl FileStamp {
             let mut stamp = Self::from_metadata(&file.metadata()?)?;
             let mut basic = MaybeUninit::<FILE_BASIC_INFO>::uninit();
             let mut id = MaybeUninit::<FILE_ID_INFO>::uninit();
-            // SAFETY: live owned handle, correctly sized/aligned output buffers;
-            // assume_init is reached only after both Windows calls succeed.
+            // SAFETY: the handle is live, the output buffers are correctly
+            // sized and aligned, and each is initialized only after success.
             unsafe {
                 if GetFileInformationByHandleEx(
                     file.as_raw_handle(),
@@ -52,22 +53,35 @@ impl FileStamp {
                     basic.as_mut_ptr().cast(),
                     size_of::<FILE_BASIC_INFO>() as u32,
                 ) == 0
-                    || GetFileInformationByHandleEx(
-                        file.as_raw_handle(),
-                        FileIdInfo,
-                        id.as_mut_ptr().cast(),
-                        size_of::<FILE_ID_INFO>() as u32,
-                    ) == 0
                 {
                     return Err(std::io::Error::last_os_error());
                 }
-                let basic = basic.assume_init();
-                let id = id.assume_init();
-                stamp.changed_ns = basic.ChangeTime;
-                stamp.device = id.VolumeSerialNumber;
-                stamp.inode = u64::from_le_bytes(id.FileId.Identifier[..8].try_into().unwrap());
-                stamp.inode_high =
-                    u64::from_le_bytes(id.FileId.Identifier[8..].try_into().unwrap());
+                stamp.changed_ns = basic.assume_init().ChangeTime;
+                if GetFileInformationByHandleEx(
+                    file.as_raw_handle(),
+                    FileIdInfo,
+                    id.as_mut_ptr().cast(),
+                    size_of::<FILE_ID_INFO>() as u32,
+                ) != 0
+                {
+                    let id = id.assume_init();
+                    stamp.device = id.VolumeSerialNumber;
+                    stamp.inode = u64::from_le_bytes(id.FileId.Identifier[..8].try_into().unwrap());
+                    stamp.inode_high =
+                        u64::from_le_bytes(id.FileId.Identifier[8..].try_into().unwrap());
+                } else {
+                    // WSL's Windows file share does not implement FileIdInfo,
+                    // but provides the volume and 64-bit file index here.
+                    let mut legacy = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+                    if GetFileInformationByHandle(file.as_raw_handle(), legacy.as_mut_ptr()) == 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    let legacy = legacy.assume_init();
+                    stamp.device = u64::from(legacy.dwVolumeSerialNumber);
+                    stamp.inode =
+                        (u64::from(legacy.nFileIndexHigh) << 32) | u64::from(legacy.nFileIndexLow);
+                    stamp.inode_high = 0;
+                }
             }
             Ok(stamp)
         }
