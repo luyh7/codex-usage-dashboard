@@ -155,7 +155,9 @@ The dollar figure estimates the API-equivalent cost of usage recorded in local C
 
 The pricing table is bundled with the application. It uses effective dates so earlier usage retains its historical rate, and applies model-specific short/long-context and service-tier rules. It is not a live fetch of the latest public prices.
 
-The current implementation covers the GPT-5.6, GPT-6 Astra/Sol/Luna, and GPT-6.1 Sol families, along with special model aliases. The bundled [price table](../crates/usage-core/data/prices-v1.json) defines supported models, effective dates, context boundaries, and Fast/Ultrafast multipliers; the [pricing implementation](../crates/usage-core/src/pricing.rs) applies those rules.
+The current implementation covers the GPT-5.6, GPT-6 Astra/Sol/Luna, and GPT-6.1 Sol/Terra families, along with special model aliases. The bundled [price table](../crates/usage-core/data/prices-v1.json) defines supported models, effective dates, context boundaries, and Fast/Ultrafast multipliers; the [pricing implementation](../crates/usage-core/src/pricing.rs) applies those rules.
+
+GPT-6.1 Terra rates apply from October 27, 2026: $1 input, $0.05 cached input, and $5 output per million tokens. Requests above 272,000 input tokens use 2x input/cache rates and 1.5x output; Fast/priority uses 2x Standard. Its published 30-minute cache-write rates are $1.25 (short) and $2.50 (long); cache writes remain excluded from estimates because Codex logs do not report them separately. See the [official Terra model page](https://developers.openai.com/api/docs/models/gpt-6.1-terra).
 
 Pricing references used by the project: [OpenAI API pricing](https://developers.openai.com/api/docs/pricing), [API changelog](https://developers.openai.com/api/docs/changelog), and [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode).
 

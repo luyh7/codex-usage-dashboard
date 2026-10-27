@@ -452,6 +452,136 @@ impl PriceSchedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terra_61_launch_and_context_boundary() {
+        let schedule = PriceSchedule::bundled();
+        let launch = "2026-10-27T00:00:00Z";
+        for input in [272_000, 272_001] {
+            assert!(
+                schedule
+                    .quote(
+                        "gpt-6.1-terra",
+                        Some("2026-10-26T23:59:59Z"),
+                        Some(input),
+                        "",
+                    )
+                    .is_none()
+            );
+            let entry = schedule
+                .quote("gpt-6.1-terra", Some(launch), Some(input), "")
+                .unwrap();
+            assert_eq!(entry.model, "gpt-6.1-terra");
+            assert_eq!(entry.effective_at.as_deref(), Some(launch));
+            assert_eq!(entry.effective_until, None);
+            assert_eq!(
+                entry.context_tier.as_deref(),
+                Some(if input == 272_000 { "short" } else { "long" })
+            );
+            assert_eq!(
+                entry.prices,
+                if input == 272_000 {
+                    Prices {
+                        input: 1.,
+                        cached_input: 0.05,
+                        output: 5.,
+                        cache_write_input: Some(1.25),
+                    }
+                } else {
+                    Prices {
+                        input: 2.,
+                        cached_input: 0.1,
+                        output: 7.5,
+                        cache_write_input: Some(2.5),
+                    }
+                }
+            );
+        }
+        let historical_sol = schedule
+            .quote("gpt-6.1-sol", Some("2026-10-26T23:59:59Z"), None, "")
+            .unwrap();
+        assert_eq!(historical_sol.prices.input, 2.);
+        assert_eq!(historical_sol.prices.cached_input, 0.1);
+        assert_eq!(historical_sol.prices.output, 10.);
+        assert_eq!(
+            historical_sol.effective_at.as_deref(),
+            Some("2026-09-29T00:00:00Z")
+        );
+        assert_eq!(historical_sol.effective_until, None);
+    }
+
+    #[test]
+    fn terra_61_latest_versioned_names_and_fast_tiers() {
+        let schedule = PriceSchedule::bundled();
+        for input in [272_000, 272_001] {
+            let standard = schedule
+                .quote("gpt-6.1-terra", None, Some(input), "")
+                .unwrap();
+            let versioned = schedule
+                .quote(
+                    " OpenAI/GPT-6.1-Terra-2026-10-27 ",
+                    Some("2026-10-27T12:00:00Z"),
+                    Some(input),
+                    "",
+                )
+                .unwrap();
+            assert_eq!(versioned, standard);
+            for tier in ["fast", "priority"] {
+                let fast = schedule
+                    .quote("gpt-6.1-terra", None, Some(input), tier)
+                    .unwrap();
+                assert_eq!(fast.cost_multiplier, 2.);
+                assert_eq!(fast.prices, standard.prices.scaled(2.));
+                assert_eq!(fast.context_tier, standard.context_tier);
+            }
+            assert!(
+                schedule
+                    .quote("gpt-6.1-terra", None, Some(input), "ultrafast")
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn terra_61_estimates_cached_and_reasoning_tokens_once() {
+        let schedule = PriceSchedule::bundled();
+        let short = Usage {
+            input_tokens: 200_000,
+            cached_input_tokens: 100_000,
+            output_tokens: 10_000,
+            reasoning_output_tokens: 10_000,
+            ..Default::default()
+        };
+        assert_eq!(
+            schedule.estimate(short, "gpt-6.1-terra", None, ""),
+            Some(0.155)
+        );
+        assert_eq!(
+            schedule.estimate(short, "gpt-6.1-terra", None, "fast"),
+            Some(0.31)
+        );
+        let long = Usage {
+            input_tokens: 272_001,
+            ..short
+        };
+        assert_eq!(
+            schedule.estimate(long, "gpt-6.1-terra", None, ""),
+            Some(0.429002)
+        );
+        assert_eq!(
+            schedule.estimate(
+                Usage {
+                    reasoning_output_tokens: 0,
+                    ..long
+                },
+                "gpt-6.1-terra",
+                None,
+                "",
+            ),
+            Some(0.429002)
+        );
+    }
+
     #[test]
     fn price_validity_tracks_changes_for_each_context_and_model() {
         let schedule = PriceSchedule::bundled();
