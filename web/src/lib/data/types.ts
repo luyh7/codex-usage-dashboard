@@ -134,7 +134,6 @@ export interface Remote {
 export interface LocalDevice {
   device_short_code: string;
   label: string;
-  platform?: string;
   session_count: number;
   sources?: { id: string; label: string; session_count: number }[];
 }

@@ -32,13 +32,6 @@ await context.route('**/api/sources', route => failSources
   : route.fulfill({ json: sources }));
 
 const page = await context.newPage();
-  await page.route(/\/api\/v2\/(projects|sessions)\?/, async route => {
-    const response = await route.fetch();
-    if (response.status() !== 200) return route.fulfill({ response });
-    const listing = await response.json();
-    if (listing.current_device) listing.current_device.platform = 'Windows';
-    return route.fulfill({ response, json: listing });
-  });
 page.setDefaultTimeout(8000);
 const errors = [];
 page.on('pageerror', error => errors.push(String(error)));

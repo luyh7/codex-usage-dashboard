@@ -178,15 +178,6 @@ try {
     await page.getByRole('heading', { name: '设置', exact: true }).waitFor();
   }
   checks.push('320px and 390px layouts have no horizontal overflow; settings remain reachable');
-  for (const platform of ['Darwin', 'Windows', 'Linux']) {
-    localDeviceInfo.platform = platform;
-    await page.reload();
-    await page.locator('.local-device-row').waitFor();
-    const heading = page.getByRole('heading', { name: 'Codex 日志来源' });
-    assert.equal(await heading.count(), platform === 'Darwin' ? 0 : 1, `Log sources on ${platform}`);
-    if (platform === 'Darwin') await page.screenshot({ path: `${output}/mac-settings.png` });
-  }
-  checks.push('Log source settings are hidden on macOS and available on Windows and Linux');
   assert.deepEqual(errors, []);
   await writeFile(`${output}/report.json`, JSON.stringify({ checks, errors }, null, 2));
   console.log(checks.join('\n'));

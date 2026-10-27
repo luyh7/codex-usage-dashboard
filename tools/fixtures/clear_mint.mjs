@@ -1,7 +1,7 @@
 // Fictional data from docs/design/clear-mint/projects.png. Never writes user data.
 export const stamp = '2026-10-22T01:00:00Z';
 export const localDeviceInfo = {
-  device_short_code: 'this-device', label: 'Local workstation', platform: 'Windows', session_count: 123,
+  device_short_code: 'this-device', label: 'Local workstation', session_count: 123,
   sources: [{ id: 'windows', label: 'Windows', session_count: 23 }, { id: 'wsl', label: 'WSL', session_count: 100 }],
 };
 export const usage = (n = 4200000) => ({ total_tokens: n, input_tokens: n * .95, cached_input_tokens: n * .95 * .89, output_tokens: n * .05, reasoning_output_tokens: n * .02, cache_write_tokens: 0 });
