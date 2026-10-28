@@ -45,7 +45,8 @@ try {
   await check.waitFor();
   await check.click();
   await dialog.waitFor();
-  assert.equal(await dialog.locator('.note-type').innerText(), '功能');
+  assert.equal(await dialog.locator('.note-type').count(), 3);
+  assert.equal(await dialog.locator('.note-type').first().innerText(), '功能');
   assert.match(await dialog.innerText(), /v1\.1\.3/);
   assert.match(await dialog.innerText(), /当前 v1\.1\.2/);
   assert.equal(await dialog.getByRole('button', { name: '更新', exact: true }).count(), 1);
