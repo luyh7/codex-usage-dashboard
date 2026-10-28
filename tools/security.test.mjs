@@ -70,7 +70,7 @@ test('native HTTP boundary blocks hostile reads/writes while legitimate operatio
   const base = await server(t, f);
   const headers = {'Content-Type':'application/json'};
   const post = (route, body, extra={}) => fetch(base+route, {method:'POST',headers:{...headers,...extra},body:JSON.stringify(body)});
-  for (const route of ['/api/health','/api/settings','/api/sources','/api/summary','/api/security/token','/api/export.json','/api/export.json.gz','/api/v2/projects','/api/revisions','/']) {
+  for (const route of ['/api/health','/api/settings','/api/sources','/api/summary','/api/security/token','/api/export.json','/api/export.json.gz','/api/export/filename','/api/v2/projects','/api/revisions','/']) {
     for (const hostile of [{Host:'evil.test'}, {Origin:'https://evil.test'}, {Origin:'null'}, {Origin:base.replace(/:\d+$/,':1')}, {'Sec-Fetch-Site':'cross-site'}]) {
       assert.equal(await rawStatus(base+route,hostile),403,route+JSON.stringify(hostile));
     }
@@ -107,7 +107,7 @@ test('native HTTP boundary blocks hostile reads/writes while legitimate operatio
   }
   const download = await fetch(base+'/api/export.json.gz?job='+sharedJob.id+'&mode=redacted');
   assert.equal(download.status,200);
-  assert.match(download.headers.get('content-disposition'),/cousash-shared/);
+  assert.match(download.headers.get('content-disposition'),/cud-shared/);
   assert.deepEqual(JSON.parse(gunzipSync(Buffer.from(await download.arrayBuffer()))).snapshot,shared.snapshot);
   for (let i=0;i<2;i++) {
     const imported = await post('/api/remotes/import',{snapshot:shared,label:'Shared'});
@@ -120,7 +120,7 @@ test('native HTTP boundary blocks hostile reads/writes while legitimate operatio
   assert.equal((await (await fetch(base+'/api/health')).json()).index.phase,'ready');
   const cli = spawnSync(binary,['--export-snapshot','--redact','--codex-home',f.home,'--no-auto-windows'],{cwd:f.dir,env:f.env,encoding:'utf8',windowsHide:true,timeout:30000});
   assert.equal(cli.status,0,cli.stderr);
-  const cliShared = JSON.parse(gunzipSync(await readFile(path.join(f.dir,'cousash-shared.json.gz'))));
+  const cliShared = JSON.parse(gunzipSync(await readFile(path.join(f.dir,'cud-shared.json.gz'))));
   assert.equal(cliShared.device.short_code,shared.device.short_code);
   assert.deepEqual(cliShared.snapshot.sessions.map(s=>s.uid),shared.snapshot.sessions.map(s=>s.uid));
   exported.device.short_code = 'audit-remote'; exported.device.label = 'Audit remote';

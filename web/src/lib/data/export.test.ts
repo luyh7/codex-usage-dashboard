@@ -11,10 +11,26 @@ test('redacted mode stays attached to job creation and download', async () => {
       if (url.includes('/start')) return Response.json({id:'shared-job',phase:'ready',percent:95});
       return new Response(new Uint8Array([1]));
     }) as typeof fetch,
-    save: () => {},
+    save: (_blob, filename) => assert.equal(filename, 'cud-shared.json.gz'),
   });
   assert(calls.includes('/api/export/start?mode=redacted'));
   assert(calls.includes('/api/export.json.gz?job=shared-job&mode=redacted'));
+});
+
+test('download preserves Unicode device names and falls back for malformed headers', async () => {
+  for (const [header, expected] of [
+    ["attachment; filename=\"cud-mac-123.json.gz\"; filename*=UTF-8''cud-%E7%A0%94%E5%8F%91-mac-123.json.gz", 'cud-研发-mac-123.json.gz'],
+    ["attachment; filename=\"fallback.json.gz\"; filename*=UTF-8''%ZZ", 'fallback.json.gz'],
+  ]) {
+    await downloadSnapshot('/api/export.json.gz', () => {}, {
+      fetcher: (async input => {
+        if (String(input).endsWith('/security/token')) return Response.json({ token: 'test' });
+        if (String(input).endsWith('/start')) return Response.json({ id: 'job', phase: 'ready', percent: 95 });
+        return new Response(new Uint8Array([1]), { headers: { 'content-disposition': header } });
+      }) as typeof fetch,
+      save: (_blob, filename) => assert.equal(filename, expected),
+    });
+  }
 });
 
 test('export follows server work and downloaded bytes monotonically before saving', async () => {

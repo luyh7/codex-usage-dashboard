@@ -434,12 +434,7 @@ async fn export(
         );
         result.headers_mut().insert(
             header::CONTENT_DISPOSITION,
-            format!(
-                "attachment; filename=\"{}.json\"",
-                export_filename(&state, redacted)
-            )
-            .parse()
-            .unwrap(),
+            export_disposition(&state, redacted, false).parse().unwrap(),
         );
         Ok(result)
     })
@@ -461,12 +456,37 @@ fn export_mode(params: &HashMap<String, String>) -> Result<bool, QueryError> {
         _ => Err(QueryError::Invalid("invalid export mode".into())),
     }
 }
-fn export_filename(state: &State, redacted: bool) -> String {
-    if redacted {
-        "cousash-shared".into()
-    } else {
-        format!("cousash-{}", state.device)
+async fn export_filename(
+    Extract(state): Extract<Arc<State>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    match export_mode(&params) {
+        Ok(redacted) => response(
+            StatusCode::OK,
+            &json!({"filename": crate::snapshot::filename(&state.hostname, &state.device, redacted)}),
+        ),
+        Err(e) => error(e),
     }
+}
+fn export_disposition(state: &State, redacted: bool, gzip: bool) -> String {
+    use std::fmt::Write as _;
+    let mut filename = crate::snapshot::filename(&state.hostname, &state.device, redacted);
+    if !gzip {
+        filename.truncate(filename.len() - 3);
+    }
+    if filename.is_ascii() {
+        return format!("attachment; filename=\"{filename}\"");
+    }
+    let fallback = format!("cud-{}.json{}", state.device, if gzip { ".gz" } else { "" });
+    let mut encoded = String::new();
+    for byte in filename.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            write!(encoded, "%{byte:02X}").unwrap();
+        }
+    }
+    format!("attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}")
 }
 fn gzip_response(state: &State, bytes: Bytes, redacted: bool) -> Response {
     (
@@ -474,10 +494,7 @@ fn gzip_response(state: &State, bytes: Bytes, redacted: bool) -> Response {
             (header::CONTENT_TYPE, "application/gzip".to_owned()),
             (
                 header::CONTENT_DISPOSITION,
-                format!(
-                    "attachment; filename=\"{}.json.gz\"",
-                    export_filename(state, redacted)
-                ),
+                export_disposition(state, redacted, true),
             ),
             (header::CACHE_CONTROL, "no-store".to_owned()),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
@@ -760,6 +777,7 @@ pub fn router(state: Arc<State>) -> Router {
         .route("/api/revisions", get(subscribe))
         .route("/api/export.json", get(export))
         .route("/api/export.json.gz", get(export_gzip))
+        .route("/api/export/filename", get(export_filename))
         .route("/api/export/start", post(start_export))
         .route("/api/export/progress", get(export_progress))
         .route("/api/remotes", get(remotes))

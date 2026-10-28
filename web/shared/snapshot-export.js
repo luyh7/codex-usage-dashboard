@@ -32,7 +32,12 @@ export async function downloadSnapshot(url, onProgress, options = {}) {
     job = await (await request('/api/export/progress?id=' + encodeURIComponent(job.id))).json();
   }
   const response = await request('/api/export.json.gz?job=' + encodeURIComponent(job.id) + (redacted ? '&mode=redacted' : ''));
-  const filename = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'cousash-snapshot.json.gz';
+  const disposition = response.headers.get('content-disposition') || '';
+  let filename = disposition.match(/filename="([^"]+)"/i)?.[1] || (redacted ? 'cud-shared.json.gz' : 'cud-snapshot.json.gz');
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try { filename = decodeURIComponent(encoded); } catch { /* Keep the compatible filename. */ }
+  }
   const total = Number(response.headers.get('content-length'));
   const chunks = [];
   let received = 0;

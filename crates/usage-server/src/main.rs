@@ -183,11 +183,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(path) = args.export_snapshot {
             let path = if path.is_empty() {
-                std::env::current_dir()?.join(if args.redact {
-                    "cousash-shared.json.gz".to_owned()
-                } else {
-                    format!("cousash-{}.json.gz", state.device)
-                })
+                std::env::current_dir()?.join(snapshot::filename(
+                    &state.hostname,
+                    &state.device,
+                    args.redact,
+                ))
             } else {
                 usage_core::project::expand_home(&path)
             };

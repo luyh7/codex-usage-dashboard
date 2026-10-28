@@ -21,6 +21,30 @@ use usage_core::{
 
 pub const MAX_BYTES: usize = 512 * 1024 * 1024;
 
+/// A portable, recognizable default name; redacted exports must not expose the device.
+pub fn filename(label: &str, device: &str, redacted: bool) -> String {
+    if redacted {
+        return "cud-shared.json.gz".into();
+    }
+    let mut safe_label = String::new();
+    for ch in label.chars() {
+        if ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            if safe_label.len() + ch.len_utf8() > 96 {
+                break;
+            }
+            safe_label.push(ch);
+        } else if !safe_label.is_empty() && !safe_label.ends_with('-') && safe_label.len() < 96 {
+            safe_label.push('-');
+        }
+    }
+    let safe_label = safe_label.trim_matches(['-', '_', '.']);
+    if safe_label.is_empty() {
+        format!("cud-{device}.json.gz")
+    } else {
+        format!("cud-{safe_label}-{device}.json.gz")
+    }
+}
+
 pub struct ExportJob {
     pub redacted: bool,
     pub id: String,
@@ -173,6 +197,23 @@ fn decode_limited(bytes: &[u8], limit: usize) -> Result<Value, Error> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn export_names_are_readable_portable_and_do_not_identify_shared_exports() {
+        assert_eq!(
+            filename("研发 Mac/Desk", "mac-12345678", false),
+            "cud-研发-Mac-Desk-mac-12345678.json.gz"
+        );
+        assert_eq!(
+            filename("..\\/:*?\"<>|\r\n", "win-12345678", false),
+            "cud-win-12345678.json.gz"
+        );
+        assert_eq!(
+            filename("机密电脑", "mac-12345678", true),
+            "cud-shared.json.gz"
+        );
+        assert!(filename(&"设备".repeat(100), "mac-12345678", false).len() < 140);
+    }
 
     #[test]
     fn lossless_json_and_gzip_including_unicode_and_bom() {

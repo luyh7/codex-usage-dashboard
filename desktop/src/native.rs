@@ -180,16 +180,18 @@ pub async fn export_snapshot(
 ) -> std::result::Result<bool, String> {
     trusted_live(&window, &app).await?;
     tauri::async_runtime::spawn_blocking(move||->Result<bool>{
-        let mut picker=app.dialog().file().set_parent(&window).set_file_name(if redacted{"cousash-shared.json.gz"}else{"cousash-snapshot.json.gz"}).add_filter("Snapshot",&["json.gz"]);
+        let state=app.state::<Desktop>();
+        let base=state.service.lock().unwrap().as_ref().ok_or("service stopped")?.record.url();
+        let mode=if redacted{"?mode=redacted"}else{""};
+        let suggested=usage_runtime::get_json(&format!("{base}/api/export/filename{mode}"))?;
+        let filename=suggested["filename"].as_str().ok_or("missing export filename")?;
+        let mut picker=app.dialog().file().set_parent(&window).set_file_name(filename).add_filter("Snapshot",&["json.gz"]);
         // AppImage changes cwd to its temporary AppDir. Never offer that as a
         // user's export destination; it disappears when the application exits.
-        let state=app.state::<Desktop>();
         if let Some(directory)=state.dialog_history.directory(DirectoryKind::Export).or_else(||app.path().document_dir().ok().filter(|path|path.is_dir())).or_else(||app.path().home_dir().ok()) {picker=picker.set_directory(directory);}
         let Some(path)=picker.blocking_save_file() else{return Ok(false);};
         let path=path.into_path()?;
-        let base=app.state::<Desktop>().service.lock().unwrap().as_ref().ok_or("service stopped")?.record.url();
         let token=usage_runtime::get_json(&format!("{base}/api/security/token"))?;
-        let mode=if redacted{"?mode=redacted"}else{""};
         let mut job:Value=usage_runtime::agent().post(format!("{base}/api/export/start{mode}")).header("x-codex-write-token",token["token"].as_str().ok_or("missing write token")?).send_json(json!({}))?.body_mut().read_json()?;
         let deadline=std::time::Instant::now()+Duration::from_secs(600);
         loop {

@@ -93,7 +93,7 @@ try {
  run(binary,['--export-snapshot','relative-export.json','--codex-home',codex,'--no-auto-windows']);
  const exported=JSON.parse(await readFile(path.join(tmp,'relative-export.json'),'utf8'));assert.equal(exported.version,1);assert.equal(exported.snapshot.summary.usage.total_tokens,12);assert.equal((await health()).pid,pid);checks.push('standalone export and once coexist with server without Python');
  run(binary,['--export-snapshot','--codex-home',codex,'--no-auto-windows']);
- const gzipPath=(await readdir(tmp)).find(name=>/^cousash-.*\.json\.gz$/.test(name));assert(gzipPath);
+ const gzipPath=(await readdir(tmp)).find(name=>/^cud-.*\.json\.gz$/.test(name));assert(gzipPath);
  const compressedExport=JSON.parse(gunzipSync(await readFile(path.join(tmp,gzipPath))).toString('utf8'));
  assert.equal(compressedExport.snapshot.summary.usage.total_tokens,12);assert.deepEqual(compressedExport.snapshot.details_by_uid,exported.snapshot.details_by_uid);
  const download=await fetch(base+'/api/export.json.gz');assert.equal(download.headers.get('content-type'),'application/gzip');assert(download.headers.get('content-disposition').includes('.json.gz'));

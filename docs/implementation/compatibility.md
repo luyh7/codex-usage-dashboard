@@ -52,7 +52,8 @@ returns 409 `{error: "snapshot stale", code: "snapshot_stale"}`. Missing detail
 is 404. The complete event timeline remains in `/api/v2/chart` and snapshot exports.
 
 Export keeps `schema: "cousash.remote-snapshot"`, `version: 1`, device identity,
-`snapshot` summaries/details/daily usage, and the `cousash-<device>.json` filename.
+and `snapshot` summaries/details/daily usage. The suggested export filename uses
+the `cud-` prefix; importing snapshots does not depend on their filename.
 Remote import retains its explicit confirmation behavior for same-device import
 and missing display name. Remote deletion requires `confirm: true`. Imported
 snapshots remain user data outside the installation and rebuildable cache.

@@ -188,10 +188,10 @@ On the source device, open **Settings → Device data** and choose **Full export
 The default filename looks like:
 
 ```text
-cousash-mac-9f3a72c1.json.gz
+cud-work-laptop-mac-9f3a72c1.json.gz
 ```
 
-The legacy `cousash-` prefix is retained for compatibility. Gzip compression preserves statistics, session details, and token timeline events.
+The name includes the device's hostname and short code to make exports easier to distinguish. Characters that cannot be used in filenames are replaced. Gzip compression preserves statistics, session details, and token timeline events.
 
 Full export remains the default for syncing your own devices. It includes session summaries and local paths.
 
@@ -201,7 +201,7 @@ Choose **Redacted export** for sharing, issue feedback, or public statistics. It
 ~/.agents/skills/codex-usage-dashboard/runtime/codex-usage-dashboard --export-snapshot --redact
 ```
 
-The default redacted filename is `cousash-shared.json.gz`. The private `export-redaction.key` in the application's configuration directory keeps pseudonyms stable across exports and restarts; do not include that key in shared files. Re-importing redacted exports from the same configuration updates the same sessions. Full and redacted exports deliberately have different device identities: use one mode per source device in an aggregate to avoid counting both copies. Redacted exports retain statistical timing and model information, so they are not a guarantee of complete anonymity. Local logs and the local parsed cache remain unchanged.
+The default redacted filename is `cud-shared.json.gz`. The private `export-redaction.key` in the application's configuration directory keeps pseudonyms stable across exports and restarts; do not include that key in shared files. Re-importing redacted exports from the same configuration updates the same sessions. Full and redacted exports deliberately have different device identities: use one mode per source device in an aggregate to avoid counting both copies. Redacted exports retain statistical timing and model information, so they are not a guarantee of complete anonymity. Local logs and the local parsed cache remain unchanged.
 
 The dashboard reports preparation, compression, and download progress. Concurrent exports of the same mode share one job, and an unchanged local snapshot can reuse a completed export. Full and redacted jobs are kept separate.
 
