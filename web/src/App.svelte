@@ -11,6 +11,7 @@
     DetailBundle,
     Daily,
     IndexStatus,
+    SnapshotImportState,
   } from './lib/data/types';
   import {
     words,
@@ -45,6 +46,7 @@
   import DetailPanel from './components/DetailPanel.svelte';
   import SettingsPage from './components/SettingsPage.svelte';
   import VirtualProjects from './components/VirtualProjects.svelte';
+  import IndexingState from './components/IndexingState.svelte';
   import { ProjectCache } from './lib/data/projectCache';
   const data = new HttpDashboard();
   const projectCache = new ProjectCache();
@@ -59,6 +61,9 @@
     stored('language', deviceLanguage()),
   );
   let settingsError = $state('');
+  // Keep the import state visible if the settings page is left and reopened.
+  let snapshotImport = $state.raw<SnapshotImportState>({ phase: 'idle' });
+  function snapshotImportChanged(value: SnapshotImportState) { snapshotImport = value; }
   async function setLanguage(value: Language) {
     try { await savePreferences({ language: value }); lang = value; settingsError = ''; }
     catch (e) { settingsError = String(e); }
@@ -551,7 +556,7 @@
       <SettingsPage {data} remotes={listing?.remotes || []} localDevice={listing?.current_device} {lang} timezone={query.timezone}
         {settingsError} languageChanged={setLanguage}
         timezoneChanged={setTimezone}
-        changed={() => load()} />
+        changed={() => load()} {snapshotImport} {snapshotImportChanged} />
     {/if}
     <div class="overview-page" hidden={page !== 'overview'} inert={page !== 'overview'}>
     <header class="page-header">
@@ -613,6 +618,9 @@
     </GlobalFilters>
     </header>
     {#if status.error}<p class="error" role="alert">{status.error}</p>{/if}
+    {#if !listing && !error && status.phase !== 'error'}
+      <IndexingState {status} {lang} />
+    {:else}
     <div class="results" class:pending={pendingResults}>
     <Metrics {summary} {lang} trend={listing?.metric_trend} period={listing?.period ?? null} />
     <div class="workspace" class:with-detail={!!selected}>
@@ -799,6 +807,7 @@
         </aside>{/if}
     </div>
     </div>
+    {/if}
     </div>
     <footer>
       <span><Icon name="shield" size={14} />{t.localOnly} · {t.estimatedHint}</span>

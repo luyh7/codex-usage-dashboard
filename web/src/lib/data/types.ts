@@ -244,6 +244,14 @@ export interface IndexStatus {
   total?: number;
   error?: string;
 }
+export interface SnapshotImportState {
+  phase: 'idle' | 'working' | 'confirmation' | 'success' | 'error';
+  startedAt?: number;
+  error?: string;
+  incoming?: unknown;
+  label?: string;
+  confirmation?: ImportResult;
+}
 export interface ImportResult {
   ok: boolean;
   needs_label?: boolean;

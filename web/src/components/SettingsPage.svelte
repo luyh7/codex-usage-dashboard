@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { DashboardData, Remote, LocalDevice } from '../lib/data/types';
+  import type { DashboardData, Remote, LocalDevice, SnapshotImportState } from '../lib/data/types';
   import { words, type Language } from '../lib/domain/ui';
   import { timezoneOption } from '../lib/domain/timezones';
   import { displaySourcePath, sourcePathKey } from '../lib/domain/logSources';
@@ -11,7 +11,9 @@
   import { writeHeaders } from '../../shared/write-token.js';
   import { onMount } from 'svelte';
 
-  let { data, remotes, localDevice, lang, timezone, languageChanged, timezoneChanged, changed, settingsError = '' }: {
+  let { data, remotes, localDevice, lang, timezone, languageChanged, timezoneChanged, changed, settingsError = '', snapshotImport, snapshotImportChanged }: {
+    snapshotImport: SnapshotImportState;
+    snapshotImportChanged: (value: SnapshotImportState) => void;
     settingsError?: string;
     data: DashboardData;
     remotes: Remote[];
@@ -137,7 +139,7 @@
         </div>
         {#if sourceError}<p class="error" role="alert">{sourceError}</p>{/if}
       </section>
-    <div class="settings-card"><RemoteManager {data} {remotes} {localDevice} {lang} {changed} /></div>
+    <div class="settings-card"><RemoteManager {data} {remotes} {localDevice} {lang} {changed} {snapshotImport} {snapshotImportChanged} /></div>
   </div>
 </div>
 

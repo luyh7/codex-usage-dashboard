@@ -41,7 +41,8 @@ await context.route('**/api/daily-usage?*', async route => {
   if (holdDaily) await new Promise(resolve => pendingDaily.push(resolve));
   await route.fulfill({ status, contentType: 'application/json', body });
 });
-const report = { checks: [], errors: [], port: 8765 };
+const report = { checks: [], errors: [] };
+const base = process.env.DASHBOARD_URL || 'http://127.0.0.1:8765';
 const page = await context.newPage();
 page.setDefaultTimeout(8000);
 page.on('pageerror', error => report.errors.push(String(error)));
@@ -74,11 +75,18 @@ const changeZone = timezone => page.evaluate(timezone => {
   history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate'));
 }, timezone);
 try {
-  await page.goto('http://127.0.0.1:8765/?view=sessions&period=week&timezone=Asia%2FShanghai');
-  await page.locator('.index-status').waitFor();
+  await page.goto(base + '/?view=sessions&period=week&timezone=Asia%2FShanghai');
+  await page.locator('.index-waiting').waitFor();
   await emit({ phase: 'parsing', revision: 0, completed: 10, total: 128 });
-  await page.waitForFunction(() => document.querySelector('.index-status')?.textContent.includes('10/128'));
-  assert.match(await statusText(), /正在建立索引/);
+  await page.waitForFunction(() => document.querySelector('.index-waiting')?.textContent.includes('10 / 128'));
+  const progress = page.locator('.index-waiting [role=progressbar]');
+  assert.equal(await progress.getAttribute('aria-valuenow'), '10');
+  assert.equal(await progress.getAttribute('aria-valuemax'), '128');
+  for (const phase of ['normalizing', 'committing']) {
+    await emit({ phase, revision: 0, completed: 0, total: 128 });
+    await page.waitForFunction(phase => document.querySelector('.index-waiting')?.textContent.includes(phase === 'normalizing' ? '正在整理会话' : '正在保存索引'), phase);
+    assert.equal(await progress.getAttribute('aria-valuenow'), null, `${phase} must not show a fabricated percentage`);
+  }
   releaseListing();
   await page.locator('.sessions-table').waitFor();
   await emit({ phase: 'ready', revision: 1 });

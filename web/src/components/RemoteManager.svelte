@@ -1,8 +1,9 @@
 <script lang="ts">
-  import type { DashboardData, Remote, LocalDevice, ImportResult } from '../lib/data/types';
+  import type { DashboardData, Remote, LocalDevice, ImportResult, SnapshotImportState } from '../lib/data/types';
   import { words, number, type Language } from '../lib/domain/ui';
   import { downloadSnapshot } from '../../shared/snapshot-export.js';
   import Icon from './Icon.svelte';
+  import SnapshotImportStatus from './SnapshotImportStatus.svelte';
   import { isDesktop, desktop } from '../lib/data/desktop';
   let {
     data,
@@ -10,7 +11,11 @@
     localDevice,
     lang,
     changed,
+    snapshotImport,
+    snapshotImportChanged,
   }: {
+    snapshotImport: SnapshotImportState;
+    snapshotImportChanged: (value: SnapshotImportState) => void;
     data: DashboardData;
     remotes: Remote[];
     localDevice?: LocalDevice;
@@ -39,38 +44,40 @@
   }
   let t = $derived(words(lang));
   let error = $state(''),
-    busy = $state(false),
-    label = $state('');
-  let incoming = $state.raw<unknown>(null),
-    result = $state.raw<ImportResult | null>(null);
+    busy = $state(false);
   let deleting = $state(''),
     renaming = $state(''),
     renameLabel = $state('');
+  let controlsBusy = $derived(busy || snapshotImport.phase === 'working');
   async function read(event: Event) {
     const file = (event.target as HTMLInputElement).files?.[0];
-    if (!file) return;
+    if (!file || controlsBusy) return;
     fileInput.value = '';
-    try {
-      if (file.size > 512 * 1024 * 1024) throw new Error('Snapshot exceeds 512 MiB');
-      incoming = file;
-      await importing();
-    } catch (e) {
-      error = String(e);
+    error = '';
+    if (file.size > 512 * 1024 * 1024) {
+      snapshotImportChanged({ phase: 'error', error: 'Snapshot exceeds 512 MiB' });
+      return;
     }
+    await importing(file);
   }
-  async function importing(allow = false) {
+  async function importing(incoming: unknown, label = '', confirmation?: ImportResult) {
+    if (controlsBusy) return;
     busy = true;
     error = '';
+    const attempt = { incoming, label, confirmation };
+    snapshotImportChanged({ ...attempt, phase: 'working', startedAt: Date.now() });
     try {
-      result = await data.importSnapshot(incoming, label || undefined, allow);
-      if (result.needs_label || result.needs_confirmation) label = result.suggested_label || label;
-      if (result.ok) {
-        incoming = null;
-        label = '';
+      const result = await data.importSnapshot(incoming, label || undefined, !!confirmation?.needs_confirmation);
+      if (result.needs_label || result.needs_confirmation) {
+        snapshotImportChanged({ phase: 'confirmation', incoming, label: result.suggested_label || label, confirmation: result });
+      } else if (result.ok) {
+        snapshotImportChanged({ phase: 'success' });
         changed();
+      } else {
+        snapshotImportChanged({ phase: 'idle' });
       }
     } catch (e) {
-      error = String(e);
+      snapshotImportChanged({ ...attempt, phase: 'error', error: String(e) });
     } finally {
       busy = false;
     }
@@ -106,8 +113,10 @@
 <section class="device-settings" aria-labelledby="remote-title">
   <header class="device-header">
     <h2 id="remote-title">{t.devices}</h2>
-    <button class="primary" disabled={busy} onclick={() => fileInput.click()}><Icon name="import" size={16} />{t.import}</button>
+    <button class="primary" disabled={controlsBusy} onclick={() => fileInput.click()}><Icon name="import" size={16} />{t.import}</button>
   </header>
+  {#if snapshotImport.phase === 'working' || snapshotImport.phase === 'success'}<SnapshotImportStatus state={snapshotImport} {lang} />{/if}
+  {#if snapshotImport.phase === 'error'}<p class="error" role="alert">{snapshotImport.error}</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <input
         bind:this={fileInput!}
@@ -116,20 +125,15 @@
         type="file"
         accept=".json,.json.gz,.gz,application/json,application/gzip,application/x-gzip"
         onchange={read}
-        disabled={busy}
+        disabled={controlsBusy}
     />
-  {#if result?.needs_label || result?.needs_confirmation}<section class="notice">
-      {#if result.needs_confirmation}<p>{t.currentConfirm}</p>{/if}
-      <label>{t.label}<input bind:value={label} /></label><button
+  {#if !controlsBusy && snapshotImport.confirmation}<section class="notice">
+      {#if snapshotImport.confirmation.needs_confirmation}<p>{t.currentConfirm}</p>{/if}
+      <label>{t.label}<input value={snapshotImport.label || ''} oninput={(event) => snapshotImportChanged({ ...snapshotImport, label: event.currentTarget.value })} /></label><button
         class="primary"
-        disabled={busy || !label.trim()}
-        onclick={() => importing(!!result?.needs_confirmation)}>{t.confirm}</button
-      ><button
-        onclick={() => {
-          incoming = null;
-          result = null;
-        }}>{t.cancel}</button
-      >
+        disabled={!snapshotImport.label?.trim()}
+        onclick={() => importing(snapshotImport.incoming, snapshotImport.label, snapshotImport.confirmation)}>{t.confirm}</button
+      ><button onclick={() => snapshotImportChanged({ phase: 'idle' })}>{t.cancel}</button>
     </section>{/if}
   <article class="remote-row local-device-row">
     <div>
@@ -171,12 +175,12 @@
       </div>
       <div class="remote-buttons">
         <button
-          disabled={busy}
+          disabled={controlsBusy}
           onclick={() => {
             renaming = remote.device_short_code;
             renameLabel = remote.label;
           }}>{t.rename}</button
-        ><button disabled={busy} onclick={() => (deleting = remote.device_short_code)}
+        ><button disabled={controlsBusy} onclick={() => (deleting = remote.device_short_code)}
           >{t.delete}</button
         >
       </div>
@@ -186,12 +190,12 @@
             rename(remote.device_short_code);
           }}
         >
-          <input aria-label={t.label} bind:value={renameLabel} /><button disabled={busy}
+          <input aria-label={t.label} bind:value={renameLabel} /><button disabled={controlsBusy}
             >{t.confirm}</button
           ><button type="button" onclick={() => (renaming = '')}>{t.cancel}</button>
         </form>{/if}{#if deleting === remote.device_short_code}<div class="notice">
           <p>{t.deleteConfirm}</p>
-          <button disabled={busy} onclick={() => remove(remote.device_short_code)}
+          <button disabled={controlsBusy} onclick={() => remove(remote.device_short_code)}
             >{t.confirm}</button
           ><button onclick={() => (deleting = '')}>{t.cancel}</button>
         </div>{/if}

@@ -15,6 +15,13 @@ await context.route('**/api/settings', route => {
 });
 await context.route('**/api/sources', route => route.fulfill({ json: [{ path: '/demo/.codex', status: 'available' }] }));
 let remotes = [];
+let releaseImport;
+const confirmedImport = new Promise(resolve => { releaseImport = resolve; });
+let releaseInitialImport;
+const initialImport = new Promise(resolve => { releaseInitialImport = resolve; });
+let releaseFailedImport;
+const failedImport = new Promise(resolve => { releaseFailedImport = resolve; });
+let failNextImport = false;
 await context.route('**/api/v2/projects?**', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({
   page: { items: [], summary: summary(sessions), total: 0, offset: 0, limit: 100, revision: 'settings-test', query_token: 'settings-test' },
   facets: summary(sessions), metric_trend: { complete: true, points: [] },
@@ -22,13 +29,15 @@ await context.route('**/api/v2/projects?**', route => route.fulfill({ contentTyp
   codex_sources: [], remotes, current_device_short_code: 'this-device',
   current_device: localDeviceInfo,
 }) }));
-await context.route('**/api/remotes/**', route => {
+await context.route('**/api/remotes/**', async route => {
   const request = route.request(), url = new URL(request.url());
   assert.equal(request.headers()['x-codex-write-token'], 'settings-fixture-token');
   const json = value => route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) });
   if (url.pathname.endsWith('import-file')) {
     assert.ok(request.postDataBuffer().length > 0);
-    if (!url.searchParams.get('label')) return json({ needs_label: true, suggested_label: 'Test laptop' });
+    if (!url.searchParams.get('label')) { await initialImport; return json({ needs_label: true, suggested_label: 'Test laptop' }); }
+    await confirmedImport;
+    if (failNextImport) { await failedImport; failNextImport = false; return route.fulfill({ status: 400, json: { error: 'Snapshot import failed' } }); }
     remotes = [{ label: url.searchParams.get('label'), device_short_code: 'test-device', session_count: 5, usage: usage(), exported_at: stamp }];
   } else if (url.pathname.endsWith('rename')) remotes[0].label = request.postDataJSON().label;
   else if (url.pathname.endsWith('delete')) {
@@ -127,15 +136,44 @@ try {
   checks.push('Language and time zone apply immediately; all supported time zones are selectable with keyboard support, Escape and persistent selection');
 
   await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json.gz', mimeType: 'application/gzip', buffer: gzipSync('{}') });
+  await page.getByText('正在导入快照', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '概览', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByText('正在导入快照', { exact: true }).waitFor();
+  releaseInitialImport();
   await page.getByLabel('显示名称', { exact: true }).fill('Test laptop');
   await page.getByRole('button', { name: '确认', exact: true }).click();
+  await page.getByText('正在导入快照', { exact: true }).waitFor();
+  assert.equal(await page.locator('.import-status [role=progressbar]').getAttribute('aria-valuenow'), null);
+  assert.equal(await page.getByRole('button', { name: '导入快照', exact: true }).isDisabled(), true);
+  await page.waitForFunction(() => !document.querySelector('.import-status .elapsed')?.textContent.includes('00:00'));
+  await page.getByRole('button', { name: '概览', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByText('正在导入快照', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '导入快照', exact: true }).isDisabled(), true);
+  releaseImport();
+  await page.getByText('快照导入完成', { exact: true }).waitFor();
   await page.locator('.remote-row').getByText('Test laptop', { exact: true }).waitFor();
+  checks.push('Import feedback survives navigation, prevents duplicate imports, and shows completion');
   const importedDevice = page.locator('.imported-device-row');
   assert.equal(await importedDevice.getByText('外部导入', { exact: true }).count(), 1);
   assert.equal(await importedDevice.getByRole('button', { name: /完整导出|脱敏导出/ }).count(), 0);
   assert.match(await localDevice.innerText(), /this-device · 123 会话数/);
   assert.deepEqual(await localSources.allTextContents(), ['Windows23 会话数', 'WSL100 会话数']);
   checks.push('Windows and WSL have separate local counts that persist across import and language changes');
+  failNextImport = true;
+  await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json.gz', mimeType: 'application/gzip', buffer: gzipSync('{}') });
+  await page.getByLabel('显示名称', { exact: true }).fill('Test laptop');
+  await page.getByRole('button', { name: '确认', exact: true }).click();
+  await page.getByText('正在导入快照', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '概览', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  releaseFailedImport();
+  await page.getByRole('alert').getByText(/Snapshot import failed/).waitFor();
+  assert.equal(await page.getByRole('button', { name: '导入快照', exact: true }).isEnabled(), true);
+  await page.getByRole('button', { name: '确认', exact: true }).click();
+  await page.getByText('快照导入完成', { exact: true }).waitFor();
+  checks.push('Import failures show an error and allow confirmation to be retried');
   const exportBounds = await localDevice.getByRole('button', { name: '完整导出', exact: true }).boundingBox();
   const nameBounds = await localDevice.locator('.device-name').boundingBox();
   assert.ok(exportBounds.x >= nameBounds.x + nameBounds.width, 'Export is to the right of local device data');
