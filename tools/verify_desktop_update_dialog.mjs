@@ -9,11 +9,11 @@ await installMintFixture(context);
 await context.route('**/api/settings', route => route.fulfill({ json: { schema_version: 1, language: 'zh', timezone: 'Asia/Shanghai', codex_homes: [] } }));
 await context.route('**/api/sources', route => route.fulfill({ json: [{ path: '/demo/.codex', status: 'available' }] }));
 
-const notes = await readFile('docs/releases/v1.1.2.md', 'utf8');
-let response = { state: 'available', version: '1.1.2', notes };
+const notes = await readFile('docs/releases/v1.1.3.md', 'utf8');
+let response = { state: 'available', version: '1.1.3', notes };
 let finishInstall, failInstall, installCalls = 0;
 await context.exposeBinding('testNativeUpdate', async (_context, command, args) => {
-  if (command === 'desktop_settings') return { hide_on_close: false, can_hide: true, autostart: false, version: '1.1.1', channel: 'test' };
+  if (command === 'desktop_settings') return { hide_on_close: false, can_hide: true, autostart: false, version: '1.1.2', channel: 'test' };
   if (command !== 'check_update') throw new Error('Unexpected desktop command: ' + command);
   if (!args.install) return response;
   installCalls++;
@@ -45,9 +45,10 @@ try {
   await check.waitFor();
   await check.click();
   await dialog.waitFor();
-  assert.equal(await dialog.locator('.note-type').innerText(), '修复');
-  assert.match(await dialog.innerText(), /v1\.1\.2/);
-  assert.match(await dialog.innerText(), /当前 v1\.1\.1/);
+  assert.equal(await dialog.locator('.note-type').count(), 3);
+  assert.equal(await dialog.locator('.note-type').first().innerText(), '功能');
+  assert.match(await dialog.innerText(), /v1\.1\.3/);
+  assert.match(await dialog.innerText(), /当前 v1\.1\.2/);
   assert.equal(await dialog.getByRole('button', { name: '更新', exact: true }).count(), 1);
   assert.equal(await page.locator('section[aria-labelledby="desktop-title"] > .notes').count(), 0);
   await page.screenshot({ path: output + '/desktop.png' });
@@ -72,7 +73,7 @@ try {
   await check.click();
   await page.getByRole('status').getByText('请通过包管理器或新版安装包更新。').waitFor();
 
-  response = { state: 'available', version: '1.1.2', notes };
+  response = { state: 'available', version: '1.1.3', notes };
   await check.click();
   await dialog.waitFor();
   const update = dialog.getByRole('button', { name: '更新', exact: true });
@@ -106,7 +107,7 @@ try {
   assert.equal(await dialog.count(), 0);
 
   await page.setViewportSize({ width: 320, height: 640 });
-  response = { state: 'available', version: '1.1.2', notes: '## 功能 · Features\n' + Array.from({ length: 16 }, (_, i) => `- 新增第 ${i + 1} 项较长的说明内容。<br>Add a longer item ${i + 1}.`).join('\n') };
+  response = { state: 'available', version: '1.1.3', notes: '## 功能 · Features\n' + Array.from({ length: 16 }, (_, i) => `- 新增第 ${i + 1} 项较长的说明内容。<br>Add a longer item ${i + 1}.`).join('\n') };
   await check.click();
   await dialog.waitFor();
   const dimensions = await dialog.evaluate(el => ({ rect: el.getBoundingClientRect().toJSON(), scroll: el.querySelector('.update-body').scrollHeight, client: el.querySelector('.update-body').clientHeight }));
