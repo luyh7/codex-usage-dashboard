@@ -186,7 +186,7 @@
         const items = [...projects.page.items];
         let next = projects.page.next_cursor;
         while (next && items.length < previousCount) {
-          const more = await data.projects(requestQuery, next, projects.page.revision, '', 100);
+          const more = await data.projects(requestQuery, next, projects.page.revision, '', projects.page.limit);
           if (seq !== listSequence || !alive || !more) return;
           items.push(...more.page.items);
           next = more.page.next_cursor;
@@ -233,7 +233,8 @@
     const seq = listSequence;
     moreLoading = true;
     try {
-      const result = await data.projects(displayedQuery, previous.page.next_cursor!, previous.page.revision);
+      // The server binds each cursor to the page size that produced it.
+      const result = await data.projects(displayedQuery, previous.page.next_cursor!, previous.page.revision, '', previous.page.limit);
       if (!alive || seq !== listSequence || listing !== previous || !result) return;
       listing = { ...previous, page: { ...previous.page, items: [...previous.page.items, ...result.page.items], next_cursor: result.page.next_cursor } };
       if (!stored('projects:' + expansionScope, null))
