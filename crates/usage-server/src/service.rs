@@ -4,14 +4,15 @@ use chrono_tz::Tz;
 use notify::Watcher;
 use serde_json::{Value, json};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex, RwLock, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::{oneshot, watch};
 use usage_core::{
     Error, PriceSchedule,
+    fsinfo::{LOCAL_POLL, SourcePolicy},
     index::{Index, IndexConfig, Snapshot},
     parser::LogSource,
     query::Period,
@@ -35,6 +36,8 @@ pub enum Command {
         Vec<PathBuf>,
         oneshot::Sender<Result<Value, Error>>,
     ),
+    /// Source polling settings changed; reload them from preferences.
+    Reconfigure,
     Stop,
 }
 type CachedView = (String, Arc<View>, Arc<Published>);
@@ -48,6 +51,8 @@ pub struct State {
     pub device: String,
     pub hostname: String,
     pub sources: Vec<LogSource>,
+    /// Effective polling policy for each active source, keyed by its home.
+    pub policies: RwLock<HashMap<PathBuf, SourcePolicy>>,
     pub zone: Tz,
     views: Mutex<VecDeque<CachedView>>,
     pub query_slots: Arc<tokio::sync::Semaphore>,
@@ -211,6 +216,7 @@ pub fn start(
         device,
         hostname,
         sources: sources.clone(),
+        policies: RwLock::new(HashMap::new()),
         zone,
         views: Mutex::new(VecDeque::new()),
         query_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -370,6 +376,32 @@ struct WorkerOptions {
     managed: bool,
 }
 
+fn load_policies(shared: &State, index: &mut Index, sources: &[LogSource]) -> Vec<SourcePolicy> {
+    let polling = crate::preferences::load()
+        .map(|p| p.source_polling)
+        .unwrap_or_default();
+    let policies = config::source_policies(sources, &polling);
+    index.set_network_sources(
+        sources
+            .iter()
+            .zip(&policies)
+            .filter(|(_, policy)| policy.network)
+            .map(|(source, _)| source.id.clone()),
+    );
+    *shared.policies.write().unwrap() = sources
+        .iter()
+        .map(|source| source.home.clone())
+        .zip(policies.iter().copied())
+        .collect();
+    policies
+}
+fn polling_status(sources: &[LogSource], policies: &[SourcePolicy]) -> Value {
+    sources
+        .iter()
+        .zip(policies)
+        .map(|(source, policy)| json!({"id":source.id,"network":policy.network,"poll_interval_ms":policy.poll_interval.as_millis() as u64}))
+        .collect()
+}
 fn run_worker(
     shared: &Arc<State>,
     root: PathBuf,
@@ -408,10 +440,39 @@ fn run_worker(
         .ok();
     let mut watched = HashMap::new();
     let mut pending: Vec<(RemoteReply, Result<Value, Error>)> = Vec::new();
+    let mut policies = load_policies(shared, &mut index, &sources);
+    // Each source refreshes on its own schedule: local sources every 2 s as
+    // before, network shares only when due or explicitly refreshed/woken.
+    let mut due_at = vec![Instant::now(); sources.len()];
     loop {
-        let watch_count = refresh_watches(&mut watcher, &sources, &mut watched);
+        let now = Instant::now();
+        let due: Vec<bool> = due_at.iter().map(|at| *at <= now).collect();
+        let due_sources: Vec<LogSource> = sources
+            .iter()
+            .zip(&due)
+            .filter(|(_, due)| **due)
+            .map(|(source, _)| source.clone())
+            .collect();
+        let watch_count = refresh_watches(&mut watcher, &due_sources, &mut watched);
         let mut progressed = false;
-        let result=index.refresh(|progress|{if !["inventory","ready"].contains(&progress.phase){progressed=true;update_status(shared,json!({"phase":progress.phase,"completed":progress.completed,"total":progress.total,"revision":publication}),true);}});
+        let result = if due_sources.is_empty() {
+            Ok(None)
+        } else {
+            let ids: HashSet<String> = due_sources.iter().map(|s| s.id.clone()).collect();
+            let scope = (due_sources.len() < sources.len()).then_some(&ids);
+            index.refresh_sources(scope, |progress|{if !["inventory","ready"].contains(&progress.phase){progressed=true;update_status(shared,json!({"phase":progress.phase,"completed":progress.completed,"total":progress.total,"revision":publication}),true);}})
+        };
+        let refreshed = Instant::now();
+        for ((at, due), policy) in due_at.iter_mut().zip(&due).zip(&policies) {
+            if *due {
+                *at = refreshed + policy.poll_interval;
+            }
+        }
+        let poll_interval = policies
+            .iter()
+            .map(|policy| policy.poll_interval)
+            .min()
+            .unwrap_or(LOCAL_POLL);
         let remotes = store.refresh(&prices);
         match (result, remotes) {
             (Ok(local_changed), Ok((remote_changed, remotes))) => {
@@ -444,7 +505,7 @@ fn run_worker(
                 }
                 update_status(
                     shared,
-                    json!({"phase":"ready","revision":publication,"metrics":index.metrics,"watch_roots":watch_count,"poll_interval_ms":2000}),
+                    json!({"phase":"ready","revision":publication,"metrics":index.metrics,"watch_roots":watch_count,"poll_interval_ms":poll_interval.as_millis() as u64,"source_polling":polling_status(&sources,&policies)}),
                     progressed,
                 );
                 for (reply, response) in pending.drain(..) {
@@ -463,24 +524,38 @@ fn run_worker(
             }
         }
         // Poll even without watcher events; dropped notifications and
-        // mounted Windows histories converge on the same inventory.
-        let command = receiver.recv_timeout(Duration::from_secs(2));
+        // mounted Windows histories converge on the same inventory. Wake at
+        // least every 2 s so imported remote snapshots keep their cadence.
+        let wait = due_at
+            .iter()
+            .min()
+            .map(|at| at.saturating_duration_since(Instant::now()))
+            .unwrap_or(LOCAL_POLL)
+            .min(LOCAL_POLL);
+        let command = receiver.recv_timeout(wait);
         let mut commands = Vec::new();
         if let Ok(command) = command {
             commands.push(command);
             commands.extend(receiver.try_iter());
         }
         let mut stop = false;
+        let woken = !commands.is_empty();
         for command in commands {
             match command {
                 Command::Refresh(reply) => {
                     index.force_refresh();
+                    due_at.fill(Instant::now());
                     store = Store::new(root.join("remotes"), shared.device.clone(), zone);
                     pending.push((reply, Ok(json!({"ok":true}))));
                 }
                 Command::Stop => stop = true,
                 Command::Wake(paths) => {
                     for path in paths {
+                        for (source, at) in sources.iter().zip(due_at.iter_mut()) {
+                            if relevant_event(&path, std::slice::from_ref(source)) {
+                                *at = Instant::now();
+                            }
+                        }
                         index.invalidate(&path)
                     }
                 }
@@ -545,16 +620,22 @@ fn run_worker(
                                 sources: source_rows,
                                 remotes,
                             }));
+                            policies = load_policies(shared, &mut index, &sources);
+                            due_at = vec![Instant::now(); sources.len()];
                             let watch_count = refresh_watches(&mut watcher, &sources, &mut watched);
                             update_status(
                                 shared,
-                                json!({"phase":"ready","revision":publication,"metrics":index.metrics,"watch_roots":watch_count,"poll_interval_ms":2000}),
+                                json!({"phase":"ready","revision":publication,"metrics":index.metrics,"watch_roots":watch_count,"poll_interval_ms":policies.iter().map(|policy| policy.poll_interval).min().unwrap_or(LOCAL_POLL).as_millis() as u64,"source_polling":polling_status(&sources,&policies)}),
                                 true,
                             );
                         }
                         Ok(json!({"ok":true}))
                     })();
                     let _ = reply.send(result);
+                }
+                Command::Reconfigure => {
+                    policies = load_policies(shared, &mut index, &sources);
+                    due_at.fill(Instant::now());
                 }
                 Command::Remote(action, mut body, reply) => {
                     let result = match action.as_str() {
@@ -580,6 +661,14 @@ fn run_worker(
                     };
                     // Reply only after the associated publication is ready.
                     pending.push((reply, result));
+                }
+            }
+        }
+        if woken {
+            // Any command refreshed every source before; local ones still do.
+            for (at, policy) in due_at.iter_mut().zip(&policies) {
+                if !policy.network {
+                    *at = Instant::now();
                 }
             }
         }

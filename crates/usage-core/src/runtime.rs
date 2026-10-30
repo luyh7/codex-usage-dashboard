@@ -110,17 +110,46 @@ pub fn service_tiers(home: &Path, threads: &BTreeSet<String>) -> BTreeMap<String
     read(home, threads).unwrap_or_default()
 }
 
+type StampKey = Option<(u64, i64)>;
 /// data_version is meaningful only across reads on the same connection.
 /// Reopen when the file identity changes; never create a missing source DB.
+/// Network homes never open the database: size and mtime of the database and
+/// its WAL are the only change evidence there.
 #[derive(Default)]
 pub struct ChangeMonitor {
     connections: BTreeMap<std::path::PathBuf, (crate::inventory::FileStamp, Connection, i64)>,
+    stamps: BTreeMap<std::path::PathBuf, (StampKey, StampKey)>,
     generation: u64,
 }
 impl ChangeMonitor {
+    /// No SQLite connection is held.
+    pub fn is_idle(&self) -> bool {
+        self.connections.is_empty()
+    }
     pub fn poll(&mut self, homes: impl Iterator<Item = std::path::PathBuf>) -> u64 {
-        for home in homes {
+        self.poll_sources(homes.map(|home| (home, false)))
+    }
+    pub fn poll_sources(&mut self, homes: impl Iterator<Item = (std::path::PathBuf, bool)>) -> u64 {
+        let key = |path: &Path| {
+            crate::inventory::FileStamp::read(path)
+                .ok()
+                .map(|s| (s.size, s.modified_ns))
+        };
+        for (home, network) in homes {
             let path = home.join("logs_2.sqlite");
+            if network {
+                if self.connections.remove(&path).is_some() {
+                    self.generation += 1;
+                }
+                let current = (key(&path), key(&home.join("logs_2.sqlite-wal")));
+                if self.stamps.insert(path, current) != Some(current) {
+                    self.generation += 1;
+                }
+                continue;
+            }
+            if self.stamps.remove(&path).is_some() {
+                self.generation += 1;
+            }
             let stamp = crate::inventory::FileStamp::read(&path).ok();
             let reusable = self
                 .connections
@@ -191,6 +220,23 @@ mod tests {
         let mut monitor = ChangeMonitor::default();
         assert_eq!(poll(&mut monitor), 0);
         assert!(!path.exists());
+    }
+    #[test]
+    fn network_homes_use_stamps_without_opening_the_database() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("logs_2.sqlite");
+        // Not a database: opening it would fail, stamps still work.
+        std::fs::write(&path, b"remote bytes").unwrap();
+        let mut monitor = ChangeMonitor::default();
+        let poll = |monitor: &mut ChangeMonitor| {
+            monitor.poll_sources(std::iter::once((root.path().to_path_buf(), true)))
+        };
+        let before = poll(&mut monitor);
+        assert_eq!(poll(&mut monitor), before);
+        assert!(monitor.connections.is_empty());
+        std::fs::write(&path, b"remote bytes, appended").unwrap();
+        assert!(poll(&mut monitor) > before);
+        assert!(monitor.connections.is_empty());
     }
     #[test]
     fn quoted_content_cannot_supply_settings() {

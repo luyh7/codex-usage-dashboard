@@ -7,8 +7,10 @@
   import RemoteManager from './RemoteManager.svelte';
   import DesktopSettings from './DesktopSettings.svelte';
   import { isDesktop, desktop } from '../lib/data/desktop';
-  import { preferences } from '../lib/data/preferences';
+  import { preferences, savePreferences } from '../lib/data/preferences';
   import { writeHeaders } from '../../shared/write-token.js';
+  import { clampPollInterval, networkPollingLabel, withSourcePolling, DEFAULT_NETWORK_POLL_SECS, MAX_POLL_SECS, MIN_NETWORK_POLL_SECS, type SourcePolling, type SourceRow } from '../lib/domain/sourcePolling';
+  import { dismissDetails } from '../lib/domain/dismiss';
   import { onMount } from 'svelte';
 
   let { data, remotes, localDevice, lang, timezone, languageChanged, timezoneChanged, changed, settingsError = '', snapshotImport, snapshotImportChanged }: {
@@ -27,7 +29,9 @@
   let t = $derived(words(lang));
   const supportedTimezones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : ['Asia/Shanghai', 'Asia/Tokyo', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris'];
   let homes = $state<string[]>([]), sourceError = $state('');
-  let effectiveSources = $state<{ path: string; status: string }[]>([]);
+  let effectiveSources = $state<SourceRow[]>([]);
+  let polling = $state<Record<string, SourcePolling>>({});
+  let pollingBusy = $state(false);
   let sourceBusy = $state(false), sourcesReady = $state(false);
   const sourceLabels: Record<string, [string, string]> = { missing: ['未找到日志文件夹', 'Log folder not found'], unreadable: ['无法读取日志文件夹', 'Cannot read log folder'], empty: ['此文件夹尚无 Codex 日志', 'No Codex logs in this folder'] };
   async function loadSources() {
@@ -35,7 +39,7 @@
       preferences(),
       fetch('/api/sources').then(async r => { if (!r.ok) throw new Error('Cannot read log sources'); return r.json(); }),
     ]);
-    homes = settings.codex_homes; effectiveSources = sources; sourcesReady = true;
+    homes = settings.codex_homes; polling = settings.source_polling ?? {}; effectiveSources = sources; sourcesReady = true;
   }
   onMount(() => { loadSources().catch(e => sourceError = String(e)); });
   async function applySources(paths: string[]) {
@@ -56,6 +60,31 @@
     }
     await loadSources();
     changed();
+  }
+  async function savePolling(path: string, change: SourcePolling) {
+    pollingBusy = true; sourceError = '';
+    try {
+      const saved = await savePreferences({ source_polling: withSourcePolling(polling, path, change) });
+      polling = saved.source_polling ?? {};
+      // The index worker applies the new interval on its next pass.
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await loadSources();
+    } catch (e) { sourceError = String(e); } finally { pollingBusy = false; }
+  }
+  function intervalChanged(path: string, input: HTMLInputElement) {
+    const value = clampPollInterval(input.valueAsNumber);
+    input.value = String(value);
+    // Enter commits and the following blur fires change again; save once.
+    if (input.dataset.committed === input.value) return;
+    input.dataset.committed = input.value;
+    savePolling(path, { poll_interval_secs: value });
+  }
+  function intervalKey(path: string, event: KeyboardEvent & { currentTarget: HTMLInputElement }) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const menu = event.currentTarget.closest('details');
+    intervalChanged(path, event.currentTarget);
+    if (menu) { menu.open = false; menu.querySelector('summary')?.focus({ preventScroll: true }); }
   }
   async function saveSources(paths: string[]) {
     sourceBusy = true; sourceError = '';
@@ -129,6 +158,18 @@
           {#each effectiveSources as source (source.path)}
             <li class="source-row">
               <div class="source-info"><div class="source-path">{displaySourcePath(source.path)}</div>{#if sourceLabels[source.status]}<div role="status">{sourceLabels[source.status][lang === 'zh' ? 0 : 1]}</div>{/if}</div>
+              {#if source.network}
+                <details class="source-polling" use:dismissDetails ontoggle={(event) => { if (event.currentTarget.open) event.currentTarget.querySelector('input')?.focus({ preventScroll: true }); }}>
+                  <summary>{networkPollingLabel(source.poll_interval_secs, lang)}</summary>
+                  <div class="source-polling-panel">
+                    <label for={`poll-${source.path}`}>{lang === 'zh' ? `检查间隔（秒），最少 ${MIN_NETWORK_POLL_SECS} 秒` : `Check interval (seconds), at least ${MIN_NETWORK_POLL_SECS}`}</label>
+                    <input id={`poll-${source.path}`} type="number" min={MIN_NETWORK_POLL_SECS} max={MAX_POLL_SECS} step="1" inputmode="numeric"
+                      disabled={pollingBusy || sourceBusy} value={source.poll_interval_secs ?? DEFAULT_NETWORK_POLL_SECS}
+                      onchange={(event) => intervalChanged(source.path, event.currentTarget)}
+                      onkeydown={(event) => intervalKey(source.path, event)} />
+                  </div>
+                </details>
+              {/if}
               <button disabled={sourceBusy || !sourcesReady || effectiveSources.length <= 1} aria-label={`${lang === 'zh' ? '移除' : 'Remove'}: ${displaySourcePath(source.path)}`} onclick={() => saveSources(effectiveSources.filter(item => item.path !== source.path).map(item => item.path))}>{lang === 'zh' ? '移除' : 'Remove'}</button>
             </li>
           {/each}
@@ -154,6 +195,15 @@
   .source-info [role='status'] { color: var(--muted); font-size: 12px; margin-top: 4px; }
   .source-row button { flex-shrink: 0; }
   .source-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .source-polling { position: relative; flex-shrink: 0; }
+  .source-polling summary { display: inline-flex; align-items: center; height: 32px; padding: 0 10px; border: 1px solid #e3b887; border-radius: 8px; background: #fff6ec; color: #b85f18; font-size: 12px; white-space: nowrap; cursor: pointer; list-style: none; }
+  .source-polling summary::-webkit-details-marker { display: none; }
+  .source-polling summary:hover { background: #ffecd6; }
+  .source-polling summary:active { background: #ffe1bf; }
+  .source-polling summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .source-polling-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; display: grid; gap: 8px; width: 220px; padding: 12px; border: 1px solid var(--border); border-radius: 11px; box-shadow: 0 8px 28px #16263f18; background: var(--panel); color: var(--text); }
+  .source-polling-panel label { color: var(--muted); font-size: 12px; }
+  .settings-card .source-polling-panel input { width: 100%; }
   .settings-scroll { flex: 1; min-height: 0; overflow: auto; padding: 2px 4px 24px 2px; }
   .settings-content { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
   .settings-card { min-width: 0; padding: 28px 32px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }

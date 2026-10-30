@@ -220,16 +220,42 @@ impl Inventory {
         Ok(Some((files, children)))
     }
     pub fn discover(&mut self) -> std::io::Result<Vec<InventoryFile>> {
-        self.discover_with_policy(|home| {
-            if home.to_string_lossy().starts_with("/mnt/") {
+        self.discover_sources(None, &HashSet::new())
+    }
+    /// Scan only `due` sources (all when `None`); skipped sources keep their
+    /// caches. Day-old history on network sources is re-stamped at most every
+    /// five minutes; `invalidate_all` (force refresh) still checks everything.
+    pub fn discover_sources(
+        &mut self,
+        due: Option<&HashSet<String>>,
+        network: &HashSet<String>,
+    ) -> std::io::Result<Vec<InventoryFile>> {
+        let network_homes: HashSet<_> = self
+            .sources
+            .iter()
+            .filter(|s| network.contains(&s.id))
+            .map(|s| s.home.clone())
+            .collect();
+        self.discover_scoped(due, |home| {
+            if network_homes.contains(home) {
+                Duration::from_secs(300)
+            } else if home.to_string_lossy().starts_with("/mnt/") {
                 Duration::from_secs(2)
             } else {
                 Duration::ZERO
             }
         })
     }
+    #[cfg(test)]
     fn discover_with_policy(
         &mut self,
+        history_ttl: impl Fn(&Path) -> Duration,
+    ) -> std::io::Result<Vec<InventoryFile>> {
+        self.discover_scoped(None, history_ttl)
+    }
+    fn discover_scoped(
+        &mut self,
+        due: Option<&HashSet<String>>,
         history_ttl: impl Fn(&Path) -> Duration,
     ) -> std::io::Result<Vec<InventoryFile>> {
         let now = Instant::now();
@@ -241,7 +267,12 @@ impl Inventory {
         let mut result = Vec::new();
         let mut visited = HashSet::new();
         let mut present = HashSet::new();
+        let mut skipped = Vec::new();
         for source in self.sources.clone() {
+            if due.is_some_and(|due| !due.contains(&source.id)) {
+                skipped.push(source.home);
+                continue;
+            }
             let ttl = history_ttl(&source.home);
             let mut retried = HashSet::new();
             let mut pending = vec![
@@ -307,8 +338,11 @@ impl Inventory {
                 *checked = completed;
             }
         }
-        self.directories.retain(|path, _| visited.contains(path));
-        self.metadata.retain(|path, _| present.contains(path));
+        let kept = |path: &Path| skipped.iter().any(|home| path.starts_with(home));
+        self.directories
+            .retain(|path, _| visited.contains(path) || kept(path));
+        self.metadata
+            .retain(|path, _| present.contains(path) || kept(path));
         result.sort_by_key(|file| std::cmp::Reverse(file.stamp.modified_ns));
         Ok(result)
     }

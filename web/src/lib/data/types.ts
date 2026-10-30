@@ -135,7 +135,8 @@ export interface LocalDevice {
   device_short_code: string;
   label: string;
   session_count: number;
-  sources?: { id: string; label: string; session_count: number }[];
+  /** `network` sources hold another machine's logs; `platform` is the OS their sessions ran on, when clear. */
+  sources?: { id: string; label: string; session_count: number; network?: boolean; platform?: string | null }[];
 }
 export interface Listing<T> {
   current_device?: LocalDevice;

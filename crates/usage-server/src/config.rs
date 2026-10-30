@@ -229,19 +229,23 @@ pub fn sources(homes: &[PathBuf], auto_windows: bool) -> Vec<LogSource> {
             continue;
         }
         let label = if windows_wsl_path(&home) {
-            "WSL"
+            "WSL".to_owned()
         } else if is_wsl {
             if home.starts_with("/mnt/c/Users") {
                 "Windows"
             } else {
                 "WSL"
             }
+            .to_owned()
+        } else if usage_core::fsinfo::is_network_path(&home) {
+            // A share holds another machine's logs; the local OS name would mislabel it.
+            network_label(&home)
         } else if platform() == "Darwin" {
-            "macOS"
+            "macOS".to_owned()
         } else {
-            platform()
+            platform().to_owned()
         };
-        let base = slug(label);
+        let base = slug(&label);
         let mut id = base.clone();
         let mut n = 1;
         while ids.contains(&id) {
@@ -252,7 +256,7 @@ pub fn sources(homes: &[PathBuf], auto_windows: bool) -> Vec<LogSource> {
         result.push(LogSource {
             id,
             label: if n == 1 {
-                label.into()
+                label
             } else {
                 format!("{label} {n}")
             },
@@ -261,10 +265,83 @@ pub fn sources(homes: &[PathBuf], auto_windows: bool) -> Vec<LogSource> {
     }
     result
 }
+/// Name a network share after the folder that owns its Codex home, e.g.
+/// `/Volumes/Users/luyh7/.codex` -> `luyh7` and `\\nas\\share\\.codex` -> `share`.
+pub fn network_label(home: &Path) -> String {
+    let text = home.to_string_lossy();
+    let parts: Vec<&str> = text
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != "?" && !part.eq_ignore_ascii_case("UNC"))
+        .collect();
+    let mut name = parts.iter().rev();
+    let last = name.next().copied();
+    let owner = if last.is_some_and(|part| part.eq_ignore_ascii_case(".codex")) {
+        name.next().copied()
+    } else {
+        last
+    };
+    let name: String = owner
+        .filter(|part| {
+            !["volumes", "mnt", "media", "net", "network"]
+                .contains(&part.to_ascii_lowercase().as_str())
+        })
+        .map(|part| part.trim_start_matches('.').chars().take(64).collect())
+        .unwrap_or_default();
+    if name.trim().is_empty() {
+        "Network".into()
+    } else {
+        name.trim().to_owned()
+    }
+}
+/// Origin OS of a share's sessions, inferred from their working directories.
+/// Only a clear majority names a platform; `None` keeps the folder label alone.
+pub fn infer_platform<'a>(cwds: impl IntoIterator<Item = &'a str>) -> Option<&'static str> {
+    let mut counts = [0usize; 3];
+    let mut total = 0usize;
+    for cwd in cwds {
+        let cwd = cwd.trim();
+        if cwd.is_empty() {
+            continue;
+        }
+        total += 1;
+        let bytes = cwd.as_bytes();
+        if (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/'))
+            || cwd.starts_with("\\\\")
+        {
+            counts[0] += 1;
+        } else if cwd.starts_with("/Users/") || cwd.starts_with("/Volumes/") {
+            counts[1] += 1;
+        } else if cwd.starts_with("/home/") || cwd.starts_with("/root") || cwd.starts_with("/mnt/")
+        {
+            counts[2] += 1;
+        }
+    }
+    let (index, best) = counts.iter().enumerate().max_by_key(|(_, count)| **count)?;
+    (*best * 2 > total).then_some(["Windows", "macOS", "Linux"][index])
+}
 pub fn source_rows(sources: &[LogSource]) -> Vec<Value> {
     sources
         .iter()
         .map(|s| json!({"id":s.id,"label":s.label,"codex_home":s.home,"is_remote":false}))
+        .collect()
+}
+/// Effective polling policy for each source, in source order.
+pub fn source_policies(
+    sources: &[LogSource],
+    polling: &std::collections::BTreeMap<String, crate::preferences::SourcePolling>,
+) -> Vec<usage_core::fsinfo::SourcePolicy> {
+    sources
+        .iter()
+        .map(|source| {
+            let settings = polling
+                .get(source.home.to_string_lossy().as_ref())
+                .cloned()
+                .unwrap_or_default();
+            usage_core::fsinfo::SourcePolicy::detect(&source.home, settings.poll_interval_secs)
+        })
         .collect()
 }
 pub fn homes_display(sources: &[LogSource]) -> String {
@@ -311,5 +388,43 @@ mod tests {
         assert_eq!(sources[0].label, "Windows");
         assert_eq!(sources[1].label, "Windows 2");
         assert_ne!(sources[0].id, sources[1].id);
+    }
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    #[test]
+    fn network_shares_are_named_after_their_owner_folder() {
+        assert_eq!(
+            network_label(Path::new("/Volumes/Users/luyh7/.codex")),
+            "luyh7"
+        );
+        assert_eq!(network_label(Path::new(r"\\nas\share\.codex")), "share");
+        assert_eq!(network_label(Path::new(r"\\?\UNC\nas\logs")), "logs");
+        assert_eq!(network_label(Path::new("/Volumes/.codex")), "Network");
+        assert_eq!(network_label(Path::new("/mnt/team-codex")), "team-codex");
+        assert_eq!(network_label(Path::new("/")), "Network");
+    }
+    #[test]
+    fn share_platform_comes_from_session_working_directories() {
+        assert_eq!(
+            infer_platform([r"C:\Users\luyh7\repo", r"D:/work", "/Users/x"]),
+            Some("Windows")
+        );
+        assert_eq!(infer_platform([r"\\server\share\repo"]), Some("Windows"));
+        assert_eq!(infer_platform(["/Users/a/b", "/Users/a/c"]), Some("macOS"));
+        assert_eq!(infer_platform(["/home/a", ""]), Some("Linux"));
+        assert_eq!(infer_platform(["/home/a", r"C:\x"]), None);
+        assert_eq!(infer_platform(["/opt/x"]), None);
+        assert_eq!(infer_platform(std::iter::empty()), None);
+    }
+    #[test]
+    fn local_sources_keep_platform_labels() {
+        let root = tempfile::tempdir().unwrap();
+        let sources = sources(&[root.path().join("a"), root.path().join("b")], false);
+        assert!(sources.iter().all(|source| !source.label.is_empty()));
+        assert_ne!(sources[0].id, sources[1].id);
+        assert!(sources[1].label.ends_with(" 2"));
     }
 }

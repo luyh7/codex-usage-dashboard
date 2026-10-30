@@ -1,5 +1,6 @@
 import { writeHeaders } from '../../../shared/write-token.js';
-export type Preferences = { schema_version: number; language: 'zh' | 'en' | null; timezone: string | null; codex_homes: string[] };
+import type { SourcePolling } from '../domain/sourcePolling';
+export type Preferences = { schema_version: number; language: 'zh' | 'en' | null; timezone: string | null; codex_homes: string[]; source_polling?: Record<string, SourcePolling> };
 let queue: Promise<unknown> = Promise.resolve();
 export async function preferences(): Promise<Preferences> {
   const response = await fetch('/api/settings', { cache: 'no-store' });
