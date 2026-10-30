@@ -10,7 +10,11 @@ mod security;
 mod service;
 mod snapshot;
 use clap::Parser;
-use std::{net::SocketAddr, path::PathBuf};
+use std::{future::IntoFuture, net::SocketAddr, path::PathBuf, time::Duration};
+/// How long shutdown waits for in-flight HTTP requests, then for the index
+/// worker, before the process exits regardless.
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(2);
+const SHUTDOWN_WORKER: Duration = Duration::from_secs(3);
 #[derive(Parser)]
 #[command(version, about = "Local read-only Codex Usage Dashboard")]
 struct Args {
@@ -277,7 +281,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     println!("Codex Usage Dashboard: http://{address}/");
-    axum::serve(
+    let (draining, drained) = tokio::sync::oneshot::channel::<()>();
+    let server = axum::serve(
         listener,
         security::protect(http::router(state.clone()), address)?,
     )
@@ -289,12 +294,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ = state.shutdown.notified() => {},
             }
             state
+                .cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            state
                 .events
                 .send_replace(serde_json::json!({"phase":"shutdown"}));
+            let _ = draining.send(());
         }
     })
-    .await?;
-    let _ = state.sender.send(service::Command::Stop);
-    let _ = worker.join();
-    Ok(())
+    .into_future();
+    // Graceful shutdown waits for in-flight requests, some of which wait on the
+    // index worker. Never let them hold the process (and its service lock).
+    tokio::select! {
+        result = server => result?,
+        _ = async {
+            match drained.await {
+                Ok(()) => tokio::time::sleep(SHUTDOWN_DRAIN).await,
+                Err(_) => std::future::pending().await,
+            }
+        } => eprintln!("in-flight requests outlived shutdown; closing them"),
+    }
+    let finished = service::stop_worker(&state.cancel, &state.sender, worker, SHUTDOWN_WORKER);
+    // Release service.lock and the instance record now: the worker (or a
+    // blocking request) may be stuck in uninterruptible network I/O, and the
+    // kernel would only close these descriptors once that read returns.
+    drop(_registration);
+    if !finished {
+        eprintln!("index worker is blocked on I/O; exiting without waiting for it");
+    }
+    // Returning would drop the runtime, which joins every blocking task.
+    std::process::exit(0)
 }

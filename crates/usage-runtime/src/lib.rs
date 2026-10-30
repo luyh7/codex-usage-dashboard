@@ -32,6 +32,7 @@ fn sources_match(recorded: &[PathBuf], health: &Value, expected: &str) -> Result
     Ok(sources_id(recorded)? == expected && sources_id(&active)? == expected)
 }
 pub const TIMEOUT: Duration = Duration::from_secs(90);
+const SERVICE_LOCK_WAIT: Duration = Duration::from_secs(30);
 pub fn ureq_url(value: &str) -> Result<url::Url> {
     Ok(url::Url::parse(value)?)
 }
@@ -259,6 +260,40 @@ pub fn alive(pid: u32) -> bool {
         }
     }
 }
+/// SIGTERM (or SIGKILL when `force`); Windows has only TerminateProcess.
+fn signal(pid: u32, force: bool) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+        if unsafe { libc::kill(pid as i32, signal) } != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(error.into());
+            }
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let _ = force;
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
+        };
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if handle.is_null() {
+                return Ok(());
+            }
+            let terminated = TerminateProcess(handle, 1) != 0;
+            CloseHandle(handle);
+            if !terminated {
+                return Err(std::io::Error::last_os_error().into());
+            }
+        }
+        Ok(())
+    }
+}
 /// Captures the exact desktop owner, rather than trusting a reusable PID.
 pub struct OwnerProcess {
     #[cfg(windows)]
@@ -383,13 +418,54 @@ impl Record {
             return Err("shutdown refused".into());
         }
         let deadline = Instant::now() + Duration::from_secs(15);
-        while self.health().is_ok() || alive(self.pid) {
+        // A service that released its registration no longer owns anything,
+        // even if the OS still lists it while a stalled network read returns.
+        while self.health().is_ok() || (alive(self.pid) && !self.released()) {
             if Instant::now() >= deadline {
                 return Err("service did not stop; no force kill attempted".into());
             }
             thread::sleep(Duration::from_millis(50));
         }
         Ok(())
+    }
+    /// Whether this instance gave up its record (and with it service.lock).
+    fn released(&self) -> bool {
+        match Record::read(&self.config_dir) {
+            Ok(None) => true,
+            Ok(Some(record)) => record.instance_id != self.instance_id,
+            Err(_) => false,
+        }
+    }
+    /// Force-stop a service this process launched after a graceful `stop`
+    /// failed. Only signals the recorded PID while it still holds this
+    /// instance's record and service.lock, so a reused PID is never touched.
+    pub fn terminate(&self) -> Result<()> {
+        let runtime = runtime_dir(&self.config_dir);
+        let stopped = || {
+            !alive(self.pid)
+                || self.released()
+                || lock(&runtime, "service.lock", Duration::ZERO).is_ok()
+        };
+        if stopped() {
+            return Ok(());
+        }
+        for (force, wait) in [
+            (false, Duration::from_secs(3)),
+            (true, Duration::from_secs(5)),
+        ] {
+            signal(self.pid, force)?;
+            let deadline = Instant::now() + wait;
+            while Instant::now() < deadline {
+                if stopped() {
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        Err(
+            "service did not exit after it was terminated; it may be blocked on a network share"
+                .into(),
+        )
     }
 }
 pub fn agent() -> ureq::Agent {
@@ -497,6 +573,13 @@ pub fn ensure_service_options(
             owned: false,
         });
     }
+    // A replaced service releases service.lock as it exits, which can lag the
+    // shutdown request while a network read drains; wait rather than spawn a
+    // child that can only fail with "service.lock is busy".
+    drop(
+        lock(&runtime, "service.lock", SERVICE_LOCK_WAIT)
+            .map_err(|_| "the previous dashboard service is still shutting down; retry shortly")?,
+    );
     let token = random()?;
     let instance = random()?;
     let log = OpenOptions::new()
@@ -624,6 +707,42 @@ mod tests {
         assert!(lock(d.path(), "test.lock", Duration::from_millis(60)).is_err());
         drop(first);
         assert!(lock(d.path(), "test.lock", Duration::ZERO).is_ok());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn terminate_escalates_only_against_the_registered_owner() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let runtime = runtime_dir(root);
+        fs::create_dir_all(&runtime).unwrap();
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let record = Record {
+            schema_version: 1,
+            address: "127.0.0.1:1234".parse().unwrap(),
+            pid: child.id(),
+            instance_id: "a".repeat(64),
+            version: "1".into(),
+            build_id: "x".into(),
+            protocol_version: PROTOCOL,
+            config_dir: absolute(root),
+            codex_homes: vec![],
+            executable: PathBuf::new(),
+            auto_windows: false,
+            shutdown_token: "b".repeat(64),
+        };
+        let held = lock(&runtime, "service.lock", Duration::ZERO).unwrap();
+        // Another instance owns the record: the PID is not ours to signal.
+        let mut other = record.clone();
+        other.instance_id = "c".repeat(64);
+        atomic_json(&runtime.join("instance.json"), &other).unwrap();
+        record.terminate().unwrap();
+        assert!(child.try_wait().unwrap().is_none());
+        // Still registered and holding service.lock: escalate.
+        atomic_json(&runtime.join("instance.json"), &record).unwrap();
+        let reaper = thread::spawn(move || child.wait().unwrap());
+        record.terminate().unwrap();
+        assert!(!reaper.join().unwrap().success());
+        drop(held);
     }
     #[test]
     fn rejects_remote_wrong_scope_and_corrupt_records() {
