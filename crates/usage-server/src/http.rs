@@ -101,6 +101,7 @@ async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
             .map(|session| session.detail.codex_home.clone())
             .collect::<std::collections::HashSet<_>>()
     });
+    let policies = state.policies.read().unwrap().clone();
     let sources: Vec<_> = state
         .active_sources()
         .iter()
@@ -123,7 +124,12 @@ async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
                     }
                 }
             };
-            json!({"path":s.home,"status":status})
+            let mut row = json!({"path":s.home,"status":status});
+            if let Some(policy) = policies.get(&s.home) {
+                row["network"] = json!(policy.network);
+                row["poll_interval_secs"] = json!(policy.poll_interval.as_secs());
+            }
+            row
         })
         .collect();
     response(StatusCode::OK, &sources)
@@ -210,9 +216,19 @@ async fn choose_source(Extract(state): Extract<Arc<State>>) -> Response {
         } => response(StatusCode::SERVICE_UNAVAILABLE, &json!({"error":"Dashboard is shutting down"})),
     }
 }
-async fn save_settings(axum::Json(value): axum::Json<Value>) -> Response {
+async fn save_settings(
+    Extract(state): Extract<Arc<State>>,
+    axum::Json(value): axum::Json<Value>,
+) -> Response {
+    let polling = value.get("source_polling").is_some();
     match tokio::task::spawn_blocking(move || crate::preferences::save_patch(value)).await {
-        Ok(Ok(value)) => response(StatusCode::OK, &value),
+        Ok(Ok(value)) => {
+            if polling {
+                // Applied on the next worker pass; a full queue applies on restart.
+                let _ = state.sender.try_send(crate::service::Command::Reconfigure);
+            }
+            response(StatusCode::OK, &value)
+        }
         Ok(Err(crate::preferences::SaveError::Invalid(e))) => {
             response(StatusCode::BAD_REQUEST, &json!({"error":e}))
         }
@@ -279,8 +295,22 @@ fn current_device(state: &State, published: &crate::service::Published) -> Value
             .entry(session.detail.environment_id.as_str())
             .or_default() += 1;
     }
+    let policies = state.policies.read().unwrap().clone();
     let sources: Vec<_> = published.local_sources.iter().map(|source| {
-        json!({"id":source.id,"label":source.label,"session_count":counts.get(source.id.as_str()).copied().unwrap_or(0)})
+        let mut row = json!({"id":source.id,"label":source.label,"session_count":counts.get(source.id.as_str()).copied().unwrap_or(0)});
+        if policies.get(&source.home).is_some_and(|policy| policy.network) {
+            // A share holds another machine's logs: name the OS its sessions ran on.
+            row["network"] = json!(true);
+            row["platform"] = json!(crate::config::infer_platform(
+                published
+                    .local
+                    .sessions
+                    .iter()
+                    .filter(|session| session.detail.environment_id == source.id)
+                    .map(|session| session.detail.cwd.as_str()),
+            ));
+        }
+        row
     }).collect();
     json!({"device_short_code":state.device,"label":state.hostname,"session_count":published.local.sessions.len(),"sources":sources})
 }

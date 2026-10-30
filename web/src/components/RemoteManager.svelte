@@ -142,7 +142,7 @@
       {#if localDevice?.sources && localDevice.sources.length > 1}
         <ul class="local-sources">
           {#each localDevice.sources as source (source.id)}
-            <li><span>{source.label}</span><span>{number(source.session_count, lang)} {t.sessions}</span></li>
+            <li><span class="source-name"><span>{source.platform ? `${source.platform} · ${source.label}` : source.label}</span>{#if source.network}<span class="device-kind network-kind">{t.networkDrive}</span>{/if}</span><span>{number(source.session_count, lang)} {t.sessions}</span></li>
           {/each}
         </ul>
       {/if}
@@ -237,6 +237,8 @@
   .device-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .device-kind { padding: 2px 7px; border-radius: 5px; background: var(--bg); color: var(--muted); font-size: 11px; line-height: 18px; font-weight: 500; }
   .local-kind { background: #34b89b18; color: var(--accent); }
+  .source-name { display: inline-flex; align-items: center; gap: 6px; }
+  .network-kind { padding: 0 6px; background: #fff6ec; color: #b85f18; }
   .local-sources { display: grid; gap: 6px; margin: 12px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--border); list-style: none; font-size: 12px; line-height: 18px; }
   .local-sources li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
   .local-sources li > span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }

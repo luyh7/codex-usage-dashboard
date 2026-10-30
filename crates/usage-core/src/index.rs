@@ -136,6 +136,9 @@ pub struct Index {
     database_changes: runtime::ChangeMonitor,
     next_auxiliary_check: Instant,
     auxiliary_contents: Vec<(String, String)>,
+    auxiliary_stamps: HashMap<String, Vec<(String, Option<FileStamp>)>>,
+    network: HashSet<String>,
+    last_inventory: Vec<InventoryFile>,
     config: IndexConfig,
     connection: Connection,
     _lock: File,
@@ -398,6 +401,9 @@ impl Index {
             database_changes: runtime::ChangeMonitor::default(),
             next_auxiliary_check: Instant::now(),
             auxiliary_contents: Vec::new(),
+            auxiliary_stamps: HashMap::new(),
+            network: HashSet::new(),
+            last_inventory: Vec::new(),
             inventory: Inventory::new(config.sources.clone()),
             config,
             connection,
@@ -421,6 +427,15 @@ impl Index {
         self.dirty.insert(path.into());
         self.next_auxiliary_check = Instant::now();
     }
+    /// Sources on network shares: no background content audit, no SQLite
+    /// connection for change detection. Forced refreshes still verify them.
+    pub fn set_network_sources(&mut self, ids: impl IntoIterator<Item = String>) {
+        self.network = ids.into_iter().collect();
+    }
+    #[cfg(test)]
+    fn database_changes_is_idle(&self) -> bool {
+        self.database_changes.is_idle()
+    }
     pub fn force_refresh(&mut self) {
         self.force = true;
         self.inventory.invalidate_all();
@@ -433,26 +448,48 @@ impl Index {
         self.auxiliary.clear();
         Ok(())
     }
-    fn auxiliary_signature(&mut self) -> Result<String, Error> {
+    fn auxiliary_signature(&mut self, due: Option<&HashSet<String>>) -> Result<String, Error> {
+        let scanned = |id: &str| due.is_none_or(|due| due.contains(id));
         let mut stamps = Vec::new();
         for source in &self.config.sources {
-            for name in ["session_index.jsonl", "logs_2.sqlite", "logs_2.sqlite-wal"] {
-                let path = source.home.join(name);
-                stamps.push((
-                    path.to_string_lossy().into_owned(),
-                    FileStamp::read(&path).ok(),
-                ));
+            if scanned(&source.id) || !self.auxiliary_stamps.contains_key(&source.id) {
+                let rows = ["session_index.jsonl", "logs_2.sqlite", "logs_2.sqlite-wal"]
+                    .iter()
+                    .map(|name| {
+                        let path = source.home.join(name);
+                        (
+                            path.to_string_lossy().into_owned(),
+                            FileStamp::read(&path).ok(),
+                        )
+                    })
+                    .collect();
+                self.auxiliary_stamps.insert(source.id.clone(), rows);
             }
+            stamps.extend(self.auxiliary_stamps[&source.id].iter().cloned());
         }
-        let generation = self
-            .database_changes
-            .poll(self.config.sources.iter().map(|s| s.home.clone()));
+        self.auxiliary_stamps
+            .retain(|id, _| self.config.sources.iter().any(|s| &s.id == id));
+        let network = &self.network;
+        let generation = self.database_changes.poll_sources(
+            self.config
+                .sources
+                .iter()
+                .filter(|s| scanned(&s.id))
+                .map(|s| (s.home.clone(), network.contains(&s.id))),
+        );
         if Instant::now() >= self.next_auxiliary_check {
+            let previous: HashMap<_, _> = self.auxiliary_contents.iter().cloned().collect();
             self.auxiliary_contents = self
                 .config
                 .sources
                 .iter()
                 .map(|source| {
+                    // Network sessions indexes are read in full only on a
+                    // forced refresh; their stamps still detect changes.
+                    if !scanned(&source.id) || (network.contains(&source.id) && !self.force) {
+                        let digest = previous.get(&source.id).cloned().unwrap_or_default();
+                        return Ok((source.id.clone(), digest));
+                    }
                     let path = source.home.join("session_index.jsonl");
                     let digest = match FileStamp::read(&path) {
                         Ok(stamp) => crate::content::Fingerprint::read(&path, stamp.size, None)
@@ -485,12 +522,18 @@ impl Index {
                 changed.insert(key);
             }
         }
-        if !inventory.is_empty() && Instant::now() >= self.next_audit {
+        // Network shares are never audited in the background; a forced
+        // refresh above re-fingerprints them in full.
+        let audited: Vec<_> = inventory
+            .iter()
+            .filter(|file| !self.network.contains(&file.source.id))
+            .collect();
+        if !audited.is_empty() && Instant::now() >= self.next_audit {
             // Round-robin files and chunks: active logs cannot starve history.
             // At most 8 MiB per two seconds, independent of watcher frequency.
-            for _ in 0..inventory.len().min(8) {
-                self.audit_cursor %= inventory.len();
-                let file = &inventory[self.audit_cursor];
+            for _ in 0..audited.len().min(8) {
+                self.audit_cursor %= audited.len();
+                let file = audited[self.audit_cursor];
                 self.audit_cursor += 1;
                 let key = file_key(file);
                 if let Some(cached) = self.files.get(&key)
@@ -516,8 +559,18 @@ impl Index {
     }
     pub fn refresh(
         &mut self,
+        progress: impl FnMut(IndexProgress),
+    ) -> Result<Option<Arc<Snapshot>>, Error> {
+        self.refresh_sources(None, progress)
+    }
+    /// Refresh only the `due` sources (all when `None`). Other sources reuse
+    /// their last inventory and auxiliary stamps without touching their files.
+    pub fn refresh_sources(
+        &mut self,
+        due: Option<&HashSet<String>>,
         mut progress: impl FnMut(IndexProgress),
     ) -> Result<Option<Arc<Snapshot>>, Error> {
+        let due = due.filter(|_| !self.force);
         let started = Instant::now();
         progress(IndexProgress {
             phase: "inventory",
@@ -525,8 +578,18 @@ impl Index {
             total: 0,
             revision: self.snapshot.revision,
         });
-        let inventory = self.inventory.discover()?;
-        let auxiliary = self.auxiliary_signature()?;
+        let mut inventory = self.inventory.discover_sources(due, &self.network)?;
+        if let Some(due) = due {
+            inventory.extend(
+                self.last_inventory
+                    .iter()
+                    .filter(|file| !due.contains(&file.source.id))
+                    .cloned(),
+            );
+            inventory.sort_by_key(|file| std::cmp::Reverse(file.stamp.modified_ns));
+        }
+        self.last_inventory = inventory.clone();
+        let auxiliary = self.auxiliary_signature(due)?;
         let content_changed = self.content_changes(&inventory)?;
         let unchanged = content_changed.is_empty()
             && auxiliary == self.auxiliary
@@ -1438,5 +1501,60 @@ mod tests {
         assert_eq!(total(&index), 0);
         assert_eq!(index.metrics.incremental_parses, 0);
         assert_eq!(index.snapshot.sessions[0].detail.parse_errors, 1);
+    }
+    #[test]
+    fn network_sources_skip_background_audits() {
+        for network in [false, true] {
+            let f = Fixture::new();
+            let mut index = Index::open(f.config.clone()).unwrap();
+            if network {
+                index.set_network_sources(["fixture".to_string()]);
+            }
+            index.refresh(|_| {}).unwrap();
+            for _ in 0..3 {
+                index.next_audit = Instant::now();
+                index.refresh(|_| {}).unwrap();
+            }
+            if network {
+                assert_eq!(index.metrics.audit_bytes, 0);
+                assert!(index.database_changes_is_idle());
+            } else {
+                assert!(index.metrics.audit_bytes > 0);
+            }
+            // A forced refresh still fully verifies a same-stamp rewrite.
+            let changed = fs::read_to_string(&f.path).unwrap().replace(":10", ":30");
+            fs::write(&f.path, changed).unwrap();
+            index.files.values_mut().next().unwrap().stamp = FileStamp::read(&f.path).unwrap();
+            index.next_audit = Instant::now() + Duration::from_secs(3600);
+            index.refresh(|_| {}).unwrap();
+            assert_eq!(total(&index), 10);
+            index.force_refresh();
+            index.refresh(|_| {}).unwrap();
+            assert_eq!(total(&index), 30, "network={network}");
+        }
+    }
+    #[test]
+    fn sources_that_are_not_due_keep_their_published_sessions() {
+        let f = Fixture::new();
+        let mut index = Index::open(f.config.clone()).unwrap();
+        index.set_network_sources(["fixture".to_string()]);
+        index.refresh(|_| {}).unwrap();
+        f.append(20, 2);
+        let none = HashSet::new();
+        assert!(
+            index
+                .refresh_sources(Some(&none), |_| {})
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(total(&index), 10);
+        assert_eq!(index.snapshot.sessions.len(), 1);
+        let due = HashSet::from(["fixture".to_string()]);
+        index.refresh_sources(Some(&due), |_| {}).unwrap();
+        assert_eq!(total(&index), 20);
+        f.append(30, 3);
+        index.force_refresh();
+        index.refresh_sources(Some(&none), |_| {}).unwrap();
+        assert_eq!(total(&index), 30);
     }
 }
