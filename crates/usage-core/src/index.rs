@@ -18,13 +18,18 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 const SCHEMA_VERSION: &str = "1";
 const PARSER_VERSION: &str = "6";
 const MARKER_BYTES: u64 = 4096;
+/// Returned when a refresh stops early because its owner is shutting down.
+pub const CANCELLED: &str = "index refresh cancelled";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventIndex {
     pub timestamp_us: i64,
@@ -138,6 +143,7 @@ pub struct Index {
     auxiliary_contents: Vec<(String, String)>,
     auxiliary_stamps: HashMap<String, Vec<(String, Option<FileStamp>)>>,
     network: HashSet<String>,
+    cancel: Arc<AtomicBool>,
     last_inventory: Vec<InventoryFile>,
     config: IndexConfig,
     connection: Connection,
@@ -403,6 +409,7 @@ impl Index {
             auxiliary_contents: Vec::new(),
             auxiliary_stamps: HashMap::new(),
             network: HashSet::new(),
+            cancel: Arc::default(),
             last_inventory: Vec::new(),
             inventory: Inventory::new(config.sources.clone()),
             config,
@@ -431,6 +438,18 @@ impl Index {
     /// connection for change detection. Forced refreshes still verify them.
     pub fn set_network_sources(&mut self, ids: impl IntoIterator<Item = String>) {
         self.network = ids.into_iter().collect();
+    }
+    /// Share a flag that aborts an in-flight refresh between files, so a
+    /// shutdown never waits for a full pass over a slow (network) source.
+    pub fn set_cancel(&mut self, cancel: Arc<AtomicBool>) {
+        self.cancel = cancel;
+    }
+    fn check_cancel(&self) -> Result<(), Error> {
+        if self.cancel.load(Ordering::Relaxed) {
+            Err(Error::InvalidData(CANCELLED.into()))
+        } else {
+            Ok(())
+        }
     }
     #[cfg(test)]
     fn database_changes_is_idle(&self) -> bool {
@@ -512,6 +531,7 @@ impl Index {
     fn content_changes(&mut self, inventory: &[InventoryFile]) -> Result<HashSet<String>, Error> {
         let mut changed = HashSet::new();
         for file in inventory {
+            self.check_cancel()?;
             let key = file_key(file);
             if let Some(cached) = self.files.get(&key)
                 && cached.stamp == file.stamp
@@ -571,6 +591,7 @@ impl Index {
         mut progress: impl FnMut(IndexProgress),
     ) -> Result<Option<Arc<Snapshot>>, Error> {
         let due = due.filter(|_| !self.force);
+        self.check_cancel()?;
         let started = Instant::now();
         progress(IndexProgress {
             phase: "inventory",
@@ -579,6 +600,7 @@ impl Index {
             revision: self.snapshot.revision,
         });
         let mut inventory = self.inventory.discover_sources(due, &self.network)?;
+        self.check_cancel()?;
         if let Some(due) = due {
             inventory.extend(
                 self.last_inventory
@@ -614,6 +636,7 @@ impl Index {
         let mut next = BTreeMap::new();
         let mut changed = HashSet::new();
         for (i, file) in inventory.iter().enumerate() {
+            self.check_cancel()?;
             let key = file_key(file);
             let cached = self.files.get(&key);
             if let Some(cached) = cached.filter(|cached| {
@@ -846,6 +869,7 @@ impl Index {
             total: snapshot.sessions.len(),
             revision: self.snapshot.revision,
         });
+        self.check_cancel()?;
         let commit_started = Instant::now();
         let tx = self.connection.transaction()?;
         for (key, file) in &next {
@@ -1292,6 +1316,40 @@ mod tests {
         assert_eq!(child.inherited_token_event_count, 2);
         assert_eq!(child.inherited_token_usage.total_tokens, 200);
         assert_eq!(child.total_token_usage.total_tokens, 50);
+    }
+    #[test]
+    fn cancelled_refresh_stops_without_committing() {
+        let f = Fixture::new();
+        let mut index = Index::open(f.config.clone()).unwrap();
+        index.refresh(|_| {}).unwrap();
+        let revision = index.snapshot.revision;
+        f.append(20, 2);
+        let cancel = Arc::new(AtomicBool::new(false));
+        index.set_cancel(cancel.clone());
+        // Shutdown arrives while a (slow) file is being parsed.
+        let error = index
+            .refresh(|progress| {
+                if progress.phase == "parsing" {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            })
+            .unwrap_err();
+        assert_eq!(error.to_string(), CANCELLED);
+        assert_eq!(index.snapshot.revision, revision);
+        assert_eq!(total(&index), 10);
+        // A cancelled pass never starts reading again.
+        assert_eq!(
+            index
+                .refresh(|_| panic!("refresh ran"))
+                .unwrap_err()
+                .to_string(),
+            CANCELLED
+        );
+        drop(index);
+        let mut index = Index::open(f.config.clone()).unwrap();
+        assert_eq!(total(&index), 10);
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 20);
     }
     #[test]
     fn rollback_at_every_commit_stage_does_not_advance_offset() {

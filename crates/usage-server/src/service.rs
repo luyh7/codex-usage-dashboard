@@ -6,7 +6,11 @@ use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock, mpsc},
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::{oneshot, watch};
@@ -44,6 +48,8 @@ type CachedView = (String, Arc<View>, Arc<Published>);
 pub struct State {
     redaction_key: [u8; 32],
     pub shutdown: tokio::sync::Notify,
+    /// Set once shutdown is requested; aborts an in-flight index refresh.
+    pub cancel: Arc<AtomicBool>,
     pub current: RwLock<Option<Arc<Published>>>,
     pub status: RwLock<Value>,
     pub events: watch::Sender<Value>,
@@ -59,6 +65,12 @@ pub struct State {
     pub exports: Mutex<VecDeque<Arc<crate::snapshot::ExportJob>>>,
 }
 impl State {
+    /// Ask every part of the service to wind down without waiting on I/O.
+    pub fn request_shutdown(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.events.send_replace(json!({"phase":"shutdown"}));
+        self.shutdown.notify_one();
+    }
     pub fn active_sources(&self) -> Vec<LogSource> {
         self.current
             .read()
@@ -209,6 +221,7 @@ pub fn start(
     let state = Arc::new(State {
         redaction_key: crate::redact::load_key(&root)?,
         shutdown: tokio::sync::Notify::new(),
+        cancel: Arc::default(),
         current: RwLock::new(None),
         status: RwLock::new(initial),
         events,
@@ -240,6 +253,51 @@ pub fn start(
             }
         })?;
     Ok((state, handle))
+}
+/// Stop the index worker, waiting at most `grace` for it to finish.
+///
+/// A refresh blocked inside a read of a slow or stalled network share cannot
+/// be interrupted, so the caller must not join the thread unconditionally:
+/// returns `false` when the worker is still running after `grace`.
+pub fn stop_worker(
+    cancel: &AtomicBool,
+    sender: &mpsc::SyncSender<Command>,
+    worker: std::thread::JoinHandle<()>,
+    grace: Duration,
+) -> bool {
+    cancel.store(true, Ordering::Relaxed);
+    // `send` would block on a full queue while the worker is stuck.
+    let _ = sender.try_send(Command::Stop);
+    let deadline = Instant::now() + grace;
+    while !worker.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = worker.join();
+    true
+}
+fn open_index(shared: &State, config: IndexConfig) -> Result<Index, Error> {
+    // A previous service whose worker is stuck on a network read may keep this
+    // index's writer lock briefly after it released the service lock.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        match Index::open(config.clone()) {
+            Err(Error::InvalidData(message))
+                if message.starts_with("index already has a writer")
+                    && Instant::now() < deadline
+                    && !shared.cancel.load(Ordering::Relaxed) =>
+            {
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            result => {
+                let mut index = result?;
+                index.set_cancel(shared.cancel.clone());
+                return Ok(index);
+            }
+        }
+    }
 }
 fn relevant_event(path: &std::path::Path, sources: &[LogSource]) -> bool {
     sources.iter().any(|source| {
@@ -410,12 +468,15 @@ fn run_worker(
     receiver: mpsc::Receiver<Command>,
     options: WorkerOptions,
 ) -> Result<(), Error> {
-    let mut index = Index::open(IndexConfig {
-        database: options
-            .database
-            .unwrap_or_else(|| config::index_path(&root, &sources)),
-        sources: sources.clone(),
-    })?;
+    let mut index = open_index(
+        shared,
+        IndexConfig {
+            database: options
+                .database
+                .unwrap_or_else(|| config::index_path(&root, &sources)),
+            sources: sources.clone(),
+        },
+    )?;
     let mut store = Store::new(root.join("remotes"), shared.device.clone(), zone);
     let prices = PriceSchedule::bundled();
     let mut publication = 0u64;
@@ -473,6 +534,9 @@ fn run_worker(
             .map(|policy| policy.poll_interval)
             .min()
             .unwrap_or(LOCAL_POLL);
+        if shared.cancel.load(Ordering::Relaxed) {
+            break;
+        }
         let remotes = store.refresh(&prices);
         match (result, remotes) {
             (Ok(local_changed), Ok((remote_changed, remotes))) => {
@@ -574,6 +638,7 @@ fn run_worker(
                                 database: config::index_path(&root, &next_sources),
                                 sources: next_sources.clone(),
                             })?;
+                            next.set_cancel(shared.cancel.clone());
                             next.refresh(|_| {})?;
                             Some(next)
                         } else {
@@ -677,4 +742,48 @@ fn run_worker(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn stop_worker_does_not_wait_for_a_worker_blocked_on_io() {
+        let cancel = AtomicBool::new(false);
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        // Full queue: a blocking `send(Stop)` would hang here as well.
+        sender.try_send(Command::Reconfigure).unwrap();
+        let (release, blocked) = mpsc::channel::<()>();
+        // Simulates a read stuck on a stalled network share.
+        let worker = std::thread::spawn(move || {
+            let _ = blocked.recv();
+        });
+        let started = Instant::now();
+        assert!(!stop_worker(
+            &cancel,
+            &sender,
+            worker,
+            Duration::from_millis(200)
+        ));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(cancel.load(Ordering::Relaxed));
+        drop(release);
+    }
+    #[test]
+    fn stop_worker_joins_a_worker_that_observes_cancellation() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        let flag = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            while !flag.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        assert!(stop_worker(
+            &cancel,
+            &sender,
+            worker,
+            Duration::from_secs(5)
+        ));
+    }
 }

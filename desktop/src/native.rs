@@ -31,6 +31,16 @@ fn set_autostart(app: &tauri::AppHandle, enabled: bool) -> std::result::Result<(
     }
 }
 
+/// Stop a service this application launched. A graceful stop can time out
+/// while the service drains a slow network share; escalate to terminating the
+/// owned process so a replacement can take over.
+fn stop_owned(record: &usage_runtime::Record) -> Result<()> {
+    record.stop().or_else(|error| {
+        record
+            .terminate()
+            .map_err(|kill| format!("{error}; {kill}").into())
+    })
+}
 #[tauri::command]
 pub async fn desktop_settings(
     window: WebviewWindow,
@@ -151,7 +161,7 @@ pub async fn apply_sources(
                 Ok(())
             };
             save(json!(codex_homes))?;
-            if let Err(error) = current.record.stop() {
+            if let Err(error) = stop_owned(&current.record) {
                 if let Err(rollback) = save(previous["codex_homes"].clone()) {
                     return Err(
                         format!("{error}; could not restore log sources: {rollback}").into(),
@@ -264,7 +274,7 @@ pub async fn check_update(
                 service.as_ref().map(|s| s.record.clone())
             };
             if let Some(record) = record
-                && let Err(error) = record.stop()
+                && let Err(error) = stop_owned(&record)
             {
                 state.busy.store(false, Ordering::SeqCst);
                 return Err(error.to_string());

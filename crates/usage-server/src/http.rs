@@ -261,8 +261,7 @@ async fn shutdown(Extract(state): Extract<Arc<State>>, headers: axum::http::Head
     {
         return StatusCode::FORBIDDEN.into_response();
     }
-    state.events.send_replace(json!({"phase":"shutdown"}));
-    state.shutdown.notify_one();
+    state.request_shutdown();
     StatusCode::ACCEPTED.into_response()
 }
 fn text<'a>(p: &'a HashMap<String, String>, key: &str) -> &'a str {
