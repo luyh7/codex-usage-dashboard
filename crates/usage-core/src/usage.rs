@@ -174,9 +174,17 @@ pub fn normalize(events: &[RawEvent]) -> Result<Vec<NormalizedEvent<'_>>, Error>
             && let Some(last) = source.last_token_usage
         {
             let inferred = cumulative.subtract(last)?;
+            // Corrupt/partial request counters are not evidence of a restored
+            // checkpoint. Preserve the legacy reset fallback for those rows.
+            let valid_request = i128::from(last.total_tokens)
+                == i128::from(last.input_tokens) + i128::from(last.output_tokens)
+                && last.cached_input_tokens <= last.input_tokens
+                && last.cache_write_tokens <= last.input_tokens
+                && last.reasoning_output_tokens <= last.output_tokens;
             if last.has_tokens()
                 && last.values().iter().all(|v| *v >= 0)
                 && inferred.checked_add(last)? == cumulative
+                && (index == 0 || valid_request)
             {
                 previous = inferred;
             }
@@ -210,6 +218,34 @@ mod tests {
             (None, 20),
             (Some(Usage::default()), 20),
             (Some(tokens(30)), 20),
+            (
+                Some(Usage {
+                    output_tokens: 1,
+                    ..tokens(5)
+                }),
+                20,
+            ),
+            (
+                Some(Usage {
+                    cached_input_tokens: 6,
+                    ..tokens(5)
+                }),
+                20,
+            ),
+            (
+                Some(Usage {
+                    cache_write_tokens: 6,
+                    ..tokens(5)
+                }),
+                20,
+            ),
+            (
+                Some(Usage {
+                    reasoning_output_tokens: 1,
+                    ..tokens(5)
+                }),
+                20,
+            ),
             (
                 Some(Usage {
                     output_tokens: -1,
