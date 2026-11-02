@@ -110,15 +110,17 @@ impl Usage {
     pub fn has_tokens(self) -> bool {
         self.values().iter().any(|v| *v > 0)
     }
-    pub fn delta(self, previous: Self) -> Result<Self, Error> {
-        let reset = if self.total_tokens != 0 || previous.total_tokens != 0 {
+    fn is_reset(self, previous: Self) -> bool {
+        if self.total_tokens != 0 || previous.total_tokens != 0 {
             self.total_tokens < previous.total_tokens
         } else {
             [0, 1, 2, 3, 5]
                 .iter()
                 .any(|i| self.values()[*i] < previous.values()[*i])
-        };
-        if reset {
+        }
+    }
+    pub fn delta(self, previous: Self) -> Result<Self, Error> {
+        if self.is_reset(previous) {
             Ok(self)
         } else {
             self.subtract(previous)
@@ -165,11 +167,17 @@ pub fn normalize(events: &[RawEvent]) -> Result<Vec<NormalizedEvent<'_>>, Error>
     let mut result = Vec::with_capacity(ordered.len());
     for (index, (source_order, source, timestamp)) in ordered.into_iter().enumerate() {
         let cumulative = source.total_token_usage;
-        if index == 0
+        // A resumed rollout can restore an older cumulative checkpoint. Like
+        // the first event, a rollback with a valid request delta starts from
+        // cumulative - last, rather than charging that checkpoint again.
+        if (index == 0 || cumulative.is_reset(previous))
             && let Some(last) = source.last_token_usage
         {
             let inferred = cumulative.subtract(last)?;
-            if last.has_tokens() && inferred.checked_add(last)? == cumulative {
+            if last.has_tokens()
+                && last.values().iter().all(|v| *v >= 0)
+                && inferred.checked_add(last)? == cumulative
+            {
                 previous = inferred;
             }
         }
@@ -189,6 +197,66 @@ pub fn normalize(events: &[RawEvent]) -> Result<Vec<NormalizedEvent<'_>>, Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rollback_uses_only_valid_request_usage_and_keeps_forward_gaps() {
+        let tokens = |n| Usage {
+            input_tokens: n,
+            total_tokens: n,
+            ..Usage::default()
+        };
+        for (last, expected) in [
+            (Some(tokens(5)), 5),
+            (Some(tokens(20)), 20),
+            (None, 20),
+            (Some(Usage::default()), 20),
+            (Some(tokens(30)), 20),
+            (
+                Some(Usage {
+                    output_tokens: -1,
+                    ..tokens(5)
+                }),
+                20,
+            ),
+        ] {
+            let events = [
+                RawEvent {
+                    timestamp: Some("2026-11-02T00:00:00Z".into()),
+                    total_token_usage: tokens(100),
+                    last_token_usage: Some(tokens(100)),
+                    ..RawEvent::default()
+                },
+                RawEvent {
+                    timestamp: Some("2026-11-02T00:01:00Z".into()),
+                    total_token_usage: tokens(20),
+                    last_token_usage: last,
+                    ..RawEvent::default()
+                },
+                // Repeated snapshots retain their stale last_token_usage.
+                RawEvent {
+                    timestamp: Some("2026-11-02T00:02:00Z".into()),
+                    total_token_usage: tokens(20),
+                    last_token_usage: last,
+                    ..RawEvent::default()
+                },
+                // A forward gap still accounts for missing intermediate events.
+                RawEvent {
+                    timestamp: Some("2026-11-02T00:03:00Z".into()),
+                    total_token_usage: tokens(50),
+                    last_token_usage: Some(tokens(10)),
+                    ..RawEvent::default()
+                },
+            ];
+            let normalized = normalize(&events).unwrap();
+            assert_eq!(
+                normalized
+                    .iter()
+                    .map(|e| e.delta.total_tokens)
+                    .collect::<Vec<_>>(),
+                vec![100, expected, 0, 30],
+                "{last:?}"
+            );
+        }
+    }
     #[test]
     fn counter_reset_and_overflow_are_explicit() {
         let a = Usage {

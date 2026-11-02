@@ -26,7 +26,7 @@ use std::{
 };
 
 const SCHEMA_VERSION: &str = "1";
-const PARSER_VERSION: &str = "6";
+const PARSER_VERSION: &str = "7";
 const MARKER_BYTES: u64 = 4096;
 /// Returned when a refresh stops early because its owner is shutting down.
 pub const CANCELLED: &str = "index refresh cancelled";
@@ -1047,6 +1047,139 @@ mod tests {
             .iter()
             .map(|s| s.detail.total_token_usage.total_tokens)
             .sum()
+    }
+    #[test]
+    fn resumed_rollout_from_older_checkpoint_counts_only_new_requests() {
+        let f = Fixture::new();
+        let usage = |input, cached, output| {
+            json!({"input_tokens":input,"cached_input_tokens":cached,
+                "output_tokens":output,"total_tokens":input + output})
+        };
+        let records = |at: &str, cumulative: serde_json::Value, last: serde_json::Value| {
+            let time = timestamp::parse(at).unwrap();
+            format!(
+                "{}\n{}\n{}\n",
+                json!({"timestamp":timestamp::format(time - chrono::Duration::seconds(2)),
+                    "type":"turn_context","payload":{"model":"gpt-6.1-sol"}}),
+                json!({"timestamp":at,"type":"event_msg","payload":{
+                    "type":"item_completed","item":{"type":"Reasoning"},
+                    "started_at_ms":time.timestamp_millis() - 1000}}),
+                json!({"timestamp":at,"type":"event_msg","payload":{
+                    "type":"token_count","info":{
+                        "total_token_usage":cumulative,"last_token_usage":last}}})
+            )
+        };
+        let meta = |at| {
+            format!(
+                "{}\n",
+                json!({"timestamp":at,"type":"session_meta",
+            "payload":{"id":"synthetic","model":"gpt-6.1-sol"}})
+            )
+        };
+        fs::write(
+            &f.path,
+            format!(
+                "{}{}{}",
+                meta("2026-10-30T00:00:00Z"),
+                records(
+                    "2026-10-30T00:01:00Z",
+                    usage(900, 800, 100),
+                    usage(900, 800, 100)
+                ),
+                records(
+                    "2026-11-02T06:00:00Z",
+                    usage(990, 880, 110),
+                    usage(90, 80, 10)
+                ),
+            ),
+        )
+        .unwrap();
+        let mut index = Index::open(f.config.clone()).unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 1100);
+
+        // A second rollout resumes from 1000, before the old file's last request.
+        let resumed = f
+            .path
+            .with_file_name("rollout-synthetic_continuation.jsonl");
+        fs::write(
+            &resumed,
+            format!(
+                "{}{}",
+                meta("2026-11-02T06:17:00Z"),
+                records(
+                    "2026-11-02T06:17:10Z",
+                    usage(945, 840, 110),
+                    usage(45, 40, 10)
+                ),
+            ),
+        )
+        .unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 1155);
+        let uid = index.snapshot.sessions[0].detail.identity.uid.clone();
+        assert_eq!(index.snapshot.sessions[0].events[2].delta.total_tokens, 55);
+
+        OpenOptions::new()
+            .append(true)
+            .open(&resumed)
+            .unwrap()
+            .write_all(
+                records(
+                    "2026-11-02T06:18:00Z",
+                    usage(985, 880, 115),
+                    usage(40, 40, 5),
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 1200);
+        drop(index);
+
+        // Persisted data and a forced refresh must agree with the cold scan.
+        let mut index = Index::open(f.config).unwrap();
+        assert_eq!(total(&index), 1200);
+        index.force_refresh();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 1200);
+        assert_eq!(index.snapshot.sessions.len(), 1);
+        let detail = &index.snapshot.sessions[0].detail;
+        assert_eq!(detail.identity.uid, uid);
+        assert_eq!(detail.pricing.estimated_cost_usd, Some(0.001576));
+        let days = crate::query::daily_usage([detail.as_ref()], chrono_tz::Asia::Shanghai).unwrap();
+        assert_eq!(days[1].usage.total_tokens, 200);
+        let today = crate::query::detail_for_period(
+            detail,
+            timestamp::parse("2026-11-01T16:00:00Z").unwrap(),
+            timestamp::parse("2026-11-02T16:00:00Z").unwrap(),
+            &index.pricing,
+        )
+        .unwrap();
+        assert_eq!(today.total_token_usage.total_tokens, 200);
+        assert_eq!(today.pricing.estimated_cost_usd, Some(0.000296));
+        let speed = today.estimated_speed.unwrap();
+        assert_eq!(
+            (speed.output_tokens, speed.duration_ms, speed.request_count),
+            (25, 3000, 3)
+        );
+
+        // An index written before this accounting fix must be rebuilt, even
+        // when both rollout files are unchanged.
+        index
+            .connection
+            .execute(
+                "UPDATE metadata SET value='6' WHERE key='parser_version'",
+                [],
+            )
+            .unwrap();
+        let config = index.config.clone();
+        drop(index);
+        let mut rebuilt = Index::open(config).unwrap();
+        assert!(rebuilt.snapshot.sessions.is_empty());
+        rebuilt.refresh(|_| {}).unwrap();
+        assert_eq!(total(&rebuilt), 1200);
+        assert_eq!(rebuilt.metrics.full_parses, 2);
     }
     #[test]
     fn identical_metadata_rewrites_converge_and_keep_old_publication() {
