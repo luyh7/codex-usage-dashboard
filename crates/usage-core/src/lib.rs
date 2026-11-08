@@ -18,6 +18,7 @@ pub mod timestamp;
 pub mod usage;
 pub mod view;
 pub mod wire;
+pub mod wsl;
 
 pub use pricing::{PriceEntry, PriceSchedule, PriceSegment, Pricing};
 pub use usage::{NormalizedEvent, RawEvent, Usage};

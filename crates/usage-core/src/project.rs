@@ -98,6 +98,11 @@ fn path_from_cwd(value: &str) -> Option<PathBuf> {
     } else {
         expand_home(value)
     };
+    // Optional Git enrichment must not wake a stopped distribution for a cwd
+    // recorded in another source or in an already cached session.
+    if crate::wsl::distribution(&path).is_some() {
+        return None;
+    }
     path.exists().then_some(path)
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

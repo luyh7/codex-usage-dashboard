@@ -65,6 +65,8 @@ node --test tools/release.test.mjs
 
 After application code changes, run an isolated dashboard from the current worktree and verify its build identity and URL as required by [AGENTS.md](../../AGENTS.md).
 
+For WSL source changes, run `node tools/verify_wsl_on_demand.mjs` on Windows after building the native executable (or pass its path). This uses synthetic logs and a nonexistent distribution to check startup, Settings, forced refresh, local updates, restart, and the network polling interval without launching WSL. The core regression test additionally checks that cached history, titles, and tier pricing survive a paused source and resume without duplicate sessions.
+
 Python is used only by optional historical differential checks in `tools/`, `tests/`, and `benchmarks/`. Their oracle is loaded from pinned Git history into a temporary directory; it is not an application backend. Release CI runs the differential check on each supported platform.
 
 ## Package and verify a native release

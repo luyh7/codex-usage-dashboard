@@ -102,25 +102,39 @@ async fn sources(Extract(state): Extract<Arc<State>>) -> Response {
             .collect::<std::collections::HashSet<_>>()
     });
     let policies = state.policies.read().unwrap().clone();
+    let paused = state.paused_sources.read().unwrap().clone();
     let sources: Vec<_> = state
         .active_sources()
         .iter()
         .map(|s| {
-            let status = match std::fs::read_dir(&s.home) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "missing",
-                Err(_) => "unreadable",
-                Ok(_) => {
-                    if indexed_homes
-                        .as_ref()
-                        .is_some_and(|homes| !homes.contains(s.home.to_string_lossy().as_ref()))
-                    {
-                        "empty"
-                    } else if s.home.join("sessions").is_dir()
-                        || s.home.join("archived_sessions").is_dir()
-                    {
-                        "available"
-                    } else {
-                        "empty"
+            let cached = indexed_homes
+                .as_ref()
+                .is_some_and(|homes| homes.contains(s.home.to_string_lossy().as_ref()));
+            let status = if usage_core::wsl::distribution(&s.home).is_some() {
+                if paused.contains(&s.id) {
+                    "paused"
+                } else if cached {
+                    "available"
+                } else {
+                    "empty"
+                }
+            } else {
+                match std::fs::read_dir(&s.home) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => "missing",
+                    Err(_) => "unreadable",
+                    Ok(_) => {
+                        if indexed_homes
+                            .as_ref()
+                            .is_some_and(|homes| !homes.contains(s.home.to_string_lossy().as_ref()))
+                        {
+                            "empty"
+                        } else if s.home.join("sessions").is_dir()
+                            || s.home.join("archived_sessions").is_dir()
+                        {
+                            "available"
+                        } else {
+                            "empty"
+                        }
                     }
                 }
             };

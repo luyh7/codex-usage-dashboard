@@ -130,6 +130,12 @@ Both `.jsonl` and Codex's compressed `.jsonl.zst` histories are supported. Log c
 
 In Settings → Codex log sources, use the folder picker to add Codex home folders or remove existing ones. Adding a folder preserves the currently discovered folders; use Discover automatically to restore discovery. On Windows, an accessible WSL home can be added as `\\wsl.localhost\<distribution>\home\<user>\.codex` alongside the Windows home. The browser's picker opens on the machine running the dashboard and requires a graphical desktop session; Linux also needs an XDG Desktop Portal file chooser or zenity. Explicit `--codex-home` launch options override saved sources on the next startup.
 
+### WSL starts only when you use it
+
+On Windows, WSL log sources update only while their distribution is already running. The dashboard checks `wsl.exe --list --running --quiet` before reading a WSL share; a stopped distribution, or a failed status check, pauses that source. Startup, background polling, Settings, and Refresh do not open a paused WSL share to wake it. Both `\\wsl.localhost\…` and `\\wsl$\…` paths, including extended UNC paths, are supported.
+
+Previously indexed WSL sessions remain in the local cache, including their titles and pricing evidence, when WSL stops or the dashboard restarts. Start the distribution normally to resume updates at its next polling interval. A source added while WSL is stopped has no history to display until its first successful scan. Keep the source configured to retain access to its cached history; removing it removes it from the current view. Imported WSL snapshots continue to work independently.
+
 Under WSL, automatic discovery also looks for accessible Windows profiles:
 
 ```text
