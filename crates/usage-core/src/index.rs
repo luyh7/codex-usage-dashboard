@@ -132,7 +132,7 @@ struct Component {
     sessions: Vec<IndexedSession>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct SourceEvidence {
     tiers: BTreeMap<String, Vec<parser::TierEvent>>,
     titles: BTreeMap<String, String>,
@@ -291,6 +291,96 @@ fn open_rebuildable(path: &Path) -> Result<Connection, Error> {
 }
 impl Index {
     pub fn open(config: IndexConfig) -> Result<Self, Error> {
+        Self::open_with_previous(config, None)
+    }
+    /// Carry retained sources into a configuration-scoped database without
+    /// reading their homes. Source IDs can change when another source is removed.
+    pub fn open_reusing(config: IndexConfig, previous: &Self) -> Result<Self, Error> {
+        Self::open_with_previous(config, Some(previous))
+    }
+    fn reuse_sources(
+        connection: &mut Connection,
+        sources: &[LogSource],
+        previous: &Self,
+    ) -> Result<(), Error> {
+        let retained: Vec<_> = sources
+            .iter()
+            .filter_map(|source| {
+                previous
+                    .config
+                    .sources
+                    .iter()
+                    .find(|old| old.home == source.home)
+                    .map(|old| (source, old))
+            })
+            .collect();
+        if retained.is_empty() {
+            return Ok(());
+        }
+        let tx = connection.transaction()?;
+        for (source, old) in retained {
+            let prefix = format!("{}:", source.id);
+            let mut evidence = previous
+                .source_evidence
+                .get(&old.id)
+                .cloned()
+                .unwrap_or_default();
+            // The target may be an older configuration's database. Replace
+            // its retained-source records with the current index, even empty.
+            tx.execute(
+                "DELETE FROM files WHERE substr(path_key,1,length(?1))=?1",
+                [&prefix],
+            )?;
+            for (key, cached) in &previous.files {
+                if cached.source_id != old.id {
+                    continue;
+                }
+                let Some(path) = key.strip_prefix(&format!("{}:", old.id)) else {
+                    continue;
+                };
+                let mut cached = cached.clone();
+                cached.source_id = source.id.clone();
+                let detail = &mut Arc::make_mut(&mut cached.parsed).detail;
+                let uid = parser::file_uid(Path::new(&detail.path), &source.id);
+                if detail.identity.session_id == detail.identity.uid {
+                    if let Some(events) = evidence.tiers.remove(&detail.identity.session_id) {
+                        evidence.tiers.insert(uid.clone(), events);
+                    }
+                    if let Some(title) = evidence.titles.remove(&detail.identity.session_id) {
+                        evidence.titles.insert(uid.clone(), title);
+                    }
+                    detail.identity.session_id = uid.clone();
+                }
+                if detail.identity.root_session_id == detail.identity.uid {
+                    detail.identity.root_session_id = uid.clone();
+                }
+                detail.identity.uid = uid;
+                detail.environment_id = source.id.clone();
+                detail.environment = source.label.clone();
+                detail.codex_home = source.home.to_string_lossy().into_owned();
+                tx.execute(
+                    "INSERT INTO files VALUES (?,?)",
+                    params![format!("{prefix}{path}"), encode(&cached)?],
+                )?;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO metadata VALUES (?,?)",
+                [
+                    format!("source_evidence:{}", source.id),
+                    serde_json::to_string(&evidence)?,
+                ],
+            )?;
+        }
+        // Rebuild derived rows from the transferred raw files and evidence.
+        // Persist the transfer before refresh so paused data survives restart.
+        tx.execute_batch(
+            "DELETE FROM components; DELETE FROM events; DELETE FROM sessions;
+             DELETE FROM metadata WHERE key IN ('pricing','auxiliary');",
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+    fn open_with_previous(config: IndexConfig, previous: Option<&Self>) -> Result<Self, Error> {
         if let Some(parent) = config.database.parent() {
             fs::create_dir_all(parent)?;
             #[cfg(unix)]
@@ -328,6 +418,9 @@ impl Index {
                 tx.execute("INSERT INTO metadata VALUES (?,?)", [key, value])?;
             }
             tx.commit()?;
+        }
+        if let Some(previous) = previous {
+            Self::reuse_sources(&mut connection, &config.sources, previous)?;
         }
         let pricing = PriceSchedule::bundled();
         let pricing_fingerprint = format!(
@@ -1999,5 +2092,177 @@ mod tests {
                 "deletions reconcile once the source resumes"
             );
         }
+    }
+
+    #[test]
+    fn retained_cache_survives_source_changes_restart_and_return_to_an_older_scope() {
+        let f = Fixture::new();
+        let local = Fixture::new();
+        let extra = Fixture::new();
+        let home = &f.config.sources[0].home;
+        fs::write(
+            home.join("session_index.jsonl"),
+            "{\"id\":\"synthetic\",\"thread_name\":\"Retained WSL title\"}\n",
+        )
+        .unwrap();
+        let runtime = Connection::open(home.join("logs_2.sqlite")).unwrap();
+        runtime.execute_batch("CREATE TABLE logs (id INTEGER,thread_id TEXT,ts INTEGER,ts_nanos INTEGER,target TEXT,feedback_log_body TEXT)").unwrap();
+        runtime.execute("INSERT INTO logs VALUES (1,'synthetic',?,0,'codex_core::session::handlers',?)", params![
+            timestamp::parse("2026-10-01T00:00:00Z").unwrap().timestamp(),
+            r#"Submission sub=Submission { thread_settings: ThreadSettingsOverrides { service_tier: Some(Some("fast")) } }"#
+        ]).unwrap();
+        drop(runtime);
+        let mut original = f.config.clone();
+        let mut local_source = local.config.sources[0].clone();
+        local_source.id = "local".into();
+        original.sources.push(local_source.clone());
+        let mut index = Index::open(original.clone()).unwrap();
+        index.set_network_sources(["fixture".into()]);
+        index.refresh(|_| {}).unwrap();
+        let cached_cost = index
+            .snapshot
+            .sessions
+            .iter()
+            .find(|s| s.detail.environment_id == "fixture")
+            .unwrap()
+            .detail
+            .pricing
+            .estimated_cost_usd;
+        let offline = f.dir.path().join("offline");
+        fs::rename(home, &offline).unwrap();
+        local.append(20, 2);
+        index
+            .refresh_available_sources(None, HashSet::from(["fixture".into()]), |_| {})
+            .unwrap();
+        assert_eq!(total(&index), 30);
+
+        let mut expanded = original.clone();
+        expanded.database = f.dir.path().join("config/expanded.sqlite3");
+        expanded.sources[0].id = "fixture-2".into();
+        expanded.sources[0].label = "Synthetic 2".into();
+        let mut extra_source = extra.config.sources[0].clone();
+        extra_source.id = "extra".into();
+        expanded.sources.push(extra_source);
+        let next = Index::open_reusing(expanded.clone(), &index).unwrap();
+        drop(index);
+        // The imported files and exact runtime evidence must be durable even
+        // if the process exits before the new scope's first refresh.
+        drop(next);
+        let mut next = Index::open(expanded.clone()).unwrap();
+        next.set_network_sources(["fixture-2".into()]);
+        next.force_refresh();
+        next.refresh_available_sources(None, HashSet::from(["fixture-2".into()]), |_| {})
+            .unwrap();
+        assert_eq!(total(&next), 40);
+        assert_eq!(next.snapshot.sessions.len(), 3);
+        let retained = next
+            .snapshot
+            .sessions
+            .iter()
+            .find(|s| s.detail.environment_id == "fixture-2")
+            .unwrap();
+        assert_eq!(retained.detail.title, "Retained WSL title");
+        assert_eq!(retained.detail.service_tier, "fast");
+        assert_eq!(retained.detail.environment, "Synthetic 2");
+        assert_eq!(retained.detail.pricing.estimated_cost_usd, cached_cost);
+        let retained_uid = retained.detail.identity.uid.clone();
+        let persisted: i64 = next
+            .connection
+            .query_row("SELECT SUM(total_tokens) FROM events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(persisted, 40);
+
+        fs::rename(&offline, home).unwrap();
+        f.append(50, 3);
+        next.force_refresh();
+        next.refresh_available_sources(None, HashSet::new(), |_| {})
+            .unwrap();
+        assert_eq!(total(&next), 80);
+        assert_eq!(next.snapshot.sessions.len(), 3);
+        assert_eq!(
+            next.snapshot
+                .sessions
+                .iter()
+                .find(|s| s.detail.environment_id == "fixture-2")
+                .unwrap()
+                .detail
+                .identity
+                .uid,
+            retained_uid,
+            "resuming must use the same identity as the transferred cache"
+        );
+        fs::rename(home, &offline).unwrap();
+        let mut returned = Index::open_reusing(original.clone(), &next).unwrap();
+        drop(next);
+        returned
+            .refresh_available_sources(None, HashSet::from(["fixture".into()]), |_| {})
+            .unwrap();
+        assert_eq!(
+            total(&returned),
+            70,
+            "the current cache must replace the old scope's stale 10-token file"
+        );
+        assert_eq!(returned.snapshot.sessions.len(), 2);
+        drop(returned);
+        let mut returned = Index::open(original).unwrap();
+        returned.force_refresh();
+        returned
+            .refresh_available_sources(None, HashSet::from(["fixture".into()]), |_| {})
+            .unwrap();
+        assert_eq!(total(&returned), 70);
+        let mut removed = Index::open_reusing(
+            IndexConfig {
+                database: f.dir.path().join("config/removed.sqlite3"),
+                sources: vec![local_source],
+            },
+            &returned,
+        )
+        .unwrap();
+        removed.refresh(|_| {}).unwrap();
+        assert_eq!(total(&removed), 20, "explicit removal must hide the source");
+        assert_eq!(removed.snapshot.sessions.len(), 1);
+    }
+
+    #[test]
+    fn retained_cache_matches_homes_when_removing_a_source_reassigns_its_id() {
+        let first = Fixture::new();
+        let second = Fixture::new();
+        second.append(30, 2);
+        let mut original = first.config.clone();
+        let mut second_source = second.config.sources[0].clone();
+        second_source.id = "fixture-2".into();
+        second_source.label = "Synthetic 2".into();
+        original.sources.push(second_source.clone());
+        let mut index = Index::open(original).unwrap();
+        index.refresh(|_| {}).unwrap();
+        assert_eq!(total(&index), 40);
+        for f in [&first, &second] {
+            fs::rename(&f.config.sources[0].home, f.dir.path().join("offline")).unwrap();
+        }
+        second_source.id = "fixture".into();
+        second_source.label = "Synthetic".into();
+        let reduced = IndexConfig {
+            database: first.dir.path().join("config/reduced.sqlite3"),
+            sources: vec![second_source.clone()],
+        };
+        let mut next = Index::open_reusing(reduced.clone(), &index).unwrap();
+        next.refresh_available_sources(None, HashSet::from(["fixture".into()]), |_| {})
+            .unwrap();
+        assert_eq!(
+            total(&next),
+            30,
+            "the removed source must not supply the cache"
+        );
+        assert_eq!(next.snapshot.sessions.len(), 1);
+        let detail = &next.snapshot.sessions[0].detail;
+        assert_eq!(detail.environment_id, "fixture");
+        assert_eq!(detail.environment, "Synthetic");
+        assert_eq!(detail.codex_home, second_source.home.to_string_lossy());
+        drop(next);
+        let mut next = Index::open(reduced).unwrap();
+        next.force_refresh();
+        next.refresh_available_sources(None, HashSet::from(["fixture".into()]), |_| {})
+            .unwrap();
+        assert_eq!(total(&next), 30);
     }
 }

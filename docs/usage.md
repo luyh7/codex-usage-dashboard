@@ -136,6 +136,8 @@ On Windows, WSL log sources update only while their distribution is already runn
 
 Previously indexed WSL sessions remain in the local cache, including their titles and pricing evidence, when WSL stops or the dashboard restarts. Start the distribution normally to resume updates at its next polling interval. A source added while WSL is stopped has no history to display until its first successful scan. Keep the source configured to retain access to its cached history; removing it removes it from the current view. Imported WSL snapshots continue to work independently.
 
+Adding, removing, or reordering other log sources in Settings preserves the cache of each WSL folder that remains configured, including after a restart.
+
 Under WSL, automatic discovery also looks for accessible Windows profiles:
 
 ```text

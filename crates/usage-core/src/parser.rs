@@ -536,6 +536,20 @@ impl ParsedFile {
 static FALLBACK_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"rollout-[^-]+-[^-]+-(.+?)\.jsonl(?:\.zst)?$").unwrap());
 
+pub(crate) fn file_uid(path: &Path, source_id: &str) -> String {
+    // Compression changes the representation, not the conversation identity.
+    let identity_path = if reader::is_compressed(path) {
+        path.with_extension("")
+    } else {
+        path.to_owned()
+    };
+    format!(
+        "{:x}",
+        Sha1::digest(format!("{source_id}:{}", identity_path.display()).as_bytes())
+    )[..16]
+        .to_owned()
+}
+
 /// Passing an owned previous result resumes from its committed byte offset.
 /// File identity/prefix validation is the index writer's responsibility.
 pub fn parse_file(
@@ -547,17 +561,7 @@ pub fn parse_file(
     end: Option<u64>,
 ) -> Result<ParsedFile, Error> {
     let path = path.canonicalize()?;
-    // Compression changes the representation, not the conversation identity.
-    let identity_path = if reader::is_compressed(&path) {
-        path.with_extension("")
-    } else {
-        path.clone()
-    };
-    let uid = format!(
-        "{:x}",
-        Sha1::digest(format!("{}:{}", source.id, identity_path.display()).as_bytes())
-    )[..16]
-        .to_owned();
+    let uid = file_uid(&path, &source.id);
     let mut parsed = base.unwrap_or_else(|| ParsedFile {
         detail: SessionDetail {
             identity: SessionIdentity {

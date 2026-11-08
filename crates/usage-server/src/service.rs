@@ -651,11 +651,20 @@ fn run_worker(
                         let changed = config::index_path(&root, &next_sources)
                             != config::index_path(&root, &sources);
                         let next_index = if changed {
-                            let mut next = Index::open(IndexConfig {
-                                database: config::index_path(&root, &next_sources),
-                                sources: next_sources.clone(),
-                            })?;
+                            let mut next = Index::open_reusing(
+                                IndexConfig {
+                                    database: config::index_path(&root, &next_sources),
+                                    sources: next_sources.clone(),
+                                },
+                                &index,
+                            )?;
                             next.set_cancel(shared.cancel.clone());
+                            next.set_network_sources(
+                                next_sources
+                                    .iter()
+                                    .filter(|s| usage_core::fsinfo::is_network_path(&s.home))
+                                    .map(|s| s.id.clone()),
+                            );
                             next.refresh(|_| {})?;
                             Some(next)
                         } else {
