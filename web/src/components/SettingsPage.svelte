@@ -33,7 +33,7 @@
   let polling = $state<Record<string, SourcePolling>>({});
   let pollingBusy = $state(false);
   let sourceBusy = $state(false), sourcesReady = $state(false);
-  const sourceLabels: Record<string, [string, string]> = { missing: ['未找到日志文件夹', 'Log folder not found'], unreadable: ['无法读取日志文件夹', 'Cannot read log folder'], empty: ['此文件夹尚无 Codex 日志', 'No Codex logs in this folder'] };
+  const sourceLabels: Record<string, [string, string]> = { paused: ['WSL 已暂停，显示已缓存统计', 'WSL paused; showing cached usage'], missing: ['未找到日志文件夹', 'Log folder not found'], unreadable: ['无法读取日志文件夹', 'Cannot read log folder'], empty: ['此文件夹尚无 Codex 日志', 'No Codex logs in this folder'] };
   async function loadSources() {
     const [settings, sources] = await Promise.all([
       preferences(),

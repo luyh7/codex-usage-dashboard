@@ -59,6 +59,9 @@ pub struct State {
     pub sources: Vec<LogSource>,
     /// Effective polling policy for each active source, keyed by its home.
     pub policies: RwLock<HashMap<PathBuf, SourcePolicy>>,
+    /// Last WSL availability observed by the index worker; API reads never
+    /// inspect a WSL share to determine its status.
+    pub paused_sources: RwLock<HashSet<String>>,
     pub zone: Tz,
     views: Mutex<VecDeque<CachedView>>,
     pub query_slots: Arc<tokio::sync::Semaphore>,
@@ -230,6 +233,13 @@ pub fn start(
         hostname,
         sources: sources.clone(),
         policies: RwLock::new(HashMap::new()),
+        paused_sources: RwLock::new(
+            sources
+                .iter()
+                .filter(|s| usage_core::wsl::distribution(&s.home).is_some())
+                .map(|s| s.id.clone())
+                .collect(),
+        ),
         zone,
         views: Mutex::new(VecDeque::new()),
         query_slots: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -320,6 +330,12 @@ fn refresh_watches(
     let Some(watcher) = watcher.as_mut() else {
         return 0;
     };
+    // ReadDirectoryChangesW on a WSL share can launch/keep its distribution
+    // running. WSL sources use the polling index's availability check instead.
+    let sources: Vec<_> = sources
+        .iter()
+        .filter(|s| usage_core::wsl::distribution(&s.home).is_none())
+        .collect();
     let desired: std::collections::HashSet<_> = sources
         .iter()
         .flat_map(|source| {
@@ -339,7 +355,7 @@ fn refresh_watches(
         let _ = watcher.unwatch(&path);
         watched.remove(&path);
     }
-    for source in sources {
+    for source in &sources {
         for (path, mode) in [
             (source.home.clone(), notify::RecursiveMode::NonRecursive),
             (
@@ -523,6 +539,7 @@ fn run_worker(
             let scope = (due_sources.len() < sources.len()).then_some(&ids);
             index.refresh_sources(scope, |progress|{if !["inventory","ready"].contains(&progress.phase){progressed=true;update_status(shared,json!({"phase":progress.phase,"completed":progress.completed,"total":progress.total,"revision":publication}),true);}})
         };
+        *shared.paused_sources.write().unwrap() = index.paused_sources().clone();
         let refreshed = Instant::now();
         for ((at, due), policy) in due_at.iter_mut().zip(&due).zip(&policies) {
             if *due {
@@ -634,11 +651,20 @@ fn run_worker(
                         let changed = config::index_path(&root, &next_sources)
                             != config::index_path(&root, &sources);
                         let next_index = if changed {
-                            let mut next = Index::open(IndexConfig {
-                                database: config::index_path(&root, &next_sources),
-                                sources: next_sources.clone(),
-                            })?;
+                            let mut next = Index::open_reusing(
+                                IndexConfig {
+                                    database: config::index_path(&root, &next_sources),
+                                    sources: next_sources.clone(),
+                                },
+                                &index,
+                            )?;
                             next.set_cancel(shared.cancel.clone());
+                            next.set_network_sources(
+                                next_sources
+                                    .iter()
+                                    .filter(|s| usage_core::fsinfo::is_network_path(&s.home))
+                                    .map(|s| s.id.clone()),
+                            );
                             next.refresh(|_| {})?;
                             Some(next)
                         } else {
@@ -648,6 +674,8 @@ fn run_worker(
                         if let Some(next) = next_index {
                             index = next;
                             sources = next_sources;
+                            *shared.paused_sources.write().unwrap() =
+                                index.paused_sources().clone();
                             *watch_sources.write().unwrap() = sources.clone();
                             let previous = shared.current.read().unwrap().clone();
                             let local = index.snapshot();

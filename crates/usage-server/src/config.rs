@@ -136,6 +136,9 @@ pub fn device_code(root: &Path) -> Result<String, Error> {
     ))
 }
 fn absolute(path: PathBuf) -> PathBuf {
+    if let Some(home) = usage_core::wsl::lexical_home(&path) {
+        return home;
+    }
     if let Ok(p) = path.canonicalize() {
         return p;
     }
