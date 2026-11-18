@@ -1,9 +1,9 @@
 //! Versioned historical pricing. Runtime updates can replace this data without
 //! reopening logs: normalized deltas retain all inputs needed for repricing.
 use crate::{Error, NormalizedEvent, Usage, timestamp};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 type Rates = BTreeMap<String, Prices>;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -53,12 +53,16 @@ impl CostParts {
     pub fn for_usage(usage: Usage, price: Prices) -> Self {
         let input = usage.input_tokens.max(0);
         let cached = usage.cached_input_tokens.clamp(0, input);
+        let cache_write = price
+            .cache_write_input
+            .map_or(0, |_| usage.cache_write_tokens.clamp(0, input - cached));
         let output = usage.output_tokens.max(0);
         let reasoning = usage.reasoning_output_tokens.clamp(0, output);
         Self {
-            input_tokens: (input - cached) as f64 * price.input / 1_000_000.,
+            input_tokens: (input - cached - cache_write) as f64 * price.input / 1_000_000.,
             cached_input_tokens: cached as f64 * price.cached_input / 1_000_000.,
-            cache_write_tokens: 0.,
+            cache_write_tokens: cache_write as f64 * price.cache_write_input.unwrap_or(0.)
+                / 1_000_000.,
             output_tokens: output as f64 * price.output / 1_000_000.,
             reasoning_output_tokens: reasoning as f64 * price.output / 1_000_000.,
         }
@@ -129,8 +133,17 @@ struct Asset {
     schedules: Vec<(Option<String>, Rates)>,
     fast: BTreeMap<String, f64>,
     ultrafast: BTreeMap<String, f64>,
+    ultrafast_promotion: Option<UltrafastPromotion>,
+    #[serde(default)]
+    batch_flex: BTreeMap<String, f64>,
     aliases: BTreeMap<String, String>,
     families: Vec<FamilyAsset>,
+}
+#[derive(Deserialize)]
+struct UltrafastPromotion {
+    until: DateTime<Utc>,
+    multiplier: f64,
+    models: BTreeSet<String>,
 }
 #[derive(Deserialize)]
 struct FamilyAsset {
@@ -159,6 +172,8 @@ pub struct PriceSchedule {
     families: Vec<Family>,
     fast: BTreeMap<String, f64>,
     ultrafast: BTreeMap<String, f64>,
+    ultrafast_promotion: Option<UltrafastPromotion>,
+    batch_flex: BTreeMap<String, f64>,
     aliases: BTreeMap<String, String>,
 }
 fn schedules(rows: Vec<(Option<String>, Rates)>) -> Result<Vec<Schedule>, Error> {
@@ -262,6 +277,8 @@ impl PriceSchedule {
             families,
             fast: asset.fast,
             ultrafast: asset.ultrafast,
+            ultrafast_promotion: asset.ultrafast_promotion,
+            batch_flex: asset.batch_flex,
             aliases: asset.aliases,
         })
     }
@@ -332,7 +349,38 @@ impl PriceSchedule {
         let service_tier = tier.trim().to_lowercase();
         let cost_multiplier = match service_tier.as_str() {
             "priority" | "fast" => *self.fast.get(canonical)?,
-            "ultrafast" => *self.ultrafast.get(canonical)?,
+            "ultrafast" => {
+                let list_multiplier = *self.ultrafast.get(canonical)?;
+                if let Some(promotion) = self
+                    .ultrafast_promotion
+                    .as_ref()
+                    .filter(|promotion| promotion.models.contains(canonical))
+                {
+                    let boundary = promotion.until.to_rfc3339_opts(SecondsFormat::Secs, true);
+                    if moment.unwrap_or_else(Utc::now) < promotion.until {
+                        if effective_until
+                            .as_deref()
+                            .and_then(timestamp::parse)
+                            .is_none_or(|until| promotion.until < until)
+                        {
+                            effective_until = Some(boundary);
+                        }
+                        promotion.multiplier
+                    } else {
+                        if effective_at
+                            .as_deref()
+                            .and_then(timestamp::parse)
+                            .is_none_or(|start| promotion.until > start)
+                        {
+                            effective_at = Some(boundary);
+                        }
+                        list_multiplier
+                    }
+                } else {
+                    list_multiplier
+                }
+            }
+            "batch" | "flex" => self.batch_flex.get(canonical).copied().unwrap_or(1.),
             _ => 1., // Freeze legacy non-fast-tier behavior before any policy change.
         };
         Some(PriceEntry {
@@ -549,6 +597,92 @@ mod tests {
         );
         assert!(quote(272_000, "ultrafast").is_none());
     }
+    #[test]
+    fn gpt_6_2_pricing_respects_launch_context_and_ultrafast_promotion() {
+        let schedule = PriceSchedule::bundled();
+        let launch = "2026-11-17T00:00:00Z";
+        let promotion_end = "2027-03-01T08:00:00Z";
+        for (model, input_price, cached_price, output_price, cache_write_price) in [
+            ("gpt-6.2-astra", 8., 0.4, 40., 10.),
+            ("gpt-6.2-sol", 2., 0.1, 10., 2.5),
+        ] {
+            let model = format!("openai/{model}-2026-11-17");
+            let quote = |time, tokens, tier| schedule.quote(&model, Some(time), Some(tokens), tier);
+            assert!(quote("2026-11-16T23:59:59Z", 272_000, "default").is_none());
+            let short = quote(launch, 272_000, "default").unwrap();
+            assert_eq!(short.effective_at.as_deref(), Some(launch));
+            assert_eq!(short.context_tier.as_deref(), Some("short"));
+            assert_eq!(short.effective_until, None);
+            assert_eq!(
+                short.prices,
+                Prices {
+                    input: input_price,
+                    cached_input: cached_price,
+                    output: output_price,
+                    cache_write_input: Some(cache_write_price),
+                }
+            );
+
+            let long = quote(launch, 272_001, "default").unwrap();
+            assert_eq!(long.effective_at.as_deref(), Some(launch));
+            assert_eq!(long.context_tier.as_deref(), Some("long"));
+            assert_eq!(
+                long.prices,
+                Prices {
+                    input: input_price * 2.,
+                    cached_input: cached_price * 2.,
+                    output: output_price * 1.5,
+                    cache_write_input: Some(cache_write_price * 2.),
+                }
+            );
+            for (tier, multiplier) in [
+                ("fast", 2.),
+                ("priority", 2.),
+                ("batch", 0.5),
+                ("flex", 0.5),
+            ] {
+                assert_eq!(
+                    quote(launch, 272_001, tier).unwrap().prices,
+                    long.prices.scaled(multiplier)
+                );
+            }
+            let promotional = quote("2027-03-01T07:59:59Z", 272_001, "ultrafast").unwrap();
+            assert_eq!(promotional.effective_at.as_deref(), Some(launch));
+            assert_eq!(promotional.effective_until.as_deref(), Some(promotion_end));
+            assert_eq!(promotional.prices, long.prices.scaled(3.));
+            let list = quote(promotion_end, 272_001, "ultrafast").unwrap();
+            assert_eq!(list.effective_at.as_deref(), Some(promotion_end));
+            assert_eq!(list.effective_until, None);
+            assert_eq!(list.prices, long.prices.scaled(6.));
+        }
+        let older = schedule
+            .quote("gpt-6.1-sol", Some(launch), None, "ultrafast")
+            .unwrap();
+        assert_eq!(older.cost_multiplier, 6.);
+        assert_eq!(older.effective_until, None);
+    }
+
+    #[test]
+    fn cache_writes_replace_uncached_input_when_a_write_rate_is_available() {
+        let schedule = PriceSchedule::bundled();
+        let usage = Usage {
+            input_tokens: 100_000,
+            cached_input_tokens: 25_000,
+            cache_write_tokens: 50_000,
+            output_tokens: 1_000,
+            ..Default::default()
+        };
+        let timestamp = Some("2026-11-18T00:00:00Z");
+        assert_eq!(
+            schedule.estimate(usage, "gpt-6.2-astra", timestamp, "default"),
+            Some(0.75)
+        );
+        assert_eq!(
+            schedule.estimate(usage, "gpt-6-astra", timestamp, "default"),
+            Some(0.825)
+        );
+    }
+
     #[test]
     fn costs_unknown_and_reasoning_subset() {
         let schedule = PriceSchedule::bundled();
