@@ -37,6 +37,26 @@ test('one price hint includes every category, exact usage and recorded rates wit
   assert.equal(usagePriceTooltip({ ...detail, estimated_cost_breakdown_usd: null, applied_price_segments: [] }, 'en').tables![0].rows[0].values[2], 'Unknown');
 });
 
+test('cache writes with a separate rate are excluded from the standard input count', () => {
+  const old = structuredClone(detail.applied_price_segments[0]);
+  const usage = { ...detail.total_token_usage, cache_write_tokens: 100 };
+  old.usage = usage;
+  const current = {
+    ...old, model: 'gpt-6.2-astra', prices: { input: 8, cached_input: .4, output: 40, cache_write_input: 10 },
+  };
+  const single = segmentPriceTooltip(detail, current, 'en').tables![0];
+  assert.deepEqual(single.rows[0].values, ['100', '$8.00', '$0.0008']);
+  assert.deepEqual(single.rows[2].values, ['100', '$10.00', '$0.001']);
+
+  const mixed = {
+    ...detail,
+    total_token_usage: { ...usage, input_tokens: 2000, cached_input_tokens: 1600, cache_write_tokens: 200 },
+    applied_price_segments: [old, current],
+  };
+  assert.equal(usageBreakdown(mixed)[0].tokens, 300);
+  assert.deepEqual(usagePriceTooltip(mixed, 'en').tables!.map(table => table.rows[0].values[0]), ['200', '100']);
+});
+
 test('identical price segments merge while distinct models and rates retain separate table headings', () => {
   const next = structuredClone(detail);
   next.applied_price_segments.push(structuredClone(next.applied_price_segments[0]));

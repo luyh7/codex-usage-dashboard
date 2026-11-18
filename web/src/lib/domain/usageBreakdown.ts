@@ -12,19 +12,27 @@ const categories: { key: Category; token: keyof Usage; rate: string; color: stri
   { key: 'reasoning', token: 'reasoning_output_tokens', rate: 'output', color: 'var(--cost-output)' },
 ];
 
-function tokenCount(usage: Partial<Usage>, key: keyof Usage) {
+function tokenCount(usage: Partial<Usage>, key: keyof Usage, pricedCacheWrites = 0) {
   return Math.max(0, key === 'input_tokens'
-    ? (usage.input_tokens ?? 0) - (usage.cached_input_tokens ?? 0)
+    ? (usage.input_tokens ?? 0) - (usage.cached_input_tokens ?? 0) - pricedCacheWrites
     : usage[key] ?? 0);
 }
 
+function pricedCacheWrites(segment: Detail['applied_price_segments'][number]) {
+  const prices = segment.prices as Record<string, number | null> | undefined;
+  if (segment.price_known === false || typeof prices?.cache_write_input !== 'number') return 0;
+  const usage = segment.usage ?? {};
+  return Math.min(tokenCount(usage, 'cache_write_tokens'), tokenCount(usage, 'input_tokens'));
+}
+
 export function usageBreakdown(detail: Detail) {
+  const cacheWrites = (detail.applied_price_segments ?? []).reduce((sum, segment) => sum + pricedCacheWrites(segment), 0);
   return categories.filter(part => part.key !== 'cacheWrite'
     || tokenCount(detail.total_token_usage, part.token) > 0
     || !!detail.estimated_cost_breakdown_usd?.cache_write_tokens).map(part => ({
       ...part,
       nested: part.key === 'reasoning',
-      tokens: tokenCount(detail.total_token_usage, part.token),
+      tokens: tokenCount(detail.total_token_usage, part.token, cacheWrites),
       cost: detail.estimated_cost_breakdown_usd?.[part.token] ?? null,
     }));
 }
@@ -44,8 +52,9 @@ export function usagePriceTooltip(detail: Detail, lang: Language, zone = 'UTC'):
     tags.longContext ? t.longContext : '',
   ].filter(Boolean).join(' · ');
   for (const segment of detail.applied_price_segments ?? []) {
+    const cacheWrites = pricedCacheWrites(segment);
     const values = parts.map(part => {
-      const tokens = tokenCount(segment.usage ?? {}, part.token);
+      const tokens = tokenCount(segment.usage ?? {}, part.token, cacheWrites);
       const prices = segment.prices as Record<string, number | null> | undefined;
       const raw = prices?.[part.rate] ?? (part.key === 'cacheWrite' ? prices?.input : null);
       const rate = segment.price_known !== false && typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
