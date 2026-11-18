@@ -2006,6 +2006,13 @@ main { margin-left: 72px; }
   .sessions-table td, .sessions-table th { padding-left: 4px; padding-right: 4px; }
 }
 @media (max-width: 480px) {
+  .cost-legend:has(> div:nth-child(4)) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cost-legend:has(> div:nth-child(4)) > div:nth-child(odd) {
+    border-left: 0;
+    padding-left: 0;
+  }
   .project-columns, .project-row { --project-columns: minmax(0, 1fr) 40px 50px 44px; }
   .project-columns { font-size: 10px; }
   .sessions-table th { font-size: 10px; }

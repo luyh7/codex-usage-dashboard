@@ -84,13 +84,11 @@ impl RunningDistributions {
 #[cfg(any(windows, test))]
 fn decode_names(bytes: &[u8]) -> HashSet<String> {
     let text = if bytes.starts_with(&[0xff, 0xfe]) || bytes.contains(&0) {
-        if !bytes.len().is_multiple_of(2) {
+        let (pairs, remainder) = bytes.as_chunks::<2>();
+        if !remainder.is_empty() {
             return HashSet::new();
         }
-        let wide: Vec<_> = bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect();
+        let wide: Vec<_> = pairs.iter().copied().map(u16::from_le_bytes).collect();
         String::from_utf16(&wide).unwrap_or_default()
     } else {
         String::from_utf8(bytes.to_vec()).unwrap_or_default()
